@@ -28,7 +28,7 @@
     {
       "label": "SDR: program board",
       "type": "shell",
-      "command": "make program PROJECT=sdr",
+      "command": "./sdr program",
       "problemMatcher": []
     }
   ]

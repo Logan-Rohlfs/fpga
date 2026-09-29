@@ -17,3 +17,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 dist/
+
+# Local setup scratch files; preserve locally, never commit.
+/key.txt
+/command.txt

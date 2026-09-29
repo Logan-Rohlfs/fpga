@@ -1,36 +1,59 @@
 # SDR receiver
 
-The first implemented component is the **host-facing UART transmitter**. It accepts bytes through a `valid`/`ready` interface and sends 8N1 serial data at 115200 baud. The Basys 3 top module currently emits `SDR READY\r\n` about once per second as a hardware diagnostic; LED0 changes state after each message. No RF or XADC signals are connected yet.
+**Current state: UART output diagnostic only.** No RF or XADC signals are connected.
+Read [the handoff](../../docs/HANDOFF.md) for receiver context, verified history,
+and parameters that remain unknown. Use [the host workbench](../../tools/README.md)
+as the normal build/program/monitor interface.
 
-The intended receive pipeline is: XADC samples → digital downconversion → channel filter/decimation → 2-GFSK discriminator → symbol timing and bit slicing → packet decoding → UART byte stream to the host. The telemetry packet format, symbol rate, and frequency deviation still need to be specified before implementing the signal-processing stages.
+## Hardware interfaces
 
-## Test on Mac
+`rtl/uart_tx.sv` accepts an 8-bit byte on a rising clock edge when `valid && ready`.
+The producer must retain a pending byte until accepted. The transmitter sends
+one start bit, eight data bits LSB first, and one stop bit; the idle line is high.
+`ready` is low during a frame and during reset. Active-high `rst` clears state on
+the clock edge and forces the output idle while asserted; a mid-frame reset aborts
+that frame. There is no queue in this module.
 
-From the repository root, `make sim PROJECT=sdr` runs the UART unit test and a top-level test that decodes two complete diagnostic messages. Both use accelerated clocks; the FPGA build uses the 100 MHz board clock.
+Parameters default to `CLK_HZ=100_000_000`, `BAUD_RATE=115_200`. The divider rounds
+the clock/baud ratio to an integer (868 clocks per bit at the defaults).
 
-## Build on Windows
+`rtl/sdr_top.sv` connects that transmitter to an 11-byte diagnostic message ROM.
+It sends `SDR READY\r\n`, waits for the final byte to finish, toggles LED0, then
+waits `HEARTBEAT_CYCLES` (default 100 million clocks) before sending again.
+The center button resets the diagnostic. Pin/clock assignments are in
+`constraints/basys3.xdc`; the UART RX pin is only a comment for future work.
 
-From the repository root in PowerShell:
+This heartbeat is a temporary bring-up diagnostic, not a packet protocol or
+firmware capability negotiation. The future receiver stages are described in
+the handoff; keep the UART module reusable when the top-level design evolves.
 
-```powershell
-& 'C:\AMDDesignTools\2026.1\Vivado\bin\vivado.bat' -mode batch -source scripts/build.tcl -tclargs sdr
-```
+## Test and use
 
-Copy `build/sdr/sdr.bit` to the Mac's copy of this repository and run `make program PROJECT=sdr` with the Basys 3 connected to the Mac's PROG USB port.
-
-## Read the board
-
-Create a Python environment once on the Mac:
+From the repository root:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r projects/sdr/host/requirements.txt
+./sdr sim
+./sdr build
+./sdr program
+./sdr receive --seconds 5
 ```
 
-Find the board's UART port (`ls /dev/cu.usbserial*` on macOS). On the FT2232 bridge it is commonly the port ending in `1`. Then:
+`sim/uart_tx_tb.sv` checks byte frames and reset behavior.
+`sim/sdr_top_tb.sv` decodes two complete messages and checks the LED heartbeat.
+The tests accelerate timing via parameters; the board uses the 100 MHz clock.
+
+The standalone checker remains available as a narrow hardware assertion:
 
 ```sh
-.venv/bin/python projects/sdr/host/check_heartbeat.py --port /dev/cu.usbserial-YOUR-PORT1
+.venv/bin/python projects/sdr/host/check_heartbeat.py --port YOUR_UART_DEVICE
 ```
 
-The script verifies three `SDR READY` lines. The same UART transmitter can later carry decoded packet bytes; the final host framing protocol remains open.
+It verifies three complete lines. Its minimal `host/requirements.txt` is for
+running that checker alone; installing the workbench also provides pyserial.
+Close the dashboard or other serial readers before running it.
+
+Direct Windows builds are still possible with
+`vivado.bat -mode batch -source scripts/build.tcl -tclargs sdr`. Those write the
+legacy `build/sdr/sdr.bit`; the workbench instead selects bundles through
+`build/sdr/latest`. Use the matching programming path as described in the root
+README. A Vivado build is unnecessary for changes confined to Python or docs.

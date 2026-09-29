@@ -1,62 +1,82 @@
 # Basys 3 FPGA projects
 
-One Git repository with independent projects for the Digilent Basys 3 (Artix-7 XC7A35T-1CPG236C).
+A single repository for a Basys 3 SDR receiver and its development tools.
+**Current checkpoint: FPGA-to-host UART is working.** The SDR FPGA design emits
+`SDR READY\r\n` at 115200 baud; RF acquisition and demodulation are not implemented.
 
-## SDR terminal workbench
+New agents: read [AGENTS.md](AGENTS.md), then [the handoff](docs/HANDOFF.md).
 
-Run `./sdr` to open the btop-inspired dashboard, or use `./sdr --help` for inline
-build, programming, serial, and recording commands. See [the tool guide](tools/README.md)
-for installation, configuration, keyboard controls, and testing.
+## Start here
 
-## Projects
-
-- `projects/blink`: a working first design. LED 0 changes state every 0.5 seconds using the board's 100 MHz clock.
-- `projects/sdr`: the SDR receiver. Its first reusable block is the host-facing UART transmitter, with a board diagnostic that sends `SDR READY` once per second. See `projects/sdr/README.md` for tests and hardware instructions.
-
-## Mac setup
-
-VS Code is the editor. Install Icarus Verilog for simulation and openFPGALoader for programming:
+On the Mac, from this checkout:
 
 ```sh
-brew install icarus-verilog openfpgaloader
+./sdr                     # interactive dashboard; connects to UART
+./sdr --help              # all inline commands
+./sdr doctor              # check local tools and serial device selection
+./sdr receive --seconds 5 # observe the board without reprogramming it
 ```
 
-VS Code will recommend the Verilog-HDL extension, WaveTrace waveform viewer, and Makefile Tools. They are optional conveniences; the terminal commands work without them. The SDR hardware diagnostic uses a small Python client with `pyserial`; its setup is in `projects/sdr/README.md`.
+The current Mac already has a configured virtual environment and local connection
+settings. For a fresh checkout, follow [installation and setup](tools/README.md).
+Machine-specific settings belong in ignored `.sdr/config.json`; do not copy keys
+or hardcode connection details into source files.
 
-Open the repository with `code ~/git/fpga`. The workspace enables Icarus linting and provides VS Code tasks for simulation, Vivado building, and board programming. The latter two tasks require Vivado or a connected board, respectively.
-
-Vivado runs on the Windows PC for synthesis, placement, timing checks, and bitstream generation. Install Vivado with 7-series device support. The build is scripted, so the repo does not depend on a generated `.xpr` project file.
-
-## First exercise: blink
-
-On the Mac, from the repository root:
+## Development workflow
 
 ```sh
-make sim PROJECT=blink
+PYTHONPATH=tools .venv/bin/python -m unittest discover -s tools/tests -v
+./sdr sim                 # SDR RTL tests; no hardware needed
+./sdr sim --project blink # blink RTL test
+./sdr build               # snapshot current sources, build on Windows, fetch results
+./sdr program             # load selected build into volatile FPGA memory
+./sdr receive --seconds 5
 ```
 
-This compiles the Verilog, runs the testbench, and writes `build/blink/blink.vcd`. Open that file in WaveTrace to inspect `clk` and `led`.
+The Mac handles editing, simulation, USB programming, and UART. Vivado runs on
+the Windows PC over SSH. `./sdr build` includes uncommitted RTL changes; it does
+not require a Git push/pull. `./sdr flash` explicitly writes persistent flash;
+normal development uses `program`.
 
-On the Windows PC, open a terminal in this repository and run:
+The [tool guide](tools/README.md) covers dashboard keys, recording, remote setup,
+artifact selection, troubleshooting details, and standalone commands. A terminal
+of 120 × 36 or larger is comfortable for the dashboard.
 
-```powershell
-vivado -mode batch -source scripts/build.tcl -tclargs blink
-```
+## Repository map
 
-The bitstream and timing/resource reports appear in `build/blink/`. If using Windows PowerShell, run `vivado.bat` or its full path if `vivado` is not on PATH. Transfer `build/blink/blink.bit` back to the Mac if the board is attached there.
+| Location | Purpose |
+| --- | --- |
+| `projects/blink/` | Independent LED hello-world design and testbench |
+| `projects/sdr/rtl/` | SDR top module and reusable hardware blocks |
+| `projects/sdr/sim/` | Self-checking SystemVerilog testbenches |
+| `projects/sdr/constraints/` | Basys 3 pins and clock constraints |
+| `projects/sdr/host/` | Standalone heartbeat checker; retained as a diagnostic |
+| `tools/sdr_cli/` | Shared host operations, UART transport, CLI, and dashboard |
+| `tools/tests/` | Host unit and pseudo-terminal integration tests |
+| `scripts/build.tcl` | Vivado synthesis, implementation, reports, and bitstream generation |
+| `docs/HANDOFF.md` | Verified state, outstanding decisions, and next-agent context |
+| `build/` | Ignored generated simulations, bitstreams, manifests, and reports |
+| `.sdr/` | Ignored local configuration, recordings, and operation logs |
 
-With the Basys 3 connected to the Mac's USB port labeled PROG:
+Keep reusable SDR components inside `projects/sdr/`, with focused testbenches.
+Add an independent project only when it needs its own top-level board design.
+See [SDR hardware details](projects/sdr/README.md).
 
-```sh
-make program PROJECT=blink
-```
+## Existing lower-level tools
 
-This configures the FPGA until it is powered off. Run `make flash PROJECT=blink` only when you want the design saved to onboard flash. The board's programming jumper must match the desired startup mode; JTAG programming itself works while the board is powered.
+`make sim PROJECT=blink|sdr` underlies the CLI simulation command. Direct Vivado
+builds use `vivado -mode batch -source scripts/build.tcl -tclargs blink|sdr` on
+Windows (use the full `vivado.bat` path if needed).
 
-## SDR development
+Direct builds and `make program` use `build/PROJECT/PROJECT.bit`. The workbench
+uses `build/PROJECT/latest` to select an artifact bundle. **Use `./sdr program`
+after `./sdr build`**; the Makefile programming target does not follow that pointer.
+`make clean` removes the entire local `build/` directory, including saved bundles.
 
-Run `make sim PROJECT=sdr` on the Mac. The SDR project's README explains the Windows Vivado build, Mac programming, and UART hardware test. The RF processing modules will be connected after their input parameters and packet format are known.
+VS Code extensions are optional. Its SDR programming task uses the workbench;
+the blink Vivado task expects Vivado on the machine where the task runs.
 
-## Sources
+## Hardware reference
 
-Pin assignments are from Digilent's Basys 3 master constraints: https://github.com/Digilent/digilent-xdc/blob/master/Basys-3-Master.xdc
+Target: Digilent Basys 3, Artix-7 `xc7a35tcpg236-1`, 100 MHz board clock.
+Pin assignments derive from the [Digilent master constraints](https://github.com/Digilent/digilent-xdc/blob/master/Basys-3-Master.xdc).
