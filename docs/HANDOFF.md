@@ -1,7 +1,7 @@
 # SDR handoff
 
-Checkpoint recorded 2026-09-29 (second session). **The host link layer is working
-on hardware.** The FPGA sends every message type at 1 Mbaud, and the `sdr` CLI and
+Checkpoint updated 2026-09-29. **The host link layer is working
+on hardware; GUI v1 and the source combiner are implemented.** The FPGA sends every message type at 1 Mbaud, and the `sdr` CLI and
 dashboard decode and display them.
 
 All message content is **SIMULATED** by stand-in producers. The planned stages are
@@ -9,6 +9,46 @@ in [`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio).
 
 **The Space Raiders SDR web GUI v1 is implemented.** See [GUI implementation status](#gui-implementation-status).
 The DSP stages come later; realistic displayed data waits for them.
+
+## Source combiner implementation status
+
+The GUI continuation was followed by subagent-driven implementation of the next
+upstream stage: `source_combiner.sv`. See the
+[contract](superpowers/specs/2026-09-29-source-combiner-design.md) and
+[plan](superpowers/plans/2026-09-29-source-combiner.md).
+
+- Bounded whole-frame input buffers match explicit type/sequence keys. Selection
+  requires good CRC, then ranks quality, signed RSSI, and A on a tie.
+- Configurable matching timeout and finite duplicate history support late copies,
+  stalled output, and sequence reuse. These are synthetic test timings, not
+  chosen receiver packet timings. No frame parsing, RF settings or DSP constants
+  were introduced.
+- The test harness now uses the actual selector and counters for BEST_TELEM and
+  LINK_STATS. Raw BEST bytes are captured on link-port acceptance. Synthetic
+  overruns count separately; all messages remain SYNTHETIC.
+- Independent implementation, test and review subagents were used. Review found
+  no actionable correctness defects. `./sdr sim` passed 34 focused selections
+  plus 75 UART messages, with all 13 BEST payloads checked against A/B records
+  (5 both-good B wins). Parameter endpoint tests also pass for 1-byte and 255-byte
+  frames with one-cycle timers and one history slot. Host decode had zero errors;
+  all 93 host tests pass.
+- Fresh Vivado build `20260929-175927-5af9b984`: WNS +0.268 ns, WHS
+  +0.043 ns at 100 MHz; 2,048 LUTs and 2,318 registers. No DRC errors;
+  the existing CFGBVS/CONFIG_VOLTAGE warning remains. The first attempt missed
+  timing by 0.008 ns; capturing accepted descriptors independently of duplicate
+  filtering removed the long control path. The revised RTL passed simulation and
+  independent review again. Failed-build reports are preserved locally.
+- The new bitstream was loaded into volatile FPGA memory; no flash write.
+  A 15-second UART capture decoded 1,676 messages across all seven types with
+  zero CRC/COBS/length errors, sequence gaps or STATUS drops. All 296 BEST
+  selections matched source, timestamp and raw bytes against channel records:
+  156 A, 140 B, including 116 both-good B wins. All messages were SYNTHETIC.
+  Capture retained at `.sdr/captures/combiner-20260929-1802.bin`.
+
+The next upstream stage is frame sync + CRC. Before connecting real decoders,
+settle transmitter framing and validate key extraction, match/dedupe windows,
+queue depth, transmitter resets and same-key payload disagreements. Do not clear
+SYNTHETIC merely because the selector is real: its present inputs are fabricated.
 
 ## GUI implementation status
 
@@ -276,9 +316,9 @@ Before fixing DSP constants or packet behavior, establish:
   firmware provisionally. Note that FLIGHT is 41 bytes, not the 38 in the APEX
   radio doc.
 
-The user chose the GUI as the next task. After it, the next stage upstream on the
-module map is the source combiner, followed by
-frame sync + CRC. When a real stage lands, it replaces its stand-in producer,
-keeps the message layout, and stops setting `SYNTHETIC`.
+The GUI and source combiner are implemented. The next upstream stage on the
+module map is frame sync + CRC. When a real stage lands, it replaces its stand-in
+producer and keeps the message layout. Clear `SYNTHETIC` only for measured data,
+never for real logic operating on synthetic inputs.
 Choose the bounded component with the user, specify its interfaces, and add
 meaningful self-checking tests before integrating it into the board top module.

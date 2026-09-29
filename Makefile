@@ -2,7 +2,7 @@ PROJECT ?= blink
 BIT := build/$(PROJECT)/$(PROJECT).bit
 SDR_RTL := $(sort $(wildcard projects/sdr/rtl/*.sv))
 # Unit testbenches first, then the full top-level link test.
-SDR_TESTS := uart_tx_tb crc16_ccitt_tb cobs_encoder_tb link_tx_tb sdr_top_tb
+SDR_TESTS := uart_tx_tb crc16_ccitt_tb cobs_encoder_tb link_tx_tb source_combiner_tb sdr_top_tb
 
 .PHONY: sim build program flash clean
 

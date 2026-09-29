@@ -1,6 +1,6 @@
 # SDR receiver
 
-**Current state: host link layer working, carrying SIMULATED data.**
+**Current state: host link and source combiner working with SIMULATED inputs.**
 The FPGA sends every host-link message type at 1 Mbaud, and the host decodes them.
 No RF, XADC, or DSP stages exist yet: stand-in producers generate all of the
 content, and every message is flagged `SYNTHETIC`.
@@ -55,7 +55,13 @@ checks it end to end.
 
 - Channel A fails CRC every 11th frame and channel B every 7th. Failed frames
   flip the last CRC byte.
-- BEST_TELEM uses A unless A failed, then B. Nothing is sent when both fail.
+- `source_combiner.sv` matches explicit type/sequence keys and selects a CRC-good
+  candidate, then higher quality, then higher signed RSSI, with A breaking ties.
+  Synthetic quality alternates so both A and B win. Nothing is sent when both fail.
+- BEST payloads are immutable snapshots. LINK_STATS comes from the real combiner;
+  every output remains SYNTHETIC because its inputs are synthetic. The configurable
+  pairing and duplicate windows use synthetic tick timing only. See the
+  [combiner contract](../../docs/superpowers/specs/2026-09-29-source-combiner-design.md).
 - Spectrum rows describe a 256-point FFT of 100 kS/s baseband at the 100 kHz IF:
   390.625 Hz bins, dBFS = −120 + 0.5·power. They show a noise floor near
   −105 dBFS, two FSK lobes at +10.4 kHz ± 25 kHz (−50 dBFS), and a walking tone.
@@ -111,6 +117,7 @@ The simulations:
 | `sim/crc16_ccitt_tb.sv` | CRC check value and an APEX frame |
 | `sim/cobs_encoder_tb.sv` | byte-exact output against `sim/vectors/cobs_golden.hex`, with random stalls |
 | `sim/link_tx_tb.sv` | priority, atomic messages, empty payloads, seq wrap, CRC |
+| `sim/source_combiner_tb.sv` | ranking, matching/timeout, dedupe, signed RSSI, backpressure, reset and counters |
 | `sim/sdr_top_tb.sv` | the whole top level; see below |
 
 `sim/sdr_top_tb.sv`:
@@ -118,6 +125,8 @@ The simulations:
 - decodes the UART line;
 - checks COBS, CRC, per-type lengths, contiguous seq, APEX CRCs, zero drops,
   and the LED;
+- compares every BEST source, timestamp and raw byte against independently ranked
+  A/B channel records, including both-good B selections;
 - saves the line as `build/sdr/link_capture.bin`. `make sim` then decodes that
   file with the host decoder, so the RTL and Python implementations are
   cross-checked on every run.

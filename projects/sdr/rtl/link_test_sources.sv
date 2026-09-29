@@ -1,5 +1,6 @@
 `timescale 1ns/1ps
-// Stand-in producers for every host-link message type. All messages carry the
+// Synthetic inputs and visualization producers, with a real source combiner.
+// All current messages carry the
 // SYNTHETIC flag: nothing here is measured. Each block is replaced by a real
 // receiver stage later, keeping its link_tx port and message layout.
 //
@@ -120,7 +121,7 @@ module link_test_sources #(
     reg fail_a = 1'b0, fail_b = 1'b0;
     reg [31:0] crc_good [0:1];
     reg [31:0] crc_bad [0:1];
-    reg [31:0] from_a = 0, from_b = 0, both_ok = 0, neither_ok = 0, best_sent = 0;
+    wire [31:0] from_a, from_b, both_ok, neither_ok, best_sent;
     wire [15:0] crc_next;
 
     crc16_ccitt frame_crc_step (.crc(crc), .data(apex_byte(crc_i, apex_seq)), .next(crc_next));
@@ -136,7 +137,6 @@ module link_test_sources #(
             crc_good[1] <= 0;
             crc_bad[0] <= 0;
             crc_bad[1] <= 0;
-            {from_a, from_b, both_ok, neither_ok, best_sent} <= 0;
         end else if (due_telem) begin
             apex_seq <= slot[7:0];
             fail_a <= (ph_fail_a == FAIL_A_EVERY - 1);
@@ -155,11 +155,6 @@ module link_test_sources #(
                 slot <= slot + 1;
                 if (fail_a) crc_bad[0] <= crc_bad[0] + 1; else crc_good[0] <= crc_good[0] + 1;
                 if (fail_b) crc_bad[1] <= crc_bad[1] + 1; else crc_good[1] <= crc_good[1] + 1;
-                if (!fail_a) from_a <= from_a + 1;
-                else if (!fail_b) from_b <= from_b + 1;
-                if (!fail_a && !fail_b) both_ok <= both_ok + 1;
-                if (fail_a && fail_b) neither_ok <= neither_ok + 1;
-                else best_sent <= best_sent + 1;
             end else begin
                 crc_i <= crc_i + 1'b1;
             end
@@ -176,7 +171,8 @@ module link_test_sources #(
     assign noise_now[0] = -16'sd1000 + $signed({13'd0, slot[2:0]});
     assign noise_now[1] = -16'sd998 + $signed({13'd0, slot[3:1]});
     assign quality_now[0] = 8'd210 - {4'd0, slot[3:0]};
-    assign quality_now[1] = 8'd175 - {3'd0, slot[4:0]};
+    // Alternate which good receiver ranks higher to exercise both selection paths.
+    assign quality_now[1] = slot[3] ? (8'd235 - {4'd0, slot[3:0]}) : (8'd175 - {3'd0, slot[4:0]});
     assign fo_now[0] = 32'sd10272 + $signed({24'd0, slot[5:0], 2'b00});
     assign fo_now[1] = 32'sd10272 + $signed({24'd0, slot[4:0], 3'b000});
 
@@ -205,25 +201,17 @@ module link_test_sources #(
         end
     endgenerate
 
-    always @(posedge clk) begin
-        if (rst) dropped <= 0;
-        else if (|drop) dropped <= dropped + 1'b1;
-    end
+    // ---- Atomic synthetic candidates -> bounded real source combiner.
+    // These windows describe this test generator only (one slot every five ticks).
+    // Actual receive timing must be chosen when frame decoders are connected.
+    wire [1:0] comb_ready;
+    wire comb_valid, comb_synthetic, comb_stats_synthetic;
+    wire [7:0] comb_source, comb_len;
+    wire [31:0] comb_t;
+    wire [8*19-1:0] comb_frame;
+    wire [2*8*19-1:0] candidate_frames;
+    wire [31:0] comb_duplicates, comb_rejected;
 
-    // ---- BEST_TELEM: source A unless A failed, then B; skipped when both failed.
-    reg [7:0] best_seq = 0, best_source = 0;
-    reg [15:0] best_crc = 0;
-    reg [31:0] best_t = 0;
-    assign mtype[P_BEST] = T_BEST;
-    assign len[P_BEST] = 16'd6 + APEX_LEN;
-    assign trigger[P_BEST] = telem_go && !(fail_a && fail_b);
-    always @(posedge clk) if (accept[P_BEST]) begin
-        best_seq <= apex_seq;
-        best_crc <= frame_crc;
-        best_source <= fail_a ? 8'd1 : 8'd0;
-        best_t <= t_us;
-    end
-    wire [8*6-1:0] best_hdr = {APEX_LEN, best_source, best_t};
     function automatic [7:0] frame_byte(input [4:0] i, input [7:0] seq, input [15:0] c, input bad);
         begin
             if (i < 17) frame_byte = apex_byte(i, seq);
@@ -231,8 +219,64 @@ module link_test_sources #(
             else frame_byte = c[7:0] ^ {7'd0, bad};
         end
     endfunction
+
+    generate
+        for (g = 0; g < 19; g = g + 1) begin : comb_bytes
+            assign candidate_frames[8*g +: 8] = frame_byte(g, apex_seq, frame_crc, fail_a);
+            assign candidate_frames[8*(19+g) +: 8] = frame_byte(g, apex_seq, frame_crc, fail_b);
+        end
+    endgenerate
+
+    source_combiner #(
+        .MAX_FRAME_BYTES(19), .MATCH_CYCLES(TICK_CYCLES),
+        .DEDUPE_CYCLES(4*TICK_CYCLES), .DEDUPE_ENTRIES(4)
+    ) combiner (
+        .clk(clk), .rst(rst), .in_valid({2{telem_go}}), .in_ready(comb_ready),
+        .in_crc_ok({!fail_b, !fail_a}), .in_synthetic(2'b11),
+        .in_type({8'h01, 8'h01}), .in_seq({8'd0, apex_seq, 8'd0, apex_seq}),
+        .in_t_us({t_us, t_us}), .in_rssi_x10({rssi_now[1], rssi_now[0]}),
+        .in_quality({quality_now[1], quality_now[0]}), .in_len({APEX_LEN, APEX_LEN}),
+        .in_frame(candidate_frames), .out_valid(comb_valid), .out_ready(!req[P_BEST]),
+        .out_source(comb_source), .out_synthetic(comb_synthetic), .out_t_us(comb_t),
+        .out_len(comb_len), .out_frame(comb_frame), .from_a(from_a), .from_b(from_b),
+        .both_ok(both_ok), .neither_ok(neither_ok), .best_sent(best_sent),
+        .duplicate_count(comb_duplicates), .rejected_count(comb_rejected),
+        .stats_synthetic(comb_stats_synthetic)
+    );
+
+    // Non-stallable fake inputs explicitly account for each candidate lost to
+    // backpressure. Other link producers continue using their existing drop pulses.
+    reg [4:0] drop_count;
+    integer drop_i;
+    always @* begin
+        drop_count = 0;
+        for (drop_i = 0; drop_i < N; drop_i = drop_i + 1)
+            drop_count = drop_count + {4'd0, drop[drop_i]};
+        drop_count = drop_count + {4'd0, (telem_go && !comb_ready[0])}
+                                + {4'd0, (telem_go && !comb_ready[1])};
+    end
+    always @(posedge clk) begin
+        if (rst) dropped <= 0;
+        else dropped <= dropped + {11'd0, drop_count};
+    end
+
+    // ---- BEST_TELEM: snapshot the selected opaque frame; never read live inputs
+    // while the link drains it. Backpressure holds the next result in the combiner.
+    reg [7:0] best_source = 0;
+    reg [8*19-1:0] best_frame = 0;
+    reg [31:0] best_t = 0;
+    assign mtype[P_BEST] = T_BEST;
+    assign len[P_BEST] = 16'd6 + APEX_LEN;
+    assign trigger[P_BEST] = comb_valid && !req[P_BEST];
+    always @(posedge clk) if (accept[P_BEST]) begin
+        best_frame <= comb_frame;
+        best_source <= comb_source;
+        best_t <= comb_t;
+    end
+    wire [8*6-1:0] best_hdr = {APEX_LEN, best_source, best_t};
+    wire [15:0] best_byte_index = idx[P_BEST] - 16'd6;
     assign data[P_BEST] = (idx[P_BEST] < 6) ? best_hdr[8*idx[P_BEST][2:0] +: 8]
-                                            : frame_byte(idx[P_BEST] - 16'd6, best_seq, best_crc, 1'b0);
+                                          : best_frame[8*best_byte_index[4:0] +: 8];
 
     generate
         for (g = 0; g < 2; g = g + 1) begin : channel

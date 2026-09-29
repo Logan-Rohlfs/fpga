@@ -1,10 +1,11 @@
 # Basys 3 FPGA projects
 
 A single repository for a Basys 3 SDR receiver and its development tools.
-**Current checkpoint: the host link layer works end to end.** The SDR FPGA
+**Current checkpoint: the GUI is implemented; the host link and source combiner
+operate on synthetic frames.** The SDR FPGA
 design sends COBS-framed, CRC-checked messages of every type at 1 Mbaud: status,
 telemetry, per-channel metrics, spectrum, and I/Q. `./sdr` decodes and displays
-them. All of that content is **SIMULATED** by stand-in producers; RF acquisition
+them. The combiner selects between **SIMULATED** stand-in A/B frames; RF acquisition
 and demodulation are not implemented. See the [module map](docs/sdr_pipeline.drawio).
 
 New agents: read [AGENTS.md](AGENTS.md), then [the handoff](docs/HANDOFF.md).
