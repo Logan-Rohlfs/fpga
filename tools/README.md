@@ -111,7 +111,10 @@ Press `v` to cycle the receive pane through its views:
 - **RAW:** text/hex bytes.
 - **LINK:** a channel A/B table (RSSI, noise, SNR, Δf, sync quality, CRC
   good/bad), the best stream, and recent channel frames.
-- **SPECTRUM:** per-channel ASCII waterfalls and constellations.
+- **SPECTRUM:** per-channel ASCII waterfalls, labelled with their IF span, plus
+  constellations. The waterfall uses the shared auto scale from
+  `sdr_cli/display.py:WaterfallScale`, and its current dBFS range is shown under
+  it.
 
 Simulated data is marked in the pane title.
 

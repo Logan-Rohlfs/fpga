@@ -9,7 +9,8 @@ import threading
 import time
 
 from .core import ToolError, bitstream, build, program, save_config, simulate
-from .protocol import CHANNELS, describe
+from .display import WaterfallScale
+from .protocol import CHANNELS, PROTOCOL_VERSION, SPECTRUM, bin_frequency, describe, power_db
 from .serial_io import Session, safe_text
 
 
@@ -48,6 +49,7 @@ class Dashboard:
         self.reconnect = False
         self.hex = False
         self.view = 'raw'
+        self.scales = {ch: WaterfallScale() for ch in CHANNELS}
         self.frozen = None
         self.scroll = 0
         self.rates = deque([0.0] * 90, maxlen=90)
@@ -336,7 +338,8 @@ class Dashboard:
             value = prompt + self.input
             self.put(h - 2, 1, value[-(w - 4):], 3 if self.confirm else 1, True)
         else:
-            self.put(h - 2, 1, '2-GFSK telemetry  ·  link protocol v1  ·  RF pipeline pending (data SIMULATED)', 4)
+            self.put(h - 2, 1, '2-GFSK telemetry  ·  link protocol v{}  ·  RF pipeline pending (data SIMULATED)'.format(
+                PROTOCOL_VERSION), 4)
         if self.help:
             width = min(w - 6, 82)
             height = len(HELP) + 2
@@ -383,13 +386,22 @@ class Dashboard:
         link = self.session.link
         half = max(4, (width - 3) // 2)
         wf_height = max(1, (height - 2) // 2)
-        rows = [('{:<{w}} │ {}'.format('WATERFALL A ↑new', 'WATERFALL B ↑new', w=half), 1)]
         history = {ch: list(link.spectrum.get(ch, []))[::-1] for ch in CHANNELS}
+        def title(ch):
+            if not history[ch]:
+                return 'WATERFALL ' + ch
+            f = history[ch][0].fields
+            return 'WATERFALL {} {:.1f}–{:.1f} kHz ↑new'.format(
+                ch, bin_frequency(f, 0) / 1e3, bin_frequency(f, f['bins'] - 1) / 1e3)
+        rows = [('{:<{w}} │ {}'.format(title('A'), title('B'), w=half), 1)]
         for n in range(wf_height):
-            a, b = [shade_row(history[ch][n].fields['power'], half) if n < len(history[ch]) else ''
+            a, b = [shade_row(power_db(history[ch][n].fields), half, self.scales[ch]) if n < len(history[ch]) else ''
                     for ch in CHANNELS]
             rows.append(('{:<{w}} │ {}'.format(a, b, w=half), 0))
-        iq_height = max(3, height - wf_height - 2)
+        a, b = ['{} {:.0f}…{:.0f} dBFS'.format(self.scales[ch].mode, self.scales[ch].low, self.scales[ch].high)
+                for ch in CHANNELS]
+        rows.append(('{:<{w}} │ {}'.format(a, b, w=half), 4))
+        iq_height = max(3, height - wf_height - 3)
         snaps = [link.iq.get(ch) for ch in CHANNELS]
         points = [p for s in snaps if s for p in s.fields['iq']]
         scale = max([1] + [max(abs(i), abs(q)) for i, q in points])
@@ -427,6 +439,9 @@ class Dashboard:
             while self.running:
                 try:
                     self.session.read()
+                    for record in self.session.last_records:
+                        if record.type == SPECTRUM and record.fields['channel'] in self.scales:
+                            self.scales[record.fields['channel']].update(power_db(record.fields))
                     now = time.monotonic()
                     if now - self.rate_at >= 1:
                         self.rates.append((self.session.rx_bytes - self.rate_bytes) / (now - self.rate_at))
@@ -467,16 +482,17 @@ VIEWS = ('raw', 'link', 'spectrum')
 SHADES = ' .:-=+*#%@'
 
 
-def shade_row(power, width):
-    """Downsample spectrum bins to width characters, keeping each segment's peak."""
-    if not power or width <= 0:
+def shade_row(row_db, width, scale):
+    """Downsample dB bins to width characters (segment peak), shaded by the waterfall scale."""
+    if not row_db or width <= 0:
         return ''
-    n = len(power)
+    n = len(row_db)
     out = []
     for c in range(width):
         a = c * n // width
         b = max(a + 1, (c + 1) * n // width)
-        out.append(SHADES[min(len(SHADES) - 1, max(power[a:b]) * len(SHADES) // 256)])
+        level = scale.normalize(max(row_db[a:b]))
+        out.append(SHADES[min(len(SHADES) - 1, int(level * len(SHADES)))])
     return ''.join(out)
 
 

@@ -8,8 +8,9 @@
 
 The current checkpoint is a working FPGA-to-host link layer carrying SIMULATED
 data (see `docs/sdr_pipeline.drawio` and the spec in `docs/superpowers/specs/`).
-The user is building the pipeline backwards from the UART toward the XADC. Follow
-the user's chosen next stage; do not silently select DSP constants or RF settings.
+The user's next chosen task is a desktop GUI (see "GUI task" in the handoff); the
+DSP stages follow later. Follow the user's chosen scope; do not silently select
+DSP constants, RF settings, or GUI dependencies.
 
 ## Work within the existing structure
 

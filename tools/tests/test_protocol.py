@@ -53,7 +53,7 @@ class MessageTest(unittest.TestCase):
         return records[0]
 
     def test_every_type_roundtrips(self):
-        r = self.roundtrip(p.STATUS, dict(version=1, channels=3, uptime_ms=1234, build_id=0xABCD, dropped=2))
+        r = self.roundtrip(p.STATUS, dict(version=2, channels=3, uptime_ms=1234, build_id=0xABCD, dropped=2))
         self.assertEqual((r.name, r.fields['uptime_ms'], r.fields['dropped']), ('STATUS', 1234, 2))
         self.assertTrue(r.synthetic)
         r = self.roundtrip(p.BEST_TELEM, dict(t_us=99, source=1, raw=test_frame()))
@@ -68,10 +68,16 @@ class MessageTest(unittest.TestCase):
         self.assertEqual((r.fields['channel'], r.fields['snr_db'], r.fields['crc_bad']), ('B', 30.0, 1))
         r = self.roundtrip(p.LINK_STATS, dict(from_a=1, from_b=2, both_ok=3, neither_ok=4, best_sent=5))
         self.assertEqual(r.fields['neither_ok'], 4)
-        r = self.roundtrip(p.SPECTRUM, dict(channel=0, row=65535, power=list(range(256))))
-        self.assertEqual((r.fields['row'], len(r.fields['power']), r.fields['power'][255]), (65535, 256, 255))
-        r = self.roundtrip(p.IQ_SNAPSHOT, dict(channel=1, iq=[(1, -1), (-32768, 32767)]))
-        self.assertEqual(r.fields['iq'], [(1, -1), (-32768, 32767)])
+        r = self.roundtrip(p.SPECTRUM, dict(channel=0, averages=4, row=65535, t_us=123, center_hz=100000,
+                                            bin_mhz=390625, db_ref_x10=-1200, db_step_x100=50, power=list(range(256))))
+        f = r.fields
+        self.assertEqual((f['row'], len(f['power']), f['power'][255], f['averages'], f['t_us']), (65535, 256, 255, 4, 123))
+        self.assertEqual((f['center_hz'], f['bin_hz'], f['db_ref'], f['db_step']), (100000, 390.625, -120.0, 0.5))
+        self.assertEqual(p.bin_frequency(f, 128), 100000.0)
+        self.assertEqual(p.bin_frequency(f, 0), 100000 - 128 * 390.625)
+        self.assertEqual(p.power_db(f)[:3], [-120.0, -119.5, -119.0])
+        r = self.roundtrip(p.IQ_SNAPSHOT, dict(channel=1, t_us=9, sample_rate_hz=100000, iq=[(1, -1), (-32768, 32767)]))
+        self.assertEqual((r.fields['iq'], r.fields['sample_rate_hz'], r.fields['t_us']), ([(1, -1), (-32768, 32767)], 100000, 9))
 
     def test_unknown_type_is_reported_not_fatal(self):
         r = self.roundtrip(0x7E, {'payload': b'\x00\x01'})

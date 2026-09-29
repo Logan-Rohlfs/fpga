@@ -15,6 +15,7 @@ SPECTRUM, IQ_SNAPSHOT = 0x30, 0x31
 TYPE_NAMES = {STATUS: 'STATUS', BEST_TELEM: 'BEST_TELEM', CHAN_FRAME: 'CHAN_FRAME',
               CHAN_METRICS: 'CHAN_METRICS', LINK_STATS: 'LINK_STATS', SPECTRUM: 'SPECTRUM',
               IQ_SNAPSHOT: 'IQ_SNAPSHOT'}
+PROTOCOL_VERSION = 2   # STATUS.version; v2 added spectrum/IQ axis metadata
 HEADER = struct.Struct('<BBBH')
 MAX_PAYLOAD = 512
 CHANNELS = ('A', 'B')
@@ -29,8 +30,12 @@ SCHEMAS = {
     CHAN_METRICS: ('<BBhhhiIII', ('channel', 'rsvd', 'rssi_dbm_x10', 'noise_dbm_x10', 'snr_db_x10',
                                   'freq_offset_hz', 'sync_hits', 'crc_good', 'crc_bad'), None, None),
     LINK_STATS: ('<IIIII', ('from_a', 'from_b', 'both_ok', 'neither_ok', 'best_sent'), None, None),
-    SPECTRUM: ('<BBHH', ('channel', 'rsvd', 'row', 'bins'), 'power', 'bins'),
-    IQ_SNAPSHOT: ('<BBH', ('channel', 'rsvd', 'pairs'), 'iq', 'pairs'),
+    # Bin k is centered at center_hz + (k - bins/2) * bin_hz, lowest frequency first.
+    # Power in dBFS is db_ref + power[k] * db_step.
+    SPECTRUM: ('<BBHHIiIhBB', ('channel', 'averages', 'row', 'bins', 't_us', 'center_hz', 'bin_mhz',
+                               'db_ref_x10', 'db_step_x100', 'rsvd'), 'power', 'bins'),
+    # int16 I/Q, full scale ±32767, captured at sample_rate_hz starting at t_us.
+    IQ_SNAPSHOT: ('<BBHII', ('channel', 'rsvd', 'pairs', 't_us', 'sample_rate_hz'), 'iq', 'pairs'),
 }
 
 
@@ -166,7 +171,21 @@ def _parse_payload(mtype, payload):
             f[key] = f.pop(key + '_x10') / 10.0
     if 'quality' in f:
         f['quality'] = f['quality'] / 255.0
+    if mtype == SPECTRUM:
+        f['bin_hz'] = f.pop('bin_mhz') / 1000.0
+        f['db_ref'] = f.pop('db_ref_x10') / 10.0
+        f['db_step'] = f.pop('db_step_x100') / 100.0
     return f
+
+
+def bin_frequency(fields, k):
+    """Center frequency in Hz (FPGA IF domain) of spectrum bin k."""
+    return fields['center_hz'] + (k - fields['bins'] // 2) * fields['bin_hz']
+
+
+def power_db(fields):
+    """Spectrum bins converted to dBFS."""
+    return [fields['db_ref'] + v * fields['db_step'] for v in fields['power']]
 
 
 def parse_message(raw, t=None):
@@ -292,6 +311,8 @@ def describe(r):
         text = 'v{} up={:.3f}s build=0x{:08x} dropped={} ch={}'.format(
             f['version'], f['uptime_ms'] / 1000.0, f['build_id'], f['dropped'],
             ''.join(c for n, c in enumerate(CHANNELS) if f['channels'] >> n & 1) or '-')
+        if f['version'] != PROTOCOL_VERSION:
+            text += ' [HOST EXPECTS v{}: rebuild/program the FPGA]'.format(PROTOCOL_VERSION)
     elif r.type in (BEST_TELEM, CHAN_FRAME):
         from . import apex
         if r.type == BEST_TELEM:
@@ -309,11 +330,13 @@ def describe(r):
     elif r.type == SPECTRUM:
         power = f['power']
         peak = max(range(len(power)), key=power.__getitem__) if power else 0
-        text = '{} row={} bins={} peak=bin{} ({:.1f}dB)'.format(
-            f['channel'], f['row'], f['bins'], peak, power[peak] / 2.0 if power else 0.0)
+        text = '{} row={} bins={}×{:.1f}Hz @{} peak={} {:.1f}dBFS'.format(
+            f['channel'], f['row'], f['bins'], f['bin_hz'], _khz(f['center_hz']),
+            _khz(bin_frequency(f, peak)), power_db(f)[peak] if power else 0.0)
     elif r.type == IQ_SNAPSHOT:
         mags = [(i * i + q * q) ** .5 for i, q in f['iq']]
-        text = '{} pairs={} |iq|avg={:.0f}'.format(f['channel'], f['pairs'], sum(mags) / len(mags) if mags else 0)
+        text = '{} pairs={} @{}S/s |iq|avg={:.0f}'.format(f['channel'], f['pairs'], f['sample_rate_hz'],
+                                                        sum(mags) / len(mags) if mags else 0)
     else:
         text = '{} payload bytes'.format(len(f.get('payload', b'')))
     return text + (' [SIMULATED]' if r.synthetic else '') + (' [EMPTY]' if r.flags & FLAG_EMPTY else '')
@@ -345,7 +368,7 @@ def golden_vectors():
     import random
     rng = random.Random(29)
     header = HEADER.pack(STATUS, FLAG_SYNTHETIC, 5, 12) + build_payload(
-        STATUS, dict(version=1, channels=3, uptime_ms=1000, build_id=0, dropped=0))
+        STATUS, dict(version=PROTOCOL_VERSION, channels=3, uptime_ms=1000, build_id=0, dropped=0))
     message = header + struct.pack('<H', crc16_ccitt(header))
     return [b'\x42', b'\x00', b'\x00\x00', b'\x11\x22\x00\x33', b'\x01' * 254, b'\x01' * 255,
             b'\x01' * 253 + b'\x00', b'\xab' * 508, bytes(rng.choice([0, rng.randrange(1, 256)]) for _ in range(600)),

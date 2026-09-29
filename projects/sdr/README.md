@@ -25,7 +25,10 @@ link_test_sources ─▶ link_tx ─▶ cobs_encoder ─▶ uart_tx ─▶ USB-U
 
 ## Wire format
 
-A message is `COBS(type, flags, seq, len u16, payload, crc16) ‖ 0x00`:
+A message is `COBS(type, flags, seq, len u16, payload, crc16) ‖ 0x00`. This is
+protocol **v2**; STATUS carries the version.
+
+The frame fields:
 
 - all fields little-endian;
 - CRC-16-CCITT, poly 0x1021, init 0xFFFF, over the header and payload;
@@ -39,8 +42,8 @@ A message is `COBS(type, flags, seq, len u16, payload, crc16) ‖ 0x00`:
 | 0x11 | CHAN_FRAME | 20 Hz × A/B | CRC ok, RSSI, sync quality, Δf, raw APEX frame |
 | 0x20 | CHAN_METRICS | 10 Hz × A/B | RSSI, noise, SNR, Δf, sync hits, CRC good/bad |
 | 0x21 | LINK_STATS | 1 Hz | frames from A / B / both OK / neither |
-| 0x30 | SPECTRUM | 10 Hz × A/B | 256 u8 power bins (0.5 dB/LSB) |
-| 0x31 | IQ_SNAPSHOT | 5 Hz × A/B | 64 int16 I/Q pairs |
+| 0x30 | SPECTRUM | 10 Hz × A/B | axis (center Hz, bin Hz, dBFS ref/step, t_us) + 256 u8 power bins |
+| 0x31 | IQ_SNAPSHOT | 5 Hz × A/B | sample rate, t_us, 64 int16 I/Q pairs |
 
 Fake traffic is about 11 kB/s, roughly 11% of the link's capacity.
 
@@ -53,7 +56,10 @@ checks it end to end.
 - Channel A fails CRC every 11th frame and channel B every 7th. Failed frames
   flip the last CRC byte.
 - BEST_TELEM uses A unless A failed, then B. Nothing is sent when both fail.
-- Spectrum rows show a noise floor, two FSK lobes, and a walking tone.
+- Spectrum rows describe a 256-point FFT of 100 kS/s baseband at the 100 kHz IF:
+  390.625 Hz bins, dBFS = −120 + 0.5·power. They show a noise floor near
+  −105 dBFS, two FSK lobes at +10.4 kHz ± 25 kHz (−50 dBFS), and a walking tone.
+  None of this comes from a real signal.
 - I/Q snapshots are points on a noisy circle; channel B's is half the radius.
 
 ## Hardware interfaces

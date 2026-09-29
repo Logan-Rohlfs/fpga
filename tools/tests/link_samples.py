@@ -9,7 +9,7 @@ def apex_test_frame(seq, good=True):
 
 
 def sample_messages(slots=3):
-    msgs = [(p.STATUS, dict(version=1, channels=3, uptime_ms=1500, build_id=0x1234, dropped=0))]
+    msgs = [(p.STATUS, dict(version=2, channels=3, uptime_ms=1500, build_id=0x1234, dropped=0))]
     for slot in range(slots):
         bad_b = slot == 1
         msgs.append((p.BEST_TELEM, dict(t_us=slot * 50000, source=0, raw=apex_test_frame(slot))))
@@ -24,10 +24,11 @@ def sample_messages(slots=3):
                                           crc_good=slots - ch, crc_bad=ch)))
         for row in range(4):
             power = [24 + (k * 7 + row) % 16 for k in range(256)]
-            power[103] = power[153] = 140
-            msgs.append((p.SPECTRUM, dict(channel=ch, row=row, power=power)))
-        msgs.append((p.IQ_SNAPSHOT, dict(channel=ch, iq=[(8000 >> ch, 0), (0, 8000 >> ch), (-8000 >> ch, 0),
-                                                         (0, -8000 >> ch)])))
+            power[90] = power[218] = 140
+            msgs.append((p.SPECTRUM, dict(channel=ch, averages=1, row=row, t_us=row * 100000, center_hz=100000,
+                                          bin_mhz=390625, db_ref_x10=-1200, db_step_x100=50, power=power)))
+        msgs.append((p.IQ_SNAPSHOT, dict(channel=ch, t_us=0, sample_rate_hz=100000,
+                                         iq=[(8000 >> ch, 0), (0, 8000 >> ch), (-8000 >> ch, 0), (0, -8000 >> ch)])))
     msgs.append((p.LINK_STATS, dict(from_a=slots, from_b=0, both_ok=slots - 1, neither_ok=0, best_sent=slots)))
     return msgs
 

@@ -1,6 +1,6 @@
 # Host link layer design
 
-Status: approved 2026-09-29. Scope: the first stage upstream of `uart_tx`, as shown in
+Status: approved 2026-09-29; protocol v2 (spectrum/IQ axis metadata) added the same day. Scope: the first stage upstream of `uart_tx`, as shown in
 [the module map](../../sdr_pipeline.drawio). The upstream receiver stages do not exist yet.
 Their messages come from stand-in producers that set a `SYNTHETIC` flag.
 
@@ -76,13 +76,13 @@ sync word: type, body, then CRC-16 **big-endian**, as in `fsw/src/radio.cpp`.
 
 | Type | Name | Payload | Len |
 | --- | --- | --- | --- |
-| 0x01 | STATUS | `version u8 (=1)`, `channels u8 (bitmask, 0b11)`, `uptime_ms u32`, `build_id u32`, `dropped u16` | 12 |
+| 0x01 | STATUS | `version u8 (=2)`, `channels u8 (bitmask, 0b11)`, `uptime_ms u32`, `build_id u32`, `dropped u16` | 12 |
 | 0x10 | BEST_TELEM | `t_us u32`, `source u8`, `frame_len u8`, `raw[frame_len]` | 6+n |
 | 0x11 | CHAN_FRAME | `channel u8`, `crc_ok u8`, `t_us u32`, `rssi_dbm_x10 i16`, `quality u8 (/255)`, `freq_offset_hz i32`, `frame_len u8`, `raw[frame_len]` | 14+n |
 | 0x20 | CHAN_METRICS | `channel u8`, `rsvd u8`, `rssi_dbm_x10 i16`, `noise_dbm_x10 i16`, `snr_db_x10 i16`, `freq_offset_hz i32`, `sync_hits u32`, `crc_good u32`, `crc_bad u32` | 24 |
 | 0x21 | LINK_STATS | `from_a u32`, `from_b u32`, `both_ok u32`, `neither_ok u32`, `best_sent u32` | 20 |
-| 0x30 | SPECTRUM | `channel u8`, `rsvd u8`, `row u16`, `bins u16`, `power u8[bins]` (0.5 dB/LSB above floor) | 6+bins |
-| 0x31 | IQ_SNAPSHOT | `channel u8`, `rsvd u8`, `pairs u16`, `(i i16, q i16)[pairs]` | 4+4·pairs |
+| 0x30 | SPECTRUM | `channel u8`, `averages u8`, `row u16`, `bins u16`, `t_us u32`, `center_hz i32`, `bin_mhz u32`, `db_ref_x10 i16`, `db_step_x100 u8`, `rsvd u8`, `power u8[bins]` | 22+bins |
+| 0x31 | IQ_SNAPSHOT | `channel u8`, `rsvd u8`, `pairs u16`, `t_us u32`, `sample_rate_hz u32`, `(i i16, q i16)[pairs]` | 12+4·pairs |
 
 Additional notes:
 
@@ -93,6 +93,17 @@ Additional notes:
 - **`build_id`:** a synthesis parameter, 0 by default.
 - **Future types:** the host reports unknown types as `UNKNOWN(0xNN)` without
   failing.
+- **SPECTRUM axis (v2):** every row describes itself, so a display can label it
+  even when it connects mid-stream.
+  - Bin `k` is centered at `center_hz + (k − bins/2) · bin_mhz/1000` Hz, lowest
+    frequency first.
+  - Power in dBFS is `db_ref_x10/10 + power[k] · db_step_x100/100`.
+  - Frequencies are in the FPGA's IF domain. Mapping to RF needs the analog LO
+    and injection side, which the FPGA does not know yet.
+- **IQ_SNAPSHOT (v2):** `pairs` contiguous samples at `sample_rate_hz`, starting
+  at `t_us`. int16 full scale is ±32767.
+- **Version mismatch:** the host flags a STATUS whose `version` differs from its
+  own. Layouts are not backward compatible.
 
 ## FPGA architecture (`projects/sdr/rtl/`)
 

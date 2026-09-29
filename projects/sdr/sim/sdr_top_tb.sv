@@ -41,8 +41,8 @@ module sdr_top_tb;
             8'h11: expected_len = 14 + 19;
             8'h20: expected_len = 24;
             8'h21: expected_len = 20;
-            8'h30: expected_len = 6 + 256;
-            8'h31: expected_len = 4 + 256;
+            8'h30: expected_len = 22 + 256;
+            8'h31: expected_len = 12 + 256;
             default: expected_len = -1;
         endcase
     endfunction
@@ -97,6 +97,16 @@ module sdr_top_tb;
                 best_ok = best_ok + 1;
             end
             if (msg[0] == 8'h01 && {msg[16], msg[15]} != 0) $fatal(1, "STATUS reports %0d dropped", {msg[16], msg[15]});
+            if (msg[0] == 8'h01 && msg[5] != 2) $fatal(1, "STATUS protocol version %0d, expected 2", msg[5]);
+            // SPECTRUM axis: center 100 kHz, 390.625 Hz bins (390625 mHz), -120.0 dBFS ref, 0.5 dB step.
+            // Payload starts at msg[5]: channel, averages, row u16, bins u16, t_us u32, center_hz, bin_mhz...
+            if (msg[0] == 8'h30 && ({msg[18], msg[17], msg[16], msg[15]} != 100000 ||
+                                    {msg[22], msg[21], msg[20], msg[19]} != 390625 ||
+                                    {msg[24], msg[23]} != 16'hfb50 || msg[25] != 50))
+                $fatal(1, "SPECTRUM axis metadata wrong");
+            // channel, rsvd, pairs u16, t_us u32, sample_rate_hz u32
+            if (msg[0] == 8'h31 && {msg[16], msg[15], msg[14], msg[13]} != 100000)
+                $fatal(1, "IQ_SNAPSHOT sample rate wrong");
             count[msg[0]] = count[msg[0]] + 1;
             messages = messages + 1;
             all_seen = count[8'h01] >= 2 && count[8'h10] > 0 && count[8'h20] >= 2 && count[8'h21] >= 2 &&

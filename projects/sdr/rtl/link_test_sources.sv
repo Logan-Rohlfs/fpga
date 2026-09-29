@@ -33,6 +33,7 @@ module link_test_sources #(
     input  wire [N-1:0]    p_ready
 );
     localparam [7:0] SYNTHETIC = 8'h01;
+    localparam [7:0] PROTOCOL_VERSION = 8'd2;   // must match tools/sdr_cli/protocol.py
     localparam [7:0] T_STATUS = 8'h01, T_BEST = 8'h10, T_FRAME = 8'h11, T_METRICS = 8'h20,
                      T_LINK = 8'h21, T_SPECTRUM = 8'h30, T_IQ = 8'h31;
     localparam integer P_BEST = 0, P_FRAME = 1, P_METRICS = 3, P_LINK = 5, P_STATUS = 6,
@@ -40,6 +41,15 @@ module link_test_sources #(
     localparam [7:0] APEX_LEN = 8'd19;      // type + seq + 15 text bytes + CRC16
     localparam integer US_CYCLES = (CLK_HZ >= 2_000_000) ? CLK_HZ / 1_000_000 : 1;
     localparam integer SPECTRUM_BINS = 256, IQ_PAIRS = 64;
+    // Axis metadata the real DDC/FFT stages will report. The stand-in describes a
+    // 256-point FFT of 100 kS/s complex baseband tuned to the 100 kHz IF:
+    // 390.625 Hz bins, dBFS = -120 + 0.5 * power.
+    localparam [31:0] SPEC_CENTER_HZ = 32'd100_000;
+    localparam [31:0] SPEC_BIN_MHZ = 32'd390_625;
+    localparam [15:0] SPEC_DB_REF_X10 = -16'sd1200;
+    localparam [7:0]  SPEC_DB_STEP_X100 = 8'd50;
+    localparam [7:0]  SPEC_AVERAGES = 8'd1;
+    localparam [31:0] IQ_RATE_HZ = 32'd100_000;
 
     // ------------------------------------------------------------ timebase
     reg [31:0] tick_div = 0;
@@ -263,25 +273,29 @@ module link_test_sources #(
                               noise_now[g], rssi_now[g], 8'd0, CH};
             assign data[PM] = m_payload[8*idx[PM][4:0] +: 8];
 
-            // ---- SPECTRUM: noise floor, two FSK lobes (±25 bins), and a walking tone.
+            // ---- SPECTRUM: noise floor, two FSK lobes, and a walking tone. The lobes sit
+            // at +10.4 kHz offset ±25 kHz deviation: bins 128 + (10.4 ± 25) / 0.390625.
             localparam integer PS = P_SPECTRUM + g;
             reg [15:0] s_row = 0, s_row_now = 0;
+            reg [31:0] s_t = 0;
             assign mtype[PS] = T_SPECTRUM;
-            assign len[PS] = 16'd6 + SPECTRUM_BINS;
+            assign len[PS] = 16'd22 + SPECTRUM_BINS;
             assign trigger[PS] = due_spectrum;
             always @(posedge clk) begin
                 if (rst) s_row_now <= 0;
                 else if (accept[PS]) begin
                     s_row <= s_row_now;
+                    s_t <= t_us;
                     s_row_now <= s_row_now + 1'b1;
                 end
             end
-            wire [8*6-1:0] s_hdr = {16'd256, s_row, 8'd0, CH};
-            wire [7:0] k = idx[PS][7:0] - 8'd6;
+            wire [8*22-1:0] s_hdr = {8'd0, SPEC_DB_STEP_X100, SPEC_DB_REF_X10, SPEC_BIN_MHZ, SPEC_CENTER_HZ, s_t,
+                                     16'd256, s_row, SPEC_AVERAGES, CH};
+            wire [7:0] k = idx[PS][7:0] - 8'd22;
             wire [7:0] hash = (k * 8'd37 + s_row[7:0] * 8'd13 + CH * 8'd7) ^ {2'd0, k[7:2]};
             wire [7:0] noise = 8'd24 + {4'd0, hash[3:0]};
-            wire [7:0] d_lo = (k > 8'd103) ? k - 8'd103 : 8'd103 - k;
-            wire [7:0] d_hi = (k > 8'd153) ? k - 8'd153 : 8'd153 - k;
+            wire [7:0] d_lo = (k > 8'd90) ? k - 8'd90 : 8'd90 - k;
+            wire [7:0] d_hi = (k > 8'd218) ? k - 8'd218 : 8'd218 - k;
             wire [7:0] d_lobe = (d_lo < d_hi) ? d_lo : d_hi;
             wire [7:0] lobe = (d_lobe == 0) ? 8'd140 : (d_lobe == 1) ? 8'd128 : (d_lobe == 2) ? 8'd110 :
                               (d_lobe == 3) ? 8'd90 : 8'd0;
@@ -295,22 +309,24 @@ module link_test_sources #(
                 noise_q <= noise;
             end
             wire [7:0] peak = (lobe_q > tone_q) ? lobe_q : tone_q;
-            assign data[PS] = (idx[PS] < 6) ? s_hdr[8*idx[PS][2:0] +: 8] : ((peak > noise_q) ? peak : noise_q);
+            assign data[PS] = (idx[PS] < 22) ? s_hdr[8*idx[PS][4:0] +: 8] : ((peak > noise_q) ? peak : noise_q);
 
             // ---- IQ_SNAPSHOT: points on a noisy constant-envelope circle.
             localparam integer PI = P_IQ + g;
             reg [15:0] q_snap = 0, q_snap_now = 0;
+            reg [31:0] q_t = 0;
             assign mtype[PI] = T_IQ;
-            assign len[PI] = 16'd4 + 4 * IQ_PAIRS;
+            assign len[PI] = 16'd12 + 4 * IQ_PAIRS;
             assign trigger[PI] = due_iq;
             always @(posedge clk) begin
                 if (rst) q_snap_now <= 0;
                 else if (accept[PI]) begin
                     q_snap <= q_snap_now;
+                    q_t <= t_us;
                     q_snap_now <= q_snap_now + 1'b1;
                 end
             end
-            wire [15:0] b = idx[PI] - 16'd4;
+            wire [15:0] b = idx[PI] - 16'd12;
             wire [7:0] j = b[9:2];
             wire [5:0] angle = j[5:0] * 6'd5 + q_snap[5:0] * 6'd3 + CH[5:0] * 6'd8;
             wire [7:0] ni8 = j * 8'd29 + q_snap[7:0] * 8'd7 + CH * 8'd3;
@@ -321,8 +337,8 @@ module link_test_sources #(
             wire signed [15:0] q_val = (sine(angle) >>> g) + n_q;
             reg [15:0] part = 0;
             always @(posedge clk) part <= b[1] ? q_val : i_val;
-            wire [8*4-1:0] q_hdr = {16'd64, 8'd0, CH};
-            assign data[PI] = (idx[PI] < 4) ? q_hdr[8*idx[PI][1:0] +: 8] : (b[0] ? part[15:8] : part[7:0]);
+            wire [8*12-1:0] q_hdr = {IQ_RATE_HZ, q_t, 16'd64, 8'd0, CH};
+            assign data[PI] = (idx[PI] < 12) ? q_hdr[8*idx[PI][3:0] +: 8] : (b[0] ? part[15:8] : part[7:0]);
         end
     endgenerate
 
@@ -339,7 +355,7 @@ module link_test_sources #(
     assign mtype[P_STATUS] = T_STATUS;
     assign len[P_STATUS] = 16'd12;
     assign trigger[P_STATUS] = due_status;
-    always @(posedge clk) if (accept[P_STATUS]) st_payload <= {dropped, BUILD_ID, uptime_ms, 8'd3, 8'd1};
+    always @(posedge clk) if (accept[P_STATUS]) st_payload <= {dropped, BUILD_ID, uptime_ms, 8'd3, PROTOCOL_VERSION};
     assign data[P_STATUS] = st_payload[8*idx[P_STATUS][3:0] +: 8];
 
     // 8000 * sin(2*pi*a/64), quarter-wave table.

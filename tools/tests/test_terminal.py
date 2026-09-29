@@ -147,7 +147,7 @@ class LinkTerminalTest(unittest.TestCase):
             after = output[link_view:].decode(errors='replace')
             self.assertNotIn('Traceback', before + after)
             # curses repaints only changed cells, so check distinctive tokens per view.
-            for expected in ('LINK · SIMULATED', 'CHANNEL A', 'CHANNEL B', 'BEST STREAM', 'Link protocol v1',
+            for expected in ('LINK · SIMULATED', 'CHANNEL A', 'CHANNEL B', 'BEST STREAM', 'Link protocol v2',
                              'SIMULATED stand-in data'):
                 self.assertIn(expected, before)
             for expected in ('SPECTRUM', 'WATERFALL A', 'CONSTELLATION B'):
