@@ -19,7 +19,8 @@ class ToolError(Exception):
 
 DEFAULTS = dict(project="sdr", port="auto", baud=1000000, host="", user="",
                 identity="", remote_root="C:/sdr-builds",
-                vivado="C:/AMDDesignTools/2026.1/Vivado/bin/vivado.bat")
+                vivado="C:/AMDDesignTools/2026.1/Vivado/bin/vivado.bat",
+                gui_admin_hash="")
 
 
 def repo_root():

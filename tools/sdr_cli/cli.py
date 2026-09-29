@@ -1,5 +1,6 @@
 """Inline commands and entry point."""
 import argparse
+import getpass
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,8 @@ def parser():
     setup.add_argument('--baud', type=int)
     setup.add_argument('--project', choices=['sdr', 'blink'])
     setup.add_argument('--interactive', action='store_true', help='Prompt for connection settings')
+    setup.add_argument('--gui-password', action='store_true',
+                       help='Prompt for the GUI Admin password (stored hashed in .sdr/config.json)')
     doctor = sub.add_parser('doctor', help='Check tools and board ports')
     doctor.add_argument('--remote', action='store_true', help='Also check SSH and the Vivado path')
     doctor.add_argument('--board', action='store_true', help='Also query JTAG via openFPGALoader')
@@ -54,6 +57,17 @@ def parser():
     send.add_argument('--newline', action='store_true')
     send.add_argument('--port')
     send.add_argument('--baud', type=int)
+    gui = sub.add_parser('gui', help='Serve the web GUI (local only unless --lan)')
+    gui.add_argument('--source', choices=['serial', 'replay', 'sim'], default='serial',
+                     help='serial: the board (default); replay: a capture file; sim: host simulator')
+    gui.add_argument('--file', type=Path, help='Capture to replay (with --source replay)')
+    gui.add_argument('--speed', type=float, default=1.0, help='Replay speed; 0 is as fast as possible')
+    gui.add_argument('--loop', action='store_true', help='Replay the capture forever')
+    gui.add_argument('--lan', action='store_true', help='Listen on all interfaces so other devices can connect')
+    gui.add_argument('--http-port', type=int, default=8080)
+    gui.add_argument('--no-browser', action='store_true', help='Do not open a browser window')
+    gui.add_argument('--port', help='UART device override')
+    gui.add_argument('--baud', type=int)
     return p
 
 
@@ -91,6 +105,26 @@ def doctor(root, config, check_remote=False, check_board=False, log=print):
     return 1 if failures else 0
 
 
+def prompt_gui_password(read=getpass.getpass, interactive=None):
+    """Ask twice; return the salted hash. The password itself is never stored or printed."""
+    if interactive is None:
+        interactive = sys.stdin.isatty()
+    if not interactive:
+        raise ToolError('Setting the GUI password needs a terminal.')
+    first = read('New GUI Admin password: ')
+    if len(first) < 8:
+        raise ToolError('Use at least 8 characters.')
+    if read('Repeat the password: ') != first:
+        raise ToolError('The passwords do not match.')
+    from .roles import hash_password
+    return hash_password(first)
+
+
+def public_config(config):
+    """Settings safe to print: the Admin password hash is masked."""
+    return dict(config, gui_admin_hash='(set)' if config.get('gui_admin_hash') else '')
+
+
 def configure(root, config, args):
     fields = ['host', 'user', 'identity', 'remote_root', 'vivado', 'port', 'baud', 'project']
     for field in fields:
@@ -104,6 +138,8 @@ def configure(root, config, args):
             value = input('{} [{}]: '.format(field, config[field])).strip()
             if value:
                 config[field] = int(value) if field == 'baud' else value
+    if getattr(args, 'gui_password', False):
+        config['gui_admin_hash'] = prompt_gui_password()
     save_config(root, config)
     print('Saved local settings to ' + str(root / '.sdr/config.json'))
     print('Check connections: sdr doctor --remote --board')
@@ -177,7 +213,7 @@ def main(root=None):
         elif args.command == 'setup':
             configure(root, config, args)
         elif args.command == 'config':
-            print(json.dumps(config, indent=2))
+            print(json.dumps(public_config(config), indent=2))
         elif args.command == 'ports':
             for port in ports():
                 print('{}\t{}\t{}'.format(port.device, port.description, port.serial_number or ''))
@@ -202,6 +238,12 @@ def main(root=None):
                 print('Sent {} bytes. No receiver command/acknowledgement protocol is implemented yet.'.format(len(data)))
             finally:
                 session.close()
+        elif args.command == 'gui':
+            try:
+                from .web.server import run_gui
+            except ImportError as exc:
+                raise ToolError('The GUI needs aiohttp. Install with: .venv/bin/python -m pip install -e ".[gui]"') from exc
+            run_gui(root, config, args)
         return 0
     except KeyboardInterrupt:
         return 130
