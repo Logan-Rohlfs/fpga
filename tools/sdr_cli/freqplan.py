@@ -134,7 +134,12 @@ def derive(s):
 
 
 def _number(key, value, integer):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError('{} must be a number'.format(key))
+    try:
+        if not math.isfinite(value):
+            raise ValueError('{} must be a number'.format(key))
+    except OverflowError:
         raise ValueError('{} must be a number'.format(key))
     if integer:
         if value != int(value):

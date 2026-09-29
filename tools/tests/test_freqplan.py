@@ -53,7 +53,8 @@ class UpdateTest(unittest.TestCase):
     def test_rejects_bad_values(self):
         bad = [{'frac': 10000}, {'mod': 1}, {'out_div': 3}, {'injection': 'side'}, {'r_div': 0},
                {'n_int': 2.5}, {'nco_hz': 600e3}, {'fs_hz': 0}, {'ref_hz': float('nan')},
-               {'bogus': 1}, {'n_int': True}, {'lo_hz': 'x'}, {'window_hz': -1}]
+               {'bogus': 1}, {'n_int': True}, {'lo_hz': 'x'}, {'window_hz': -1},
+               {'n_int': 10**400}, {'lo_hz': 10**400}]
         for change in bad:
             with self.subTest(change=change), self.assertRaises(ValueError):
                 fp.update(fp.TuningState(), change)
