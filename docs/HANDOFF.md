@@ -7,9 +7,53 @@ dashboard decode and display them.
 All message content is **SIMULATED** by stand-in producers. The planned stages are
 in [`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio).
 
-**Next task, chosen by the user: a desktop GUI** in the style of SDR++. See
-[GUI task](#gui-task) below. The DSP stages come later; realistic displayed data
-waits for them.
+**Current task: the Space Raiders SDR web GUI. It is partway through
+implementation.** See [GUI implementation status](#gui-implementation-status).
+The DSP stages come later; realistic displayed data waits for them.
+
+## GUI implementation status
+
+Recorded 2026-09-29 (third session). The session stopped partway through, at the
+user's request.
+
+- **Design:**
+  - [Spec](superpowers/specs/2026-09-29-gui-design.md)
+  - [Plan](superpowers/plans/2026-09-29-space-raiders-sdr-gui.md): 15 tasks in 6 phases.
+  - A web GUI with an aiohttp server and a Svelte 5 frontend, reachable from the
+    LAN with `--lan`.
+  - Viewer and Admin roles, with Admin takeover.
+  - Space Raiders branding.
+  - The user merged the Tune and Metrics views into one Tune page.
+- **Done (committed on `gui-prep`, each task reviewed):**
+  - Tasks 1–7: `freqplan.py`, `roles.py`, `sources.py` (serial, replay and a
+    tuning-aware simulator), `hub.py`, `web/server.py`, the `./sdr gui` and
+    `./sdr setup --gui-password` commands, and the frontend scaffold (theme and
+    branded shell).
+  - The review rounds added fixes: oversized-number rejection, subscriber
+    isolation, and handler errors that no longer drop viewers.
+- **Committed but not yet reviewed:** Task 8, the frontend view helpers.
+- **Not started:**
+  - Task 9: the WebSocket client and stores.
+  - Task 10: the app shell (status bar, role menu, theme toggle).
+  - Tasks 11–13: the Tune page.
+  - Task 14: Telemetry cards (v1 placeholders; lower priority).
+  - Task 15: end-to-end checks and documentation.
+- **What runs today:**
+  - `./sdr gui` serves the branded placeholder page and a live WebSocket feed.
+  - The Tune and Telemetry pages do not exist yet.
+- **Verified at the stop:**
+  - 84 Python tests pass.
+  - 10 Vitest tests pass.
+  - svelte-check reports 0 errors, and the frontend builds.
+  - No LAN, phone or hardware check has been done yet.
+- **To resume:** follow the plan from Task 8's review onward.
+  - The per-task progress log is `.superpowers/sdd/2026-09-29-space-raiders-sdr-gui/progress.md`.
+    It is local and ignored by Git.
+  - It lists the rulings made and the deferred minor findings, which the final
+    review should triage.
+  - Build the frontend before running the GUI:
+    `(cd tools/sdr_web && npm install && npm run build)`.
+    Install the Python side with `.venv/bin/python -m pip install -e '.[gui]'`.
 
 ## What exists
 
