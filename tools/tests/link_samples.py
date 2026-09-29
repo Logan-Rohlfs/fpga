@@ -1,11 +1,6 @@
 """A small synthetic link stream containing every message type (mirrors rtl/link_test_sources.sv)."""
 from sdr_cli import protocol as p
-
-
-def apex_test_frame(seq, good=True):
-    body = bytes([0x01, seq & 0xFF]) + b'APEX RADIO TEST'
-    crc = p.crc16_ccitt(body) ^ (0 if good else 1)
-    return body + bytes([crc >> 8, crc & 0xFF])
+from sdr_cli.apex import build_test_frame as apex_test_frame
 
 
 def sample_messages(slots=3):

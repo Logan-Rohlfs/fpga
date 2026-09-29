@@ -71,3 +71,10 @@ def summary(frame):
     elif frame['kind'] == 'HK' and 'uptime_s' in f:
         text += ' up={}s'.format(f['uptime_s'])
     return text + ('' if frame['crc_ok'] else ' CRC-BAD')
+
+
+def build_test_frame(seq, good=True):
+    """APEX TEST frame as the FPGA stand-in sends it; good=False flips the CRC's last bit."""
+    data = bytes([TEST, seq & 0xFF]) + b'APEX RADIO TEST'
+    crc = crc16_ccitt(data) ^ (0 if good else 1)
+    return data + bytes([crc >> 8, crc & 0xFF])
