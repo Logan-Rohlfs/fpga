@@ -1,4 +1,4 @@
-"""Raw UART transport shared by the CLI and dashboard."""
+"""UART transport and link decoding shared by the CLI and dashboard."""
 from collections import deque
 from datetime import datetime, timezone
 import json
@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 
 from .core import ToolError
+from .protocol import LinkState, StreamDecoder
 
 
 def serial_module():
@@ -56,6 +57,10 @@ class Session:
         self.hex_lines = deque(maxlen=300)
         self.pending = bytearray()
         self.heartbeats = 0
+        self.decoder = StreamDecoder()
+        self.link = LinkState()
+        self.last_records = []
+        self.records = deque(maxlen=300)
 
     @property
     def connected(self):
@@ -77,6 +82,9 @@ class Session:
         self.started = time.monotonic()
         self.heartbeats = 0
         self.pending.clear()
+        self.decoder = StreamDecoder()
+        self.link = LinkState()
+        self.records.clear()
 
     def disconnect(self):
         if self.serial is not None:
@@ -85,6 +93,7 @@ class Session:
         self.pending.clear()
 
     def read(self):
+        self.last_records = []
         if not self.connected:
             return b''
         try:
@@ -105,6 +114,10 @@ class Session:
             for offset in range(0, len(data), 16):
                 chunk = data[offset:offset + 16]
                 self.hex_lines.append('{}  {}'.format(chunk.hex(' '), safe_text(chunk)))
+            # Link messages; legacy text below still feeds the raw text view.
+            self.last_records = self.decoder.feed(data)
+            self.link.update(self.last_records)
+            self.records.extend(self.last_records)
             self.pending.extend(data)
             while b'\n' in self.pending:
                 line, _, rest = self.pending.partition(b'\n')

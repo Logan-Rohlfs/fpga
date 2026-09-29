@@ -1,5 +1,8 @@
 PROJECT ?= blink
 BIT := build/$(PROJECT)/$(PROJECT).bit
+SDR_RTL := $(sort $(wildcard projects/sdr/rtl/*.sv))
+# Unit testbenches first, then the full top-level link test.
+SDR_TESTS := uart_tx_tb crc16_ccitt_tb cobs_encoder_tb link_tx_tb sdr_top_tb
 
 .PHONY: sim build program flash clean
 
@@ -9,10 +12,11 @@ sim:
 		iverilog -g2012 -s blink_tb -o build/blink/sim.vvp projects/blink/rtl/blink.sv projects/blink/sim/blink_tb.sv && \
 		vvp build/blink/sim.vvp; \
 	elif [ "$(PROJECT)" = sdr ]; then \
-		iverilog -g2012 -Wall -s uart_tx_tb -o build/sdr/uart_tx_tb.vvp projects/sdr/rtl/uart_tx.sv projects/sdr/sim/uart_tx_tb.sv && \
-		vvp build/sdr/uart_tx_tb.vvp && \
-		iverilog -g2012 -Wall -s sdr_top_tb -o build/sdr/sdr_top_tb.vvp projects/sdr/rtl/uart_tx.sv projects/sdr/rtl/sdr_top.sv projects/sdr/sim/sdr_top_tb.sv && \
-		vvp build/sdr/sdr_top_tb.vvp; \
+		for tb in $(SDR_TESTS); do \
+			iverilog -g2012 -Wall -s $$tb -o build/sdr/$$tb.vvp $(SDR_RTL) projects/sdr/sim/$$tb.sv && \
+			vvp -n build/sdr/$$tb.vvp || exit 1; \
+		done; \
+		PYTHONPATH=tools python3 -m sdr_cli.protocol --check build/sdr/link_capture.bin; \
 	else echo "Unknown project: $(PROJECT)"; exit 1; fi
 
 build:

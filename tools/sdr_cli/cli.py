@@ -8,6 +8,7 @@ import sys
 import time
 
 from . import __version__
+from .protocol import format_record, summarize
 from .core import (ToolError, build, load_config, program, remote, repo_root,
                    run, save_config, simulate, ps_literal)
 from .serial_io import Session, ports, resolve_port, serial_module
@@ -43,7 +44,9 @@ def parser():
     receive.add_argument('--port')
     receive.add_argument('--baud', type=int)
     receive.add_argument('--seconds', type=float, default=0, help='0 means continuous')
-    receive.add_argument('--format', choices=['text', 'hex', 'raw', 'json'], default='text')
+    receive.add_argument('--format', choices=['decoded', 'records', 'text', 'hex', 'raw', 'json'], default='decoded',
+                         help='decoded: one line per link message (default); records: JSON lines; '
+                              'text/hex/raw/json: undecoded UART bytes')
     receive.add_argument('--output', type=Path, help='Also record exact raw bytes to a NEW file')
     send = sub.add_parser('send', help='Write raw UART data; current FPGA diagnostic has no command receiver')
     send.add_argument('data', help='UTF-8 text, or bytes with --hex')
@@ -70,7 +73,7 @@ def doctor(root, config, check_remote=False, check_board=False, log=print):
     except ToolError as exc:
         log('MISSING ' + str(exc))
         failures += 1
-    log('FPGA    Diagnostic is TX-only; RF demodulation and receiver controls are not implemented yet.')
+    log('FPGA    Link is TX-only and its data is SIMULATED; RF stages and receiver controls are not implemented yet.')
     if check_remote:
         try:
             remote(config, "$ErrorActionPreference='Stop'; if (!(Test-Path -LiteralPath " +
@@ -115,13 +118,25 @@ def receive(config, args):
         if args.output:
             session.start_capture(args.output)
         print('Connected to {} at {} baud. Ctrl-C stops.'.format(session.port, config['baud']), file=sys.stderr)
-        deadline = time.monotonic() + args.seconds if args.seconds else None
+        started = time.monotonic()
+        deadline = started + args.seconds if args.seconds else None
+        heartbeats = 0
         while deadline is None or time.monotonic() < deadline:
             data = session.read()
             if not data:
                 time.sleep(0.01)
                 continue
-            if args.format == 'raw':
+            if args.format == 'decoded':
+                for record in session.last_records:
+                    print(format_record(record), flush=True)
+                if session.heartbeats > heartbeats:
+                    heartbeats = session.heartbeats
+                    print('Legacy SDR READY heartbeat: this bitstream predates the link protocol '
+                          '(rebuild, or use --format text --baud 115200).', flush=True)
+            elif args.format == 'records':
+                for record in session.last_records:
+                    print(json.dumps(record.as_json()), flush=True)
+            elif args.format == 'raw':
                 sys.stdout.buffer.write(data)
                 sys.stdout.buffer.flush()
             elif args.format == 'hex':
@@ -135,6 +150,9 @@ def receive(config, args):
     finally:
         session.close()
         print('\nReceived {} bytes.'.format(session.rx_bytes), file=sys.stderr)
+        if session.started is not None:
+            for line in summarize(session.decoder.stats, time.monotonic() - session.started):
+                print(line, file=sys.stderr)
 
 
 def main(root=None):

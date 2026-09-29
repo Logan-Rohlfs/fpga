@@ -27,7 +27,7 @@ class TerminalTest(unittest.TestCase):
             uart_master, uart_slave = pty.openpty()
             for fd in (master, slave, uart_master, uart_slave):
                 self.addCleanup(os.close, fd)
-            (root / '.sdr/config.json').write_text(json.dumps({'port': os.ttyname(uart_slave)}))
+            (root / '.sdr/config.json').write_text(json.dumps({'port': os.ttyname(uart_slave), 'baud': 115200}))
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 120, 0, 0))
             environment = dict(os.environ, TERM='xterm-256color', LANG='en_US.UTF-8',
                                PYTHONPATH=str(Path(__file__).resolve().parents[1]))
@@ -72,6 +72,90 @@ class TerminalTest(unittest.TestCase):
                 if process.poll() is None:
                     process.terminate()
                     process.wait(timeout=5)
+
+
+@unittest.skipIf(os.name == 'nt', 'Uses Unix pseudo terminals')
+class LinkTerminalTest(unittest.TestCase):
+    """Decoded link data through the real CLI entry point and dashboard."""
+
+    def setUp(self):
+        import pty
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        (self.root / 'scripts').mkdir()
+        (self.root / 'scripts/build.tcl').write_text('# test checkout')
+        (self.root / '.sdr').mkdir()
+        self.uart_master, uart_slave = pty.openpty()
+        self.addCleanup(os.close, self.uart_master)
+        self.addCleanup(os.close, uart_slave)
+        (self.root / '.sdr/config.json').write_text(json.dumps({'port': os.ttyname(uart_slave), 'baud': 115200}))
+        self.environment = dict(os.environ, TERM='xterm-256color', LANG='en_US.UTF-8',
+                                PYTHONPATH=os.pathsep.join([str(Path(__file__).resolve().parents[1]),
+                                                            str(Path(__file__).resolve().parent)]))
+        from link_samples import sample_stream
+        self.stream = sample_stream()
+
+    def test_receive_prints_decoded_records_and_summary(self):
+        process = subprocess.Popen([sys.executable, '-m', 'sdr_cli.cli', '--repo', str(self.root), 'receive',
+                                    '--seconds', '1.5'], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   env=self.environment)
+        time.sleep(.5)
+        os.write(self.uart_master, self.stream)
+        out, err = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, err)
+        out, err = out.decode(), err.decode()
+        for expected in ('STATUS', 'BEST_TELEM', 'CHAN_FRAME   B crc=BAD', 'CHAN_METRICS A', 'LINK_STATS',
+                         'SPECTRUM', 'IQ_SNAPSHOT', 'APEX TEST seq=2', '[SIMULATED]'):
+            self.assertIn(expected, out)
+        self.assertIn('crc_err=0', err)
+        self.assertIn('SIMULATED (stand-in FPGA producers', err)
+
+    def test_dashboard_link_and_spectrum_views(self):
+        import fcntl
+        import pty
+        import termios
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 120, 0, 0))
+        process = subprocess.Popen([sys.executable, '-m', 'sdr_cli.cli', '--repo', str(self.root)],
+                                   stdin=slave, stdout=slave, stderr=slave, env=self.environment,
+                                   start_new_session=True)
+        output = bytearray()
+        def collect(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                if select.select([master], [], [], .025)[0]:
+                    try:
+                        output.extend(os.read(master, 65536))
+                    except OSError:
+                        break
+        try:
+            collect(.4)
+            os.write(self.uart_master, self.stream)
+            collect(.3)
+            os.write(master, b'v')
+            collect(.3)
+            link_view = len(output)
+            os.write(master, b'v')
+            collect(.3)
+            os.write(master, b'q')
+            collect(.3)
+            self.assertEqual(process.wait(timeout=5), 0, output[-3000:])
+            before = output[:link_view].decode(errors='replace')
+            after = output[link_view:].decode(errors='replace')
+            self.assertNotIn('Traceback', before + after)
+            # curses repaints only changed cells, so check distinctive tokens per view.
+            for expected in ('LINK · SIMULATED', 'CHANNEL A', 'CHANNEL B', 'BEST STREAM', 'Link protocol v1',
+                             'SIMULATED stand-in data'):
+                self.assertIn(expected, before)
+            for expected in ('SPECTRUM', 'WATERFALL A', 'CONSTELLATION B'):
+                self.assertIn(expected, after)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
 
 
 if __name__ == '__main__':

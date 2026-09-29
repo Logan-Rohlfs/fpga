@@ -1,8 +1,11 @@
 # Basys 3 FPGA projects
 
 A single repository for a Basys 3 SDR receiver and its development tools.
-**Current checkpoint: FPGA-to-host UART is working.** The SDR FPGA design emits
-`SDR READY\r\n` at 115200 baud; RF acquisition and demodulation are not implemented.
+**Current checkpoint: the host link layer works end to end.** The SDR FPGA
+design sends COBS-framed, CRC-checked messages of every type at 1 Mbaud: status,
+telemetry, per-channel metrics, spectrum, and I/Q. `./sdr` decodes and displays
+them. All of that content is **SIMULATED** by stand-in producers; RF acquisition
+and demodulation are not implemented. See the [module map](docs/sdr_pipeline.drawio).
 
 New agents: read [AGENTS.md](AGENTS.md), then [the handoff](docs/HANDOFF.md).
 
@@ -14,7 +17,7 @@ On the Mac, from this checkout:
 ./sdr                     # interactive dashboard; connects to UART
 ./sdr --help              # all inline commands
 ./sdr doctor              # check local tools and serial device selection
-./sdr receive --seconds 5 # observe the board without reprogramming it
+./sdr receive --seconds 5 # decoded link messages without reprogramming the board
 ```
 
 The current Mac already has a configured virtual environment and local connection
@@ -50,11 +53,13 @@ of 120 × 36 or larger is comfortable for the dashboard.
 | `projects/sdr/rtl/` | SDR top module and reusable hardware blocks |
 | `projects/sdr/sim/` | Self-checking SystemVerilog testbenches |
 | `projects/sdr/constraints/` | Basys 3 pins and clock constraints |
-| `projects/sdr/host/` | Standalone heartbeat checker; retained as a diagnostic |
+| `projects/sdr/host/` | Standalone hardware link checker (`check_link.py`) |
 | `tools/sdr_cli/` | Shared host operations, UART transport, CLI, and dashboard |
 | `tools/tests/` | Host unit and pseudo-terminal integration tests |
 | `scripts/build.tcl` | Vivado synthesis, implementation, reports, and bitstream generation |
 | `docs/HANDOFF.md` | Verified state, outstanding decisions, and next-agent context |
+| `docs/sdr_pipeline.drawio` | Planned FPGA module map (open with draw.io) |
+| `docs/superpowers/` | Design specs and implementation plans |
 | `build/` | Ignored generated simulations, bitstreams, manifests, and reports |
 | `.sdr/` | Ignored local configuration, recordings, and operation logs |
 

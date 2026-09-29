@@ -17,7 +17,7 @@ class ToolError(Exception):
     pass
 
 
-DEFAULTS = dict(project="sdr", port="auto", baud=115200, host="", user="",
+DEFAULTS = dict(project="sdr", port="auto", baud=1000000, host="", user="",
                 identity="", remote_root="C:/sdr-builds",
                 vivado="C:/AMDDesignTools/2026.1/Vivado/bin/vivado.bat")
 

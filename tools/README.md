@@ -52,7 +52,9 @@ stored. If automatic UART selection is ambiguous, set `--port DEVICE` using
 ./sdr sim                          # run the SDR HDL testbenches locally
 ./sdr build                        # build current files on Windows and fetch results
 ./sdr program                      # temporary FPGA configuration; lost on power-off
-./sdr receive --seconds 5           # display UART text
+./sdr receive --seconds 5           # decoded link messages, then a per-type summary
+./sdr receive --format records      # decoded messages as JSON lines
+./sdr receive --format text         # undecoded UART bytes as ASCII
 ./sdr connect                       # alias for continuous receive
 ./sdr receive --format hex          # continuous hex display; Ctrl-C stops
 ./sdr receive --output capture.bin  # display and record exact bytes
@@ -64,24 +66,54 @@ stored. If automatic UART selection is ambiguous, set `--port DEVICE` using
 ./sdr program --bit path/to/file.bit
 ```
 
-`receive` also accepts `--port` and `--baud` overrides, as does `send`. Text mode
+`receive` also accepts `--port` and `--baud` overrides, as does `send`.
+
+**Decoded output.** The default `decoded` format prints one line per link message,
+with its seq and a `[SIMULATED]` mark when the FPGA flagged it as stand-in data.
+Every receive ends with a summary on stderr: counts and rates per type, CRC, COBS
+and length errors, seq gaps, and resync bytes. Bytes before the first delimiter
+are counted as resync, not errors.
+
+**Baud.** The default is 1 000 000. A local config that still says 115200 needs
+`./sdr setup --baud 1000000`. macOS pseudo-terminals reject nonstandard rates, so
+the tests use 115200 on fake ports.
+
+Text mode
 is an ASCII diagnostic view with terminal control bytes suppressed; use raw
 output or recording to preserve arbitrary binary data. JSON timestamps describe
 host arrival of chunks, not ADC sample times. Ctrl-C returns status 130; failed
 commands return nonzero. `flash` is an explicit persistent write, whereas
 `program` is the normal development command.
 
-The existing FPGA firmware only emits `SDR READY` at 115200 baud. Sending bytes
-does not yet control the receiver or produce an acknowledgement. RF strength,
-sample plots, tuning, packet decoding, and other DSP measurements need future
-FPGA modules and a versioned host protocol. They are not inferred from UART
-traffic. The text heartbeat is a diagnostic observation, not firmware discovery.
+The FPGA link is transmit-only. Sending bytes does not control the receiver or
+produce an acknowledgement.
+
+Every current metric, frame, spectrum and I/Q message comes from stand-in FPGA
+producers and is labelled SIMULATED. Real RF numbers arrive only when the
+receiver stages replace those producers. The protocol lives in
+`sdr_cli/protocol.py`, and APEX frames are parsed provisionally in
+`sdr_cli/apex.py`. An old bitstream that still prints `SDR READY` is reported as
+a legacy heartbeat; view it with `--format text --baud 115200`.
 
 ## Dashboard
 
 Use a UTF-8 terminal with at least 86 columns and 26 rows; 120 × 36 or larger
-shows more traffic and logs. It has device and build panels, text/hex receive
-history, actual UART byte-rate history, counters, and an event/build log.
+shows more traffic and logs. It has:
+
+- device and build panels, including the firmware protocol version and build ID
+  from STATUS;
+- a receive pane with three views;
+- UART byte-rate history plus link message counters and per-type rates;
+- an event/build log.
+
+Press `v` to cycle the receive pane through its views:
+
+- **RAW:** text/hex bytes.
+- **LINK:** a channel A/B table (RSSI, noise, SNR, Δf, sync quality, CRC
+  good/bad), the best stream, and recent channel frames.
+- **SPECTRUM:** per-channel ASCII waterfalls and constellations.
+
+Simulated data is marked in the pane title.
 
 | Key | Action |
 | --- | --- |
@@ -89,7 +121,8 @@ history, actual UART byte-rate history, counters, and an event/build log.
 | `s` / `b` / `p` | Simulate / build / program |
 | `F` | Persistent flash; type `FLASH` to confirm |
 | `r` | Start/stop a raw recording |
-| `x` | Toggle text/hex |
+| `v` | Cycle RAW / LINK / SPECTRUM views |
+| `x` | Toggle text/hex (RAW view) |
 | Space | Freeze display; receiving and recording continue |
 | Up / Down | Scroll receive history |
 | `:` | Enter a command |
@@ -139,9 +172,14 @@ PYTHONPATH=tools .venv/bin/python -m unittest discover -s tools/tests -v
 ./sdr sim
 ```
 
-The host tests cover real pseudo-terminal serial I/O, fragmented heartbeat
-recognition, binary TX and captures, a real curses terminal with resizing and
-command entry, bounded history, serial-port ambiguity,
+The host tests cover:
+
+- link protocol vectors: COBS, CRC, every message type, resync, and seq gaps;
+- decoded CLI output and the dashboard LINK/SPECTRUM views;
+- real pseudo-terminal serial I/O, fragmented legacy heartbeat recognition,
+  binary TX and captures;
+- a real curses terminal with resizing and command entry;
+- bounded history, serial-port ambiguity,
 snapshot exclusions, build failures, and stale-source rejection. FPGA simulations
 remain separate. The dashboard uses Python curses; installed Windows hosts also
 get `windows-curses`, but the primary supported setup is Mac host + Windows builder.

@@ -6,9 +6,10 @@
 2. `docs/HANDOFF.md` — checkpoint, verified behavior, and open decisions.
 3. `projects/sdr/README.md` for HDL work; `tools/README.md` for host-tool work.
 
-The user has intentionally stopped at working FPGA-to-host UART. This handoff is
-not a request to implement the remaining SDR pipeline. Follow the next user's
-chosen scope; do not silently select a demodulator, packet format, or RF settings.
+The current checkpoint is a working FPGA-to-host link layer carrying SIMULATED
+data (see `docs/sdr_pipeline.drawio` and the spec in `docs/superpowers/specs/`).
+The user is building the pipeline backwards from the UART toward the XADC. Follow
+the user's chosen next stage; do not silently select DSP constants or RF settings.
 
 ## Work within the existing structure
 
@@ -21,9 +22,11 @@ chosen scope; do not silently select a demodulator, packet format, or RF setting
 - `scripts/build.tcl` and `core.py:source_files` must agree on build inputs.
   They currently include only direct `.v`/`.sv` files and one project XDC.
   Add include files, nested RTL, ROM assets, or IP to both if a task needs them.
-- Preserve the tested UART diagnostic until an intentional replacement has
-  equivalent simulation and hardware verification. Do not label raw host writes
-  as successful FPGA commands: no command receiver/acknowledgement exists yet.
+- Keep the link wire format in `tools/sdr_cli/protocol.py` and the RTL in step.
+  `./sdr sim` cross-checks them. Stand-in producers must set `SYNTHETIC`, and
+  real stages clear it only for measured data.
+- Do not label raw host writes as successful FPGA commands: no command
+  receiver or acknowledgement exists yet.
 
 ## Local state and hardware
 

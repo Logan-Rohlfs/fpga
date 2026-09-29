@@ -9,6 +9,7 @@ import threading
 import time
 
 from .core import ToolError, bitstream, build, program, save_config, simulate
+from .protocol import CHANNELS, describe
 from .serial_io import Session, safe_text
 
 
@@ -17,6 +18,7 @@ HELP = [
     's  simulate RTL                    b  build current sources on Windows',
     'p  program volatile FPGA memory    F  persistent flash (confirmation)',
     'x  text / hex view                 SPACE  freeze / resume display',
+    'v  cycle RAW / LINK / SPECTRUM views of pane 03',
     ':  command entry                   ?  help       q  quit',
     '',
     'Commands: connect, disconnect, sim, build, program, flash, record, stop,',
@@ -24,8 +26,9 @@ HELP = [
     'Use quotes for text with spaces. Arrow up/down scroll the receive pane.',
     '',
     'Raw recordings: .sdr/captures/ with a companion metadata file.',
-    'The FPGA currently transmits SDR READY. It has no command receiver.',
-    'RF power, frequency offset, demodulation, and packets are not available.',
+    'The FPGA sends COBS-framed link messages at 1 Mbaud. Every current message',
+    'is SIMULATED by stand-in producers: no RF, XADC, or demodulation exists yet.',
+    'The FPGA has no command receiver.',
     'A host write counts bytes sent; it does not confirm FPGA acceptance.',
     '',
     'Builds include uncommitted RTL. No Git push is needed. Close other serial',
@@ -44,6 +47,7 @@ class Dashboard:
         self.busy = ''
         self.reconnect = False
         self.hex = False
+        self.view = 'raw'
         self.frozen = None
         self.scroll = 0
         self.rates = deque([0.0] * 90, maxlen=90)
@@ -55,7 +59,7 @@ class Dashboard:
         self.running = True
         self.operation_log = None
         self.log('Ready. Press c to connect, ? for help, or : for commands.')
-        self.log('RF processing unavailable. Showing actual UART traffic and build status.')
+        self.log('RF stages not implemented; decoded link data is SIMULATED. Press v for LINK view.')
 
     def log(self, message):
         self.events.append((time.strftime('%H:%M:%S'), safe_text(message)))
@@ -194,6 +198,8 @@ class Dashboard:
             self.hex = not self.hex
             self.frozen = None
             self.scroll = 0
+        elif key == 'v':
+            self.view = VIEWS[(VIEWS.index(self.view) + 1) % len(VIEWS)]
         elif key == ' ':
             self.frozen = None if self.frozen is not None else self.rx_lines()
         elif key == curses.KEY_UP:
@@ -255,9 +261,15 @@ class Dashboard:
         self.put(3, 2, '● ' + status, 1 if self.session.connected else 3, True)
         self.put(4, 2, self.session.port or self.config['port'], 0, width=left - 4)
         self.put(5, 2, '{} baud  ·  8N1  ·  USB UART'.format(self.config['baud']), 4)
-        firmware = 'Diagnostic heartbeat observed' if self.session.heartbeats else 'Firmware identity not confirmed'
+        link = self.session.link
+        if link.status:
+            firmware = 'Link protocol v{} · build 0x{:08x} · up {:.0f}s'.format(
+                link.status.fields['version'], link.status.fields['build_id'], link.status.fields['uptime_ms'] / 1000)
+        else:
+            firmware = 'Legacy diagnostic heartbeat observed' if self.session.heartbeats else 'Firmware identity not confirmed'
         self.put(6, 2, firmware, 4, width=left - 4)
-        self.put(7, 2, 'Receiver / RF metrics: not implemented', 3, width=left - 4)
+        self.put(7, 2, 'Receiver / RF metrics: ' + ('SIMULATED stand-in data' if link.synthetic else 'not implemented'),
+                 3, width=left - 4)
         spinner = '◐◓◑◒'[int(time.monotonic() * 5) % 4]
         self.put(3, left + 2, (spinner + ' ' + self.busy.upper()) if self.busy else '● IDLE', 3 if self.busy else 1, True)
         self.put(4, left + 2, 'Build: ' + (self.config['host'] or 'run sdr setup'), 0, width=right - 4)
@@ -270,17 +282,27 @@ class Dashboard:
         self.put(7, left + 2, 'F persistent flash', 4)
         log_height = 7 if h < 34 else 9
         body_h = h - log_height - 12
-        self.box(9, 0, body_h, left, '03 / RECEIVE · ' + ('HEX' if self.hex else 'TEXT'), 1)
+        simulated = ' · SIMULATED' if link.synthetic else ''
+        if self.view == 'raw':
+            self.box(9, 0, body_h, left, '03 / RECEIVE · ' + ('HEX' if self.hex else 'TEXT'), 1)
+        else:
+            self.box(9, 0, body_h, left, '03 / ' + self.view.upper() + simulated, 1)
         self.box(9, left, body_h, right, '04 / TRAFFIC', 2)
-        lines = self.frozen if self.frozen is not None else self.rx_lines()
         visible = body_h - 3
-        end = max(0, len(lines) - self.scroll)
-        shown = lines[max(0, end - visible):end]
-        if not lines:
-            shown = ['Waiting for UART data…', '', 'c connect   x text/hex   r record']
-        for i, line in enumerate(shown[:visible]):
-            self.put(10 + i, 2, line, 0 if lines else 4, width=left - 4)
-        state = 'FROZEN (capture continues)' if self.frozen is not None else ('SCROLL -' + str(self.scroll) if self.scroll else 'LIVE')
+        if self.view == 'raw':
+            lines = self.frozen if self.frozen is not None else self.rx_lines()
+            end = max(0, len(lines) - self.scroll)
+            shown = lines[max(0, end - visible):end]
+            if not lines:
+                shown = ['Waiting for UART data…', '', 'c connect   x text/hex   v views   r record']
+            for i, line in enumerate(shown[:visible]):
+                self.put(10 + i, 2, line, 0 if lines else 4, width=left - 4)
+            state = 'FROZEN (capture continues)' if self.frozen is not None else ('SCROLL -' + str(self.scroll) if self.scroll else 'LIVE')
+        else:
+            rows = self.link_rows(left - 4) if self.view == 'link' else self.spectrum_rows(left - 4, visible)
+            for i, (line, color) in enumerate(rows[:visible]):
+                self.put(10 + i, 2, line, color, width=left - 4)
+            state = 'v next view'
         self.put(9 + body_h - 1, 3, ' ' + state + ' ', 3 if self.frozen is not None else 1)
         rate = self.rates[-1]
         self.put(10, left + 2, '{:,.0f} B/s RX'.format(rate), 1, True, right - 4)
@@ -290,24 +312,31 @@ class Dashboard:
         graph = ''.join(bars[min(7, int(v / peak * 7))] if v else '▁' for v in values)
         self.put(11, left + 2, graph, 1, width=right - 4)
         self.put(12, left + 2, '1s/bin · peak {:,.0f} B/s'.format(peak if peak > 1 else max(values)), 4, width=right - 4)
-        stats = ['RX {:,} B    TX {:,} B'.format(self.session.rx_bytes, self.session.tx_bytes),
-                 'Heartbeats: {:,}'.format(self.session.heartbeats),
-                 'Capture: ' + ('REC {:,} B'.format(self.session.capture_bytes) if self.session.capture_file else 'off')]
-        for i, line in enumerate(stats):
+        d = self.session.decoder.stats
+        errors = d['crc_errors'] + d['cobs_errors'] + d['length_errors']
+        stats = [('RX {:,} B    TX {:,} B'.format(self.session.rx_bytes, self.session.tx_bytes), 4),
+                 ('Capture: ' + ('REC {:,} B'.format(self.session.capture_bytes) if self.session.capture_file else 'off'),
+                  3 if self.session.capture_file else 4),
+                 ('Link msgs {:,}  err {}  gaps {}'.format(d['messages'], errors, d['seq_gaps']),
+                  3 if errors or d['seq_gaps'] else 1)]
+        rates = sorted(link.rates().items())
+        stats += [('  '.join('{} {:.1f}/s'.format(n.replace('_', ' ').title().replace(' ', ''), v)
+                             for n, v in rates[i:i + 2]), 4) for i in range(0, len(rates), 2)]
+        for i, (line, color) in enumerate(stats):
             if 14 + i < 9 + body_h - 1:
-                self.put(14 + i, left + 2, line, 3 if i == 2 and self.session.capture_file else 4, width=right - 4)
+                self.put(14 + i, left + 2, line, color, width=right - 4)
         log_y = 9 + body_h
         self.box(log_y, 0, log_height, w - 1, '05 / EVENTS & BUILD OUTPUT', 2)
         for i, (stamp, message) in enumerate(list(self.events)[-(log_height - 2):]):
             self.put(log_y + 1 + i, 2, stamp, 4)
             self.put(log_y + 1 + i, 11, message, 3 if 'failed' in message.lower() or 'error' in message.lower() else 0, width=w - 15)
-        self.put(h - 3, 1, 'c connect  s sim  b build  p program  r record  x hex  SPACE freeze  : command  ? help  q quit', 2, width=w - 3)
+        self.put(h - 3, 1, 'c connect  s sim  b build  p program  r record  v view  x hex  SPACE freeze  : command  ? help  q quit', 2, width=w - 3)
         if self.input is not None:
             prompt = 'Write persistent flash? Type FLASH: ' if self.confirm else ': '
             value = prompt + self.input
             self.put(h - 2, 1, value[-(w - 4):], 3 if self.confirm else 1, True)
         else:
-            self.put(h - 2, 1, '2-GFSK telemetry  ·  host tools online  ·  RF pipeline pending', 4)
+            self.put(h - 2, 1, '2-GFSK telemetry  ·  link protocol v1  ·  RF pipeline pending (data SIMULATED)', 4)
         if self.help:
             width = min(w - 6, 82)
             height = len(HELP) + 2
@@ -318,6 +347,59 @@ class Dashboard:
             for i, line in enumerate(HELP):
                 self.put(top + 1 + i, x + 2, line, 0, width=width - 4)
         self.screen.refresh()
+
+    def link_rows(self, width):
+        link = self.session.link
+        if not self.session.decoder.stats['messages']:
+            return [('No link messages decoded yet.', 4), ('', 0),
+                    ('Expecting COBS frames at {} baud. An older bitstream sends SDR READY'.format(self.config['baud']), 4),
+                    ('at 115200 instead: rebuild/program, or view RAW text.', 4)]
+        col = max(10, (width - 14) // 2)
+        latest = {}
+        for frame in reversed(link.frames):
+            latest.setdefault(frame.fields['channel'], frame)
+        def cell(ch, fmt, key, source=None):
+            record = (source or link.metrics).get(ch)
+            return fmt.format(record.fields[key]) if record else '—'
+        rows = [('{:<14}{:>{c}}{:>{c}}'.format('', 'CHANNEL A', 'CHANNEL B', c=col), 1)]
+        for label, fmt, key, source in [('RSSI dBm', '{:.1f}', 'rssi_dbm', None), ('Noise dBm', '{:.1f}', 'noise_dbm', None),
+                                        ('SNR dB', '{:.1f}', 'snr_db', None), ('Freq off Hz', '{:+d}', 'freq_offset_hz', None),
+                                        ('Sync quality', '{:.2f}', 'quality', latest), ('CRC good', '{:,}', 'crc_good', None),
+                                        ('CRC bad', '{:,}', 'crc_bad', None), ('Sync hits', '{:,}', 'sync_hits', None)]:
+            rows.append(('{:<14}{:>{c}}{:>{c}}'.format(label, cell('A', fmt, key, source), cell('B', fmt, key, source), c=col), 0))
+        rows.append(('', 0))
+        if link.link_stats:
+            f = link.link_stats.fields
+            rows.append(('BEST STREAM  from A {:,} · from B {:,} · both ok {:,} · neither {:,}'.format(
+                f['from_a'], f['from_b'], f['both_ok'], f['neither_ok']), 1))
+        else:
+            rows.append(('BEST STREAM', 1))
+        rows += [(describe(r), 0) for r in list(link.best)[-3:]]
+        rows.append(('RECENT CHANNEL FRAMES', 1))
+        rows += [(describe(r), 3 if not r.fields['crc_ok'] else 4) for r in list(link.frames)[-6:]]
+        return rows
+
+    def spectrum_rows(self, width, height):
+        link = self.session.link
+        half = max(4, (width - 3) // 2)
+        wf_height = max(1, (height - 2) // 2)
+        rows = [('{:<{w}} │ {}'.format('WATERFALL A ↑new', 'WATERFALL B ↑new', w=half), 1)]
+        history = {ch: list(link.spectrum.get(ch, []))[::-1] for ch in CHANNELS}
+        for n in range(wf_height):
+            a, b = [shade_row(history[ch][n].fields['power'], half) if n < len(history[ch]) else ''
+                    for ch in CHANNELS]
+            rows.append(('{:<{w}} │ {}'.format(a, b, w=half), 0))
+        iq_height = max(3, height - wf_height - 2)
+        snaps = [link.iq.get(ch) for ch in CHANNELS]
+        points = [p for s in snaps if s for p in s.fields['iq']]
+        scale = max([1] + [max(abs(i), abs(q)) for i, q in points])
+        rows.append(('{:<{w}} │ {}'.format('CONSTELLATION A', 'CONSTELLATION B', w=half), 1))
+        # Terminal cells are about twice as tall as wide: keep the plot roughly square.
+        plot_w = min(half, 2 * iq_height + 1)
+        pad = ' ' * ((half - plot_w) // 2)
+        grids = [constellation(s.fields['iq'] if s else [], plot_w, iq_height, scale) for s in snaps]
+        rows += [('{:<{w}} │ {}'.format(pad + grids[0][n], pad + grids[1][n], w=half), 2) for n in range(iq_height)]
+        return rows
 
     def loop(self):
         self.screen.nodelay(True)
@@ -379,6 +461,37 @@ class Dashboard:
                 time.sleep(.05)
         finally:
             self.session.close()
+
+
+VIEWS = ('raw', 'link', 'spectrum')
+SHADES = ' .:-=+*#%@'
+
+
+def shade_row(power, width):
+    """Downsample spectrum bins to width characters, keeping each segment's peak."""
+    if not power or width <= 0:
+        return ''
+    n = len(power)
+    out = []
+    for c in range(width):
+        a = c * n // width
+        b = max(a + 1, (c + 1) * n // width)
+        out.append(SHADES[min(len(SHADES) - 1, max(power[a:b]) * len(SHADES) // 256)])
+    return ''.join(out)
+
+
+def constellation(iq, width, height, scale):
+    grid = [[' '] * width for _ in range(height)]
+    cx, cy = (width - 1) / 2, (height - 1) / 2
+    for x in range(width):
+        grid[int(round(cy))][x] = '·'
+    for y in range(height):
+        grid[y][int(round(cx))] = '·'
+    for i, q in iq:
+        x = int(round(cx + i / scale * cx))
+        y = int(round(cy - q / scale * cy))
+        grid[min(height - 1, max(0, y))][min(width - 1, max(0, x))] = 'o'
+    return [''.join(row) for row in grid]
 
 
 def launch(root, config):

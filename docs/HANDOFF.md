@@ -1,49 +1,70 @@
 # SDR handoff
 
-Checkpoint recorded 2026-09-29. Feature work deliberately stops here: **UART output
-from the Basys 3 to the Mac is verified.** The user will choose the next component.
+Checkpoint recorded 2026-09-29 (second session). **The host link layer is working
+on hardware.** The FPGA sends every message type at 1 Mbaud, and the `sdr` CLI and
+dashboard decode and display them.
+
+All message content is **SIMULATED** by stand-in producers. The user is building
+the pipeline backwards from the UART toward the XADC. The planned stages are in
+[`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio); the next one on that map is the
+source combiner.
 
 ## What exists
 
-- `blink`: LED0 changes state every 0.5 seconds, with a simulation testbench.
-- `uart_tx.sv`: reusable 115200-baud, 8N1, LSB-first transmitter with byte
-  `valid`/`ready` flow control and active-high reset.
-- `sdr_top.sv`: temporary diagnostic transmitting the 11 bytes `SDR READY\r\n`
-  about once a second; LED0 toggles after each message. The center button resets it.
-- `sdr`: one host entry point for setup, diagnostics, simulations, Windows builds,
-  local programming, raw serial TX/RX, recordings, and a btop-inspired dashboard.
-- Remote builds snapshot current sources into a unique Windows directory and fetch
-  a completed artifact bundle. Source and bitstream hashes protect default
-  programming against stale sources or a changed bitstream.
+- **`blink`:** LED0 changes state every 0.5 seconds, with a simulation testbench.
+- **`uart_tx.sv`:** a reusable 8N1, LSB-first transmitter, now run at 1 Mbaud
+  (100 clocks per bit).
+- **Link layer RTL:**
+  - `crc16_ccitt.sv`, `cobs_encoder.sv`;
+  - `link_tx.sv`, a fixed-priority framer;
+  - `link_msg_port.sv`, the producer port;
+  - `link_test_sources.sv`, 11 stand-in producers for all seven message types.
+- **Wire format:** specified in
+  [the link design](superpowers/specs/2026-09-29-host-link-layer-design.md) and
+  summarized in [the SDR README](../projects/sdr/README.md).
+- **`sdr_top.sv`:** the producers feed the link, LED0 toggles on each STATUS, and
+  the synchronized btnC plus a power-on reset reset the design.
+- **Host:**
+  - `sdr_cli/protocol.py`: COBS, CRC, parsers, `StreamDecoder`, `LinkState`;
+  - `sdr_cli/apex.py`: provisional APEX TEST/FLIGHT/HK frame parser, mirroring
+    `~/git/apex` `fsw/src/radio.cpp`;
+  - `sdr receive --format decoded|records` with a per-type summary;
+  - dashboard LINK and SPECTRUM views (key `v`);
+  - `projects/sdr/host/check_link.py`, which replaced `check_heartbeat.py`.
+- **Remote builds:** each build snapshots the current sources, and hashes protect
+  programming against stale sources.
 
-There is **no FPGA UART RX/command decoder**, no XADC acquisition, no RF/DSP chain,
-no packet protocol, and no GUI. `sdr send` writes bytes to the host serial transport;
-it does not prove the FPGA received or acted on them. Dashboard traffic statistics
-are UART bytes, not ADC samples, RF power, or demodulation results.
+Not implemented:
 
-## Verified baseline
+- the XADC, sample conditioning, DDC, filtering, discriminator, symbol timing,
+  frame sync, source combiner, FFT, and constellation capture. Every stage in the
+  map is a stand-in;
+- a UART RX/command path (`sdr send` bytes are not acted on);
+- the GUI;
+- a real `BUILD_ID` (the parameter defaults to 0; build.tcl does not set it).
 
-The previous implementation session verified:
+## Verified in this session
 
 | Check | Result |
 | --- | --- |
-| Host regression suite | 16 tests passed, including real pseudo-terminals and curses resize/command entry |
-| SDR RTL simulation | UART byte frames/reset and two complete top-level diagnostic messages passed |
-| Remote Vivado build | Build and artifact download succeeded; timing report says all user constraints met |
-| Local SRAM programming | `sdr program` loaded the fetched bitstream through openFPGALoader |
-| Actual UART output | `sdr receive --seconds 3` received three complete diagnostic lines (33 bytes) |
-| Live dashboard | Connection, text/hex, recording, simulation, resize, command entry, and exit exercised |
+| Host regression suite | 33 tests passed: protocol, decoded CLI, dashboard LINK/SPECTRUM views in a real PTY, plus the earlier tests |
+| RTL simulation (`./sdr sim`) | uart_tx, CRC, COBS (10 golden vectors), link_tx and the full top passed. The top-level test produced 75 messages of all types; the host decoded its capture with 0 errors |
+| Remote Vivado build | Bundle `build/sdr/artifacts/20260929-152924-1411d343/`. WNS +0.603 ns, WHS +0.108 ns; DRC shows only the CFGBVS/CONFIG_VOLTAGE warning; 7.8% LUTs, 4.4% FFs, no BRAM |
+| SRAM programming | `sdr program` succeeded (not flash) |
+| Hardware decode | `sdr receive --baud 1000000 --seconds 6`: 671 messages at the designed rates (STATUS 1/s, CHAN_FRAME 40/s, SPECTRUM 20/s, …); 0 CRC/COBS/length errors, 0 seq gaps, 0 producer drops |
+| Hardware checker | `check_link.py`: passed 9 of 10 runs (10–20 s each, over 11,000 messages clean). The one failing run coincided with the user opening the dashboard on the same port, and it could not be reproduced. Soak captures are in `.sdr/captures/check_link-*.bin` |
 
-The implementation checkpoint is commit `82ce6fc` (host workbench), following
-`4df8ff3` (UART RTL/diagnostic). These are historical results, not an assertion that
-the board or Windows host is currently connected. Persistent flash was not exercised
-as part of this workbench verification.
+Findings from this session:
 
-On the existing Mac, the verified bundle was
-`build/sdr/artifacts/20260929-141419-ab63dc16/`, with bitstream, timing/utilization/DRC
-reports, and `manifest.json`. `build/sdr/latest` selects the current bundle. These
-files are intentionally not in Git; a new checkout must build them. Recordings and
-local operation logs are under `.sdr/`. Preserve them during ordinary cleanup.
+- **Timing:** the first build missed timing by 6.3 ns, because producer byte logic
+  was combinationally chained through `link_tx` into the COBS buffer write enable.
+  `link_msg_port` now registers payload bytes with a settle `LATENCY`. The
+  remaining critical path is inside the fake I/Q generator.
+- **Local baud:** hardware checks used `--baud 1000000`. The user then set the
+  local config to 1 000 000.
+
+The previous checkpoint (commit `82ce6fc`, a 115200 `SDR READY` diagnostic) is
+superseded; its bundle `20260929-141419-ab63dc16` is retained locally.
 
 ## Environment and recovery
 
@@ -103,12 +124,15 @@ Before fixing DSP constants or packet behavior, establish:
   input bias/range, and the resulting digital sample representation.
 - DSP sample rates, word widths, rounding/saturation, filtering requirements,
   expected frequency offset, and test-vector/reference-model conventions.
-- Host framing/versioning, command acknowledgement, telemetry vs. sample output,
-  and required throughput. Current 115200 8N1 has a theoretical payload ceiling
-  of 11,520 bytes/s before higher-level framing; do not promise continuous raw
-  XADC streaming over it.
+- Host commands: whether and when to add UART RX, command acknowledgement,
+  NCO tuning, and stream enables. The link is currently TX-only, at roughly 11% of
+  its 100 kB/s capacity; raw continuous XADC streaming would not fit.
+- The defined APEX telemetry format. `sdr_cli/apex.py` mirrors the current
+  firmware provisionally. Note that FLIGHT is 41 bytes, not the 38 in the APEX
+  radio doc.
 
-A future task could extend the host protocol/UART RX or begin sample-input/DDC
-work with synthetic vectors. Neither is implicitly selected by this handoff.
+The next stage upstream on the module map is the source combiner, followed by
+frame sync + CRC. When a real stage lands, it replaces its stand-in producer,
+keeps the message layout, and stops setting `SYNTHETIC`.
 Choose the bounded component with the user, specify its interfaces, and add
 meaningful self-checking tests before integrating it into the board top module.

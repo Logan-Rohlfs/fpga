@@ -107,7 +107,8 @@ class SerialTest(unittest.TestCase):
         self.master, self.slave = pty.openpty()
         self.addCleanup(os.close, self.master)
         self.addCleanup(os.close, self.slave)
-        self.session = Session(dict(core.DEFAULTS, port=os.ttyname(self.slave)))
+        # macOS pseudo-terminals reject nonstandard rates such as the 1 Mbaud default.
+        self.session = Session(dict(core.DEFAULTS, port=os.ttyname(self.slave), baud=115200))
         self.session.connect()
         self.addCleanup(self.session.close)
 
@@ -140,6 +141,23 @@ class SerialTest(unittest.TestCase):
         self.session.send(b'\xaa\x00\xff')
         self.assertEqual(os.read(self.master, 3), b'\xaa\x00\xff')
         self.assertEqual(self.session.tx_bytes, 3)
+
+    def test_session_decodes_link_messages(self):
+        from link_samples import sample_stream
+        data = sample_stream()
+        for offset in range(0, len(data), 97):   # arbitrary fragmentation
+            os.write(self.master, data[offset:offset + 97])
+            self.read_until(len(data[offset:offset + 97]))
+        stats = self.session.decoder.stats
+        self.assertEqual(stats['messages'], len(self.session.records))
+        self.assertEqual(stats['crc_errors'] + stats['cobs_errors'] + stats['seq_gaps'], 0)
+        self.assertEqual(set(stats['by_type']), {'STATUS', 'BEST_TELEM', 'CHAN_FRAME', 'CHAN_METRICS',
+                                                 'LINK_STATS', 'SPECTRUM', 'IQ_SNAPSHOT'})
+        link = self.session.link
+        self.assertTrue(link.synthetic)
+        self.assertEqual(link.status.fields['build_id'], 0x1234)
+        self.assertEqual(len(link.spectrum['B']), 4)
+        self.assertEqual(sorted(link.metrics), ['A', 'B'])
 
     def test_binary_stream_has_bounded_display_buffer(self):
         for _ in range(10):
