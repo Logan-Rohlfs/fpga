@@ -18,6 +18,18 @@
       "type": "shell",
       "command": "make program PROJECT=blink",
       "problemMatcher": []
+    },
+    {
+      "label": "SDR: simulate",
+      "type": "shell",
+      "command": "make sim PROJECT=sdr",
+      "problemMatcher": []
+    },
+    {
+      "label": "SDR: program board",
+      "type": "shell",
+      "command": "make program PROJECT=sdr",
+      "problemMatcher": []
     }
   ]
 }

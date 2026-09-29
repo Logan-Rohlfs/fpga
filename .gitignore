@@ -11,4 +11,4 @@ build/
 *.srcs/
 *.xpr
 .DS_Store
-
+.venv/

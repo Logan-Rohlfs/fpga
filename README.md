@@ -5,7 +5,7 @@ One Git repository with independent projects for the Digilent Basys 3 (Artix-7 X
 ## Projects
 
 - `projects/blink`: a working first design. LED 0 changes state every 0.5 seconds using the board's 100 MHz clock.
-- `projects/sdr`: starter structure for the real project. Add a top-level RTL file and matching pin constraints when its interfaces are known.
+- `projects/sdr`: the SDR receiver. Its first reusable block is the host-facing UART transmitter, with a board diagnostic that sends `SDR READY` once per second. See `projects/sdr/README.md` for tests and hardware instructions.
 
 ## Mac setup
 
@@ -15,7 +15,7 @@ VS Code is the editor. Install Icarus Verilog for simulation and openFPGALoader 
 brew install icarus-verilog openfpgaloader
 ```
 
-VS Code will recommend the Verilog-HDL extension, WaveTrace waveform viewer, and Makefile Tools. They are optional conveniences; the terminal commands work without them. A Python virtual environment and `pyserial` are useful later, once the SDR has a UART protocol; there is no UART design yet.
+VS Code will recommend the Verilog-HDL extension, WaveTrace waveform viewer, and Makefile Tools. They are optional conveniences; the terminal commands work without them. The SDR hardware diagnostic uses a small Python client with `pyserial`; its setup is in `projects/sdr/README.md`.
 
 Open the repository with `code ~/git/fpga`. The workspace enables Icarus linting and provides VS Code tasks for simulation, Vivado building, and board programming. The latter two tasks require Vivado or a connected board, respectively.
 
@@ -47,15 +47,9 @@ make program PROJECT=blink
 
 This configures the FPGA until it is powered off. Run `make flash PROJECT=blink` only when you want the design saved to onboard flash. The board's programming jumper must match the desired startup mode; JTAG programming itself works while the board is powered.
 
-## Adding the SDR design
+## SDR development
 
-Create `projects/sdr/rtl/sdr_top.sv`, add its pins to `projects/sdr/constraints/basys3.xdc`, then build with:
-
-```powershell
-vivado -mode batch -source scripts/build.tcl -tclargs sdr
-```
-
-Put module tests in `projects/sdr/sim/`. In the future, add a UART protocol and Python host client under `projects/sdr/host/` for automated hardware feedback.
+Run `make sim PROJECT=sdr` on the Mac. The SDR project's README explains the Windows Vivado build, Mac programming, and UART hardware test. The RF processing modules will be connected after their input parameters and packet format are known.
 
 ## Sources
 
