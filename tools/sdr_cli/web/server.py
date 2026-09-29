@@ -5,6 +5,7 @@ toolkit-free modules (hub, roles, freqplan, sources); this file is glue.
 """
 import asyncio
 import json
+import logging
 from pathlib import Path
 import socket
 import uuid
@@ -169,7 +170,11 @@ class GuiServer:
                 if not isinstance(data, dict):
                     client.put(error('bad_json', 'Message must be a JSON object.'))
                     continue
-                await self.handle(client, data)
+                try:
+                    await self.handle(client, data)
+                except Exception:
+                    logging.getLogger(__name__).exception('GUI message handler failed')
+                    client.put(error('bad_request', 'The server could not handle that message.'))
         finally:
             sender.cancel()
             self.clients.pop(client.id, None)

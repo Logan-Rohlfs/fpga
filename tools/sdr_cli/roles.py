@@ -86,7 +86,7 @@ class RoleManager:
         """Rebind a dropped Admin to a new connection that presents its token."""
         self.expire()
         if (self.admin and self.admin['client'] is None and token
-                and hmac.compare_digest(self.admin['token'], str(token))):
+                and hmac.compare_digest(self.admin['token'].encode(), str(token).encode('utf-8', 'surrogatepass'))):
             self.admin['client'] = client
             self.admin['dropped_at'] = None
             return True

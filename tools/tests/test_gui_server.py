@@ -130,3 +130,13 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         await ws.send_json(dict(type='ping'))
         await self.recv(ws, self.of('pong'))
         await ws.close()
+
+    async def test_handler_errors_do_not_drop_the_socket(self):
+        ws, _ = await self.connect()
+        with self.assertLogs('sdr_cli.web.server', level='ERROR'):
+            self.server.roles.resume = lambda client, token: (_ for _ in ()).throw(RuntimeError('test'))
+            await ws.send_json(dict(type='resume', token='test'))
+            self.assertEqual((await self.recv(ws, self.of('error')))['code'], 'bad_request')
+            await ws.send_json(dict(type='ping'))
+            await self.recv(ws, self.of('pong'))
+        await ws.close()

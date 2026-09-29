@@ -90,3 +90,10 @@ class RoleTest(unittest.TestCase):
         self.assertTrue(roles.can_login('here'))
         self.assertEqual(roles.login('lan', '', 'x')['code'], 'no_password')
         self.assertTrue(roles.login('here', '', 'x')['ok'])
+
+    def test_resume_rejects_non_ascii_token(self):
+        token = self.roles.login('a', 'pw', 'gs')['token']
+        self.roles.disconnect('a')
+        self.roles.connect('a2', local=False)
+        self.assertFalse(self.roles.resume('a2', 'é'))
+        self.assertTrue(self.roles.resume('a2', token))
