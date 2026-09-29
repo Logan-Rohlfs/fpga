@@ -1,11 +1,14 @@
 """Decode one byte source and fan the results out to GUI clients (no web imports)."""
 import asyncio
 from collections import deque
+import logging
 import time
 
 from .core import ToolError
 from .display import WaterfallScale
 from .protocol import CHANNELS, SPECTRUM, LinkState, StreamDecoder, bin_frequency, format_record, power_db
+
+logger = logging.getLogger(__name__)
 
 
 class Hub:
@@ -26,7 +29,10 @@ class Hub:
 
     def publish(self, msg):
         for fn in list(self.subscribers):
-            fn(msg)
+            try:
+                fn(msg)
+            except Exception:
+                logger.exception('GUI subscriber failed')
 
     def feed(self, data):
         self.arrivals.append((self.clock(), len(data)))

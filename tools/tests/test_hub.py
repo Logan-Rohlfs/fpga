@@ -54,6 +54,15 @@ class HubTest(unittest.TestCase):
         now[0] += 6
         self.assertEqual(hub.byte_rate(), 0.0)
 
+    def test_isolates_subscribers_from_failures(self):
+        hub = Hub()
+        seen = []
+        hub.subscribe(lambda msg: (_ for _ in ()).throw(OSError('subscriber failure')))
+        hub.subscribe(seen.append)
+        with self.assertLogs('sdr_cli.hub', level='ERROR'):
+            messages = hub.feed(sample_stream())
+        self.assertEqual(len(seen), len(messages))
+
 
 class Once:
     kind, responds_to_tuning, detail = 'replay', False, 'sample.bin'
