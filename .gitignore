@@ -12,3 +12,8 @@ build/
 *.xpr
 .DS_Store
 .venv/
+.sdr/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/

@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Run from a checkout, using its virtual environment when available."""
+import os
+from pathlib import Path
+import sys
+
+root = Path(__file__).resolve().parent
+python = root / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+if python.exists() and Path(sys.prefix).resolve() != python.parent.parent.resolve():
+    os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
+sys.path.insert(0, str(root / 'tools'))
+from sdr_cli.cli import main
+raise SystemExit(main(root=root))

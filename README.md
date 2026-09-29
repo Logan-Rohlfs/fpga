@@ -2,6 +2,12 @@
 
 One Git repository with independent projects for the Digilent Basys 3 (Artix-7 XC7A35T-1CPG236C).
 
+## SDR terminal workbench
+
+Run `./sdr` to open the btop-inspired dashboard, or use `./sdr --help` for inline
+build, programming, serial, and recording commands. See [the tool guide](tools/README.md)
+for installation, configuration, keyboard controls, and testing.
+
 ## Projects
 
 - `projects/blink`: a working first design. LED 0 changes state every 0.5 seconds using the board's 100 MHz clock.
