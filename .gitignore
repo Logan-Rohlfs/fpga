@@ -1,0 +1,14 @@
+build/
+*.jou
+*.log
+*.str
+*.wdb
+.Xil/
+*.cache/
+*.hw/
+*.runs/
+*.sim/
+*.srcs/
+*.xpr
+.DS_Store
+

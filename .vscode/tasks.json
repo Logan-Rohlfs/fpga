@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Blink: simulate",
+      "type": "shell",
+      "command": "make sim PROJECT=blink",
+      "problemMatcher": []
+    },
+    {
+      "label": "Blink: build bitstream (Vivado)",
+      "type": "shell",
+      "command": "vivado -mode batch -source scripts/build.tcl -tclargs blink",
+      "problemMatcher": []
+    },
+    {
+      "label": "Blink: program board",
+      "type": "shell",
+      "command": "make program PROJECT=blink",
+      "problemMatcher": []
+    }
+  ]
+}

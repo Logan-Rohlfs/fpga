@@ -1,0 +1,5 @@
+{
+  "verilog.linting.linter": "iverilog",
+  "verilog.linting.iverilog.systemVerilog.standard": "SystemVerilog2012"
+}
+
