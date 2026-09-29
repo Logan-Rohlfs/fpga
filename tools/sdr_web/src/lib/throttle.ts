@@ -1,5 +1,5 @@
 /** Merge partial updates and send at most one per interval (drag → `tune`). */
-export function createCoalescer<T extends object>(send: (merged: T) => void, intervalMs = 33) {
+export function createCoalescer<T extends object>(send: (merged: T) => void, intervalMs = 34) {
   let pending: T | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let last = -Infinity;
@@ -19,6 +19,10 @@ export function createCoalescer<T extends object>(send: (merged: T) => void, int
       const wait = last + intervalMs - Date.now();
       if (wait <= 0) flush();
       else timer = setTimeout(flush, wait);
+    },
+    cancel() {
+      if (timer) clearTimeout(timer);
+      timer = null; pending = null; last = -Infinity;
     },
     flush,
   };

@@ -18,7 +18,7 @@ On the Mac, from this checkout:
 ./sdr --help              # all inline commands
 ./sdr doctor              # check local tools and serial device selection
 ./sdr receive --seconds 5 # decoded link messages without reprogramming the board
-./sdr gui --source sim    # web GUI (in progress; see tools/README.md)
+./sdr gui --source sim    # Space Raiders web GUI; no board needed
 ```
 
 The current Mac already has a configured virtual environment and local connection

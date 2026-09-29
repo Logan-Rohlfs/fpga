@@ -8,8 +8,7 @@
 
 The current checkpoint is a working FPGA-to-host link layer carrying SIMULATED
 data (see `docs/sdr_pipeline.drawio` and the spec in `docs/superpowers/specs/`).
-The current task is the Space Raiders SDR web GUI, which is partway through
-implementation. See "GUI implementation status" in the handoff and the plan in
+The Space Raiders SDR web GUI v1 is implemented, with Tune and Telemetry pages. See "GUI implementation status" in the handoff and the plan in
 `docs/superpowers/plans/`. The DSP stages follow later. Follow the user's chosen
 scope. Do not silently select DSP constants or RF settings, and do not add GUI
 dependencies beyond the spec's list (aiohttp in the `gui` extra; the frontend

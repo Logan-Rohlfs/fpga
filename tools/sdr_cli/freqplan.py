@@ -12,6 +12,7 @@ from pathlib import Path
 
 OUT_DIVS = (1, 2, 4, 8, 16, 32, 64)
 INJECTIONS = ('low', 'high')
+MAX_SAFE_NUMBER = 2 ** 53 - 1  # JSON clients must retain whole-Hz precision.
 _INTEGERS = ('r_div', 'n_int', 'frac', 'mod', 'out_div')
 
 
@@ -79,6 +80,8 @@ def nco_resolution_hz(s):
 def with_lo(s, target_lo_hz):
     """Nearest synthesizer setting to target_lo_hz; only N and FRAC change."""
     ratio = target_lo_hz * s.out_div / pfd_hz(s)
+    if not math.isfinite(ratio):
+        raise ValueError("LO exceeds numeric range")
     n = int(math.floor(ratio))
     frac = int(round((ratio - n) * s.mod))
     if frac >= s.mod:
@@ -107,6 +110,14 @@ def validate(s):
         problems.append('NCO must be between 0 and half the sample rate')
     if problems:
         raise ValueError('; '.join(problems))
+    try:
+        derived = derive(s)
+        if any(not math.isfinite(v) or abs(v) > MAX_SAFE_NUMBER for k, v in derived.items() if k != 'warnings'):
+            raise ValueError('Derived frequencies exceed numeric range')
+        if pfd_hz(s) <= 0 or lo_step_hz(s) <= 0:
+            raise ValueError('Reference frequency is too small')
+    except (OverflowError, ZeroDivisionError):
+        raise ValueError('Tuning exceeds numeric range')
     return s
 
 
@@ -137,7 +148,7 @@ def _number(key, value, integer):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError('{} must be a number'.format(key))
     try:
-        if not math.isfinite(value):
+        if not math.isfinite(value) or abs(value) > MAX_SAFE_NUMBER:
             raise ValueError('{} must be a number'.format(key))
     except OverflowError:
         raise ValueError('{} must be a number'.format(key))

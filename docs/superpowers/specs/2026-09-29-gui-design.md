@@ -1,6 +1,6 @@
 # SDR web GUI design
 
-Status: draft for review, 2026-09-29. Scope: the first version of the graphical
+Status: v1 implemented, 2026-09-29; see [handoff](../../HANDOFF.md) for verification and remaining checks. Scope: the first version of the graphical
 SDR workbench. It builds on the [host link layer](2026-09-29-host-link-layer-design.md).
 The approved visual mockup is the reference for layout and interaction.
 

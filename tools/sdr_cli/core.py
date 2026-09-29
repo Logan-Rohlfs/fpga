@@ -67,7 +67,11 @@ def save_config(root, config):
     folder = root / '.sdr'
     folder.mkdir(exist_ok=True)
     temporary = folder / 'config.tmp'
-    temporary.write_text(json.dumps(config, indent=2) + '\n')
+    fd = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as output:
+        if hasattr(os, 'fchmod'):
+            os.fchmod(output.fileno(), 0o600)
+        output.write(json.dumps(config, indent=2) + '\n')
     temporary.replace(folder / 'config.json')
 
 

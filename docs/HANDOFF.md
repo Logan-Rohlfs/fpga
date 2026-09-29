@@ -7,70 +7,76 @@ dashboard decode and display them.
 All message content is **SIMULATED** by stand-in producers. The planned stages are
 in [`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio).
 
-**Current task: the Space Raiders SDR web GUI. It is partway through
-implementation.** See [GUI implementation status](#gui-implementation-status).
+**The Space Raiders SDR web GUI v1 is implemented.** See [GUI implementation status](#gui-implementation-status).
 The DSP stages come later; realistic displayed data waits for them.
 
 ## GUI implementation status
 
-Recorded 2026-09-29 (third session). The session stopped partway through, at the
-user's request.
+Recorded 2026-09-29 (GUI continuation).
 
-- **Design:**
-  - [Spec](superpowers/specs/2026-09-29-gui-design.md)
-  - [Plan](superpowers/plans/2026-09-29-space-raiders-sdr-gui.md): 15 tasks in 6 phases.
-  - A web GUI with an aiohttp server and a Svelte 5 frontend, reachable from the
-    LAN with `--lan`.
-  - Viewer and Admin roles, with Admin takeover.
-  - Space Raiders branding.
-  - The user merged the Tune and Metrics views into one Tune page.
-- **Done (committed on `gui-prep`, each task reviewed):**
-  - Tasks 1–7: `freqplan.py`, `roles.py`, `sources.py` (serial, replay and a
-    tuning-aware simulator), `hub.py`, `web/server.py`, the `./sdr gui` and
-    `./sdr setup --gui-password` commands, and the frontend scaffold (theme and
-    branded shell).
-  - The review rounds added fixes: oversized-number rejection, subscriber
-    isolation, and handler errors that no longer drop viewers.
-- **Committed but not yet reviewed:** Task 8, the frontend view helpers.
-- **Not started:**
-  - Task 9: the WebSocket client and stores.
-  - Task 10: the app shell (status bar, role menu, theme toggle).
-  - Tasks 11–13: the Tune page.
-  - Task 14: Telemetry cards (v1 placeholders; lower priority).
-  - Task 15: end-to-end checks and documentation.
-- **What runs today:**
-  - `./sdr gui` serves the branded placeholder page and a live WebSocket feed.
-  - The Tune and Telemetry pages do not exist yet.
-- **Verified at the stop:**
-  - 84 Python tests pass.
-  - 10 Vitest tests pass.
-  - svelte-check reports 0 errors, and the frontend builds.
-  - No LAN, phone or hardware check has been done yet.
-- **Where the code intentionally differs from the plan text** (all changes came
-  from task reviews):
-  - `freqplan._number` rejects oversized integers with `ValueError`.
-  - `Hub.publish` isolates subscriber exceptions and logs them.
-  - `GuiServer` wraps `handle()` and replies with a `bad_request` error.
-  - `RoleManager.resume` compares tokens as bytes.
-  - The server broadcasts every accepted tune. The client coalesces tune
-    messages to at most 30 Hz, which is the rate limit.
-- **Minor findings deferred to the final review:**
-  - `.sdr/config.json` is written 0644 even though it now holds the password hash.
-  - The drop-oldest queue can drop control messages for a very slow viewer.
-  - `resume` fails if the old socket has not closed yet.
-  - PBKDF2 runs on the event loop.
-  - There are test gaps in the server paths (resume, logout, reconnect).
-- **To resume:** follow the plan from Task 8's review onward. Task 15's doc step
-  should **replace** the interim "Web GUI (in progress)" section in
-  `tools/README.md` and the interim README lines, not add a second copy.
-  - The per-task progress log is `.superpowers/sdd/2026-09-29-space-raiders-sdr-gui/progress.md`.
-    It is local and ignored by Git.
-  - It lists the rulings made and the deferred minor findings, which the final
-    review should triage. The two lists above are copies, in case the log is
-    missing on another checkout.
-  - Build the frontend before running the GUI:
-    `(cd tools/sdr_web && npm install && npm run build)`.
-    Install the Python side with `.venv/bin/python -m pip install -e '.[gui]'`.
+- [Spec](superpowers/specs/2026-09-29-gui-design.md) and
+  [15-task plan](superpowers/plans/2026-09-29-space-raiders-sdr-gui.md).
+- Tasks 1–8 were already committed. Task 8 was reviewed; the default tune
+  coalescer now uses 34 ms to stay below 30 sends/s. Tasks 9–14 are implemented:
+  WebSocket stores/reconnect, branded app shell, role menu, Tune controls,
+  frequency plan, A/B waterfall, constellations/history, and Telemetry cards.
+- Task 15 automated checks and local browser/hardware checks are complete.
+  Real phone/LAN testing remains unperformed. Browser takeover confirmation was
+  reached, but automatic approval review blocked confirming it; automated
+  takeover/demotion tests pass. No new password was set on the user's config.
+- **New verification:** 93 Python tests (including aiohttp tests), 19 Vitest
+  tests, svelte-check with 0 errors/warnings, production build, and `./sdr sim`.
+  RTL capture: 75 messages, every type, 0 decode errors.
+- **Browser checks:** local Viewer/Admin login, reload resume, rejected MOD
+  restoration, both pages with live data, keyboard card reorder/resize and layout
+  persistence, and phone/tablet viewport layouts. These viewport checks do not
+  establish access from an actual phone. Simulator preview uses isolated temp
+  tuning state, not the user's saved receiver settings.
+- **Hardware check newly run:** GUI serial source on the attached Basys 3 at
+  1 Mbaud; both channels and all seven message types. A 60-second WebSocket
+  observation showed about 11.6 kB/s, 0 CRC/COBS/length errors and 0 sequence gaps.
+  Tune and Telemetry were inspected in the browser. All content was SYNTHETIC.
+  No build/program/flash was performed.
+- **Replay check newly run:** both channels and every type arrive from
+  `build/sdr/link_capture.bin` with 0 decode errors. Looping the short capture
+  increases sequence-gap counters because the original sequence numbers repeat.
+
+Review fixes include cancelling stale reconnect/tune timers, disabling tuning
+on disconnect, waiting for UART cleanup before reconnect, reliable resume when
+the old socket has not closed yet, an explicit failed-resume reply, reconnecting
+slow viewers instead of dropping role messages, private config writes, numeric
+range validation, empty-loop replay rejection, and truthful source-down reporting
+for simulator wire-range errors and unexpected source exceptions. Rejected
+numeric inputs restore their authoritative value. Waterfall history resets when
+its frequency axis changes. Frozen canvases redraw on theme changes.
+
+Implementation choices relative to the plan:
+
+- Omitted the unconfirmed ±25 kHz RF deviation overlay and antenna-model labels.
+  The simulator remains an explicitly synthetic toy model; these are not hardware
+  decisions. Placeholder synthesizer/XADC/filter values are labelled visibly.
+- Omitted the misleading “measured IF” computed from the host NCO: serial/replay
+  data does not carry the actual NCO reference. Expected IF remains server-derived,
+  and the received frequency offset is displayed directly.
+- Added touch/keyboard card reorder buttons and clamped saved spans to available
+  columns. FLIGHT plots explicitly say they are unimplemented even if frames arrive.
+- The existing plan's old checkpoint and per-task commit instructions are
+  historical; this continuation is recorded here and in the local progress log.
+
+Remaining limitations/follow-ups:
+
+- UART RX/commands, real DSP/RF acquisition, FLIGHT plots, Pi packaging, and HTTPS
+  remain out of scope. “Send to FPGA” stays disabled.
+- PBKDF2 password checks still run synchronously on the event loop; login bursts
+  can briefly interrupt streaming. Replay pacing uses bytes, not capture timestamps;
+  loop boundaries can introduce gaps or a torn frame in arbitrary recordings.
+- Retained minor test gaps: direct rf_hz/LO-only updates, source pacing/cancellation
+  and rate warm-up, and theme persistence failures. Hub unsubscribe remains
+  non-idempotent; byte rate averages over five seconds even during startup.
+- Dark/light token blocks remain duplicated and white-on-brand-red small text
+  contrast could be improved. A real phone/LAN acceptance pass remains useful.
+
+See [the GUI guide](../tools/README.md#web-gui) for build/run commands and controls.
 
 ## What exists
 
@@ -107,7 +113,6 @@ Not implemented:
   frame sync, source combiner, FFT, and constellation capture. Every stage in the
   map is a stand-in;
 - a UART RX/command path (`sdr send` bytes are not acted on);
-- the GUI;
 - a real `BUILD_ID` (the parameter defaults to 0; build.tcl does not set it).
 
 ## Verified in this session

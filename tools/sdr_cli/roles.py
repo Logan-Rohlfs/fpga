@@ -83,9 +83,9 @@ class RoleManager:
         return dict(ok=True, token=self.admin['token'], demoted=demoted)
 
     def resume(self, client, token):
-        """Rebind a dropped Admin to a new connection that presents its token."""
+        """Rebind Admin by token, including reloads before the old socket closes."""
         self.expire()
-        if (self.admin and self.admin['client'] is None and token
+        if (self.admin and client in self.local and token
                 and hmac.compare_digest(self.admin['token'].encode(), str(token).encode('utf-8', 'surrogatepass'))):
             self.admin['client'] = client
             self.admin['dropped_at'] = None

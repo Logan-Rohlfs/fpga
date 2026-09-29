@@ -38,11 +38,13 @@ class Client:
         self.queue = asyncio.Queue(maxsize=QUEUE_MAX)
 
     def put(self, msg):
-        if self.queue.full():   # a slow viewer drops its oldest message; live views prefer fresh data
-            try:
-                self.queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
+        if getattr(self, 'overflowed', False):
+            return
+        if self.queue.full():
+            # A lost role/tuning message is unsafe. Reconnect for an authoritative snapshot.
+            self.overflowed = True
+            asyncio.ensure_future(self.ws.close(code=1013, message=b'Slow viewer: reconnect for current state'))
+            return
         self.queue.put_nowait(msg)
 
 
@@ -61,6 +63,7 @@ class GuiServer:
         self.clients = {}
         self.source_task = None
         self.tasks = []
+        self.source_lock = asyncio.Lock()
         self.hub.subscribe(self.broadcast)
 
     # ---- lifecycle
@@ -82,7 +85,7 @@ class GuiServer:
         return web.FileResponse(index)
 
     async def _start(self, app):
-        self.start_source()
+        await self.start_source()
         self.tasks.append(asyncio.ensure_future(self._housekeeping()))
 
     async def _shutdown(self, app):
@@ -94,16 +97,18 @@ class GuiServer:
         await asyncio.gather(*pending, return_exceptions=True)
         self.save_if_dirty()
 
-    def start_source(self):
-        if self.source_task and not self.source_task.done():
-            self.source_task.cancel()
-        try:
-            source = self.source_factory(lambda: self.tuning)
-        except ToolError as exc:
-            self.hub.source = dict(kind='none', state='down', detail=str(exc), responds_to_tuning=False)
-            self.broadcast(self.hub.stats_message())
-            return
-        self.source_task = asyncio.ensure_future(self.hub.run(source))
+    async def start_source(self):
+        async with self.source_lock:
+            if self.source_task and not self.source_task.done():
+                self.source_task.cancel()
+                await asyncio.gather(self.source_task, return_exceptions=True)
+            try:
+                source = self.source_factory(lambda: self.tuning)
+            except ToolError as exc:
+                self.hub.source = dict(kind='none', state='down', detail=str(exc), responds_to_tuning=False)
+                self.broadcast(self.hub.stats_message())
+                return
+            self.source_task = asyncio.ensure_future(self.hub.run(source))
 
     async def _housekeeping(self):
         while True:
@@ -192,6 +197,8 @@ class GuiServer:
             if self.roles.resume(client.id, data.get('token')):
                 client.put(self.role_message(client, 'resumed', token=data.get('token')))
                 self.broadcast_roles('admin_changed', skip={client.id})
+            else:
+                client.put(self.role_message(client, 'resume_failed'))
         elif kind == 'logout':
             if self.roles.logout(client.id):
                 self.broadcast_roles('logout')
@@ -212,7 +219,7 @@ class GuiServer:
             if not is_admin:
                 client.put(error('not_admin', 'Only the Admin can reconnect the source.'))
                 return
-            self.start_source()
+            await self.start_source()
         else:
             client.put(error('unknown_type', 'Unknown message type: {}'.format(kind)))
 

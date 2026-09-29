@@ -48,11 +48,13 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.client.close)
 
     async def recv(self, ws, predicate, limit=300):
-        for _ in range(limit):
-            msg = await asyncio.wait_for(ws.receive_json(), 3)
-            if predicate(msg):
-                return msg
-        self.fail('expected message not received')
+        async def receive():
+            for _ in range(limit):
+                msg = await ws.receive_json()
+                if predicate(msg):
+                    return msg
+            self.fail('expected message not received')
+        return await asyncio.wait_for(receive(), 3)
 
     def of(self, kind, **match):
         return lambda m: m['type'] == kind and all(m.get(k) == v for k, v in match.items())
@@ -139,4 +141,43 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.recv(ws, self.of('error')))['code'], 'bad_request')
             await ws.send_json(dict(type='ping'))
             await self.recv(ws, self.of('pong'))
+        await ws.close()
+
+    async def test_reload_resume_and_logout(self):
+        old, _ = await self.connect()
+        await old.send_json(dict(type='login', password='pw', label='reload'))
+        token = (await self.recv(old, self.of('role', role='admin')))['token']
+        new, _ = await self.connect()
+        await new.send_json(dict(type='resume', token=token))
+        await self.recv(new, self.of('role', role='admin', reason='resumed'))
+        await self.recv(old, self.of('role', role='viewer'))
+        await old.close()
+        await new.send_json(dict(type='tune', changes=dict(nco_hz=101000)))
+        self.assertEqual((await self.recv(new,self.of('tuning')))['state']['nco_hz'],101000)
+        await new.send_json(dict(type='logout'))
+        await self.recv(new,self.of('role',role='viewer',reason='logout'))
+        await new.send_json(dict(type='resume',token=token))
+        await self.recv(new,self.of('role',role='viewer',reason='resume_failed'))
+        await new.close()
+
+    async def test_source_reconnect_waits_for_old_cleanup(self):
+        events=[]
+        class SlowClose:
+            kind='sim'; responds_to_tuning=True; detail='test'
+            async def chunks(self):
+                events.append('start')
+                try:
+                    await asyncio.sleep(3600)
+                    yield b''
+                finally:
+                    await asyncio.sleep(0.02)
+                    events.append('closed')
+        self.server.source_factory=lambda tuning: SlowClose()
+        ws,_=await self.connect()
+        await ws.send_json(dict(type='login',password='pw',label='test'))
+        await self.recv(ws,self.of('role',role='admin'))
+        for _ in range(2):
+            await ws.send_json(dict(type='reconnect_source'))
+            await self.recv(ws,lambda m:m['type']=='stats' and m['source']['kind']=='sim' and m['source']['state']=='running')
+        self.assertEqual(events,['start','closed','start'])
         await ws.close()

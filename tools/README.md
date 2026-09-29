@@ -145,27 +145,61 @@ The displayed histories are bounded; raw recording is the way to keep all data.
 Recording consumes disk space until stopped. There is no automatic reconnect
 after USB removal: reconnect explicitly with `c` when the board is back.
 
-## Web GUI (in progress)
+## Web GUI
 
-`./sdr gui` serves the Space Raiders SDR web app. Implementation is partway
-through: the server, roles, and data sources work, but the Tune and Telemetry
-pages are not built yet. The page currently shows the branded shell only. See
-the plan in `docs/superpowers/plans/2026-09-29-space-raiders-sdr-gui.md`.
+`./sdr gui` serves the Space Raiders SDR workbench: a Tune page with the RF
+frequency plan, selectable A/B IF spectrum and waterfall, synthesizer/NCO
+controls, both constellations and signal histories; and a Telemetry page with
+reorderable, resizable cards. FLIGHT plots remain a clearly labelled placeholder.
 
 ```sh
-.venv/bin/python -m pip install -e '.[gui]'        # once: adds aiohttp
-(cd tools/sdr_web && npm install && npm run build) # needs Node; output is ignored by Git
-./sdr gui --source sim           # host simulator; http://127.0.0.1:8080
+.venv/bin/python -m pip install -e '.[gui]'         # once: adds aiohttp
+(cd tools/sdr_web && npm install && npm run build) # Node is needed only to build
+./sdr gui --source sim                            # no board needed
 ./sdr gui --source replay --file build/sdr/link_capture.bin --loop
-./sdr gui                        # board over UART (close the dashboard first)
-./sdr gui --lan                  # also reachable from other devices on the network
-./sdr setup --gui-password       # Admin password, stored hashed; `sdr config` masks it
+./sdr gui                                        # UART; close other readers first
+./sdr gui --lan                                  # allow viewers on the local network
+./sdr setup --gui-password                       # prompted, stored hashed
 ```
 
-- **Local by default:** without `--lan`, only this machine can connect.
-- **Roles:** everyone is a Viewer. One Admin, protected by the password, can
-  change tuning. With no password set, only the server machine can become Admin.
-- **The FPGA does not receive tuning yet.**
+The default URL is `http://127.0.0.1:8080`. Use `--http-port` to change it and
+`--no-browser` to suppress browser opening. Without `--lan`, only this machine
+can connect. Fonts and scripts are bundled; viewers need no internet access.
+For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
+
+- **Viewer/Admin:** everyone starts as a Viewer. One Admin can change shared
+  tuning; log in through the header. With no password configured, only localhost
+  can become Admin. Taking over requires confirmation and demotes the old Admin.
+  Reloading resumes Admin through a session token within a 15-second grace period.
+- **Tune:** drag/scroll the RF plan or edit the LO digits; drag the waterfall or
+  edit the NCO field. All tuning is validated and quantized in Python. Receiver,
+  synthesizer and filter values are a host model with placeholder hardware
+  settings. Only the host simulator reacts to them. **Send to FPGA is disabled:**
+  there is no UART RX command protocol or acknowledgement yet.
+- **Display:** auto waterfall scaling is the default. Manual floor/peak, A/B
+  selection and Freeze are per viewer. Space toggles Freeze outside inputs.
+  The header cycles System/Dark/Light themes. Synthetic content is labelled
+  SIMULATED; it is not an RF measurement.
+- **Telemetry:** Edit layout enables drag reorder, corner/arrow-key resizing,
+  and earlier/later buttons (also usable on touch devices). Layout and theme
+  are saved locally in the browser; Reset layout restores the defaults.
+- **Disconnection:** the browser retries automatically and dims old data. Source
+  failures stay visible; an Admin can Reconnect after fixing the cause. Receiving
+  continues while the display is frozen. Tuning is saved in ignored
+  `.sdr/gui_state.json`.
+- **Replay limitations:** pacing uses capture byte count, not recorded time.
+  Loop boundaries restart original sequence numbers and can increment the gap
+  counter; a capture cut mid-frame can also yield a decode error at the boundary.
+- **LAN security:** plain HTTP provides protection against accidental/casual
+  tuning changes, not network sniffing. Use a trusted network. Password hashes
+  are masked by `sdr config`; new config writes use owner-only permissions on POSIX.
+
+Verification:
+
+```sh
+PYTHONPATH=tools .venv/bin/python -m unittest discover -s tools/tests -v
+(cd tools/sdr_web && npm test && npm run check && npm run build)
+```
 
 ## Remote builds and artifacts
 

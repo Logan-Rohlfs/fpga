@@ -49,13 +49,17 @@ class ReplaySource:
         self.path = Path(path).expanduser()
         if not self.path.is_file():
             raise ToolError('Replay file not found: {}'.format(path))
-        if speed < 0:
+        if loop and self.path.stat().st_size == 0:
+            raise ToolError('Cannot loop an empty replay file.')
+        if not math.isfinite(speed) or speed < 0:
             raise ToolError('Replay speed must be 0 (as fast as possible) or positive.')
         self.speed, self.loop, self.chunk = speed, loop, chunk
         self.detail = self.path.name + (' (looping)' if loop else '')
 
     async def chunks(self):
         data = self.path.read_bytes()
+        if not data:
+            return
         while True:
             for offset in range(0, len(data), self.chunk):
                 part = data[offset:offset + self.chunk]
@@ -114,6 +118,9 @@ class SimSource:
         s = self.get_tuning()
         sig = freqplan.if_hz(s, s.carrier_hz + BENCH_OFFSET_HZ)
         df = sig - s.nco_hz
+        if not (-2**31 <= df <= 2**31 - 1 and 0 < s.target_if_hz <= 2**31 - 1):
+            raise ToolError('Simulator IF or offset exceeds the signed 32-bit wire format. '
+                            'Adjust tuning, then reconnect the source.')
         locked = abs(sig - s.target_if_hz) <= s.window_hz and abs(df) <= max(0.0, s.filter_hz - 17e3)
         return s, sig, df, locked
 

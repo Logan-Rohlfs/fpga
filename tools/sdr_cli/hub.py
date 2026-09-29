@@ -92,4 +92,8 @@ class Hub:
         except (ToolError, OSError) as exc:
             self.set_source(source, 'down', str(exc))
             return
+        except Exception as exc:
+            logger.exception('GUI source failed')
+            self.set_source(source, 'down', str(exc))
+            return
         self.set_source(source, 'ended')
