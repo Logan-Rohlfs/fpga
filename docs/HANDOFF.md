@@ -46,11 +46,28 @@ user's request.
   - 10 Vitest tests pass.
   - svelte-check reports 0 errors, and the frontend builds.
   - No LAN, phone or hardware check has been done yet.
-- **To resume:** follow the plan from Task 8's review onward.
+- **Where the code intentionally differs from the plan text** (all changes came
+  from task reviews):
+  - `freqplan._number` rejects oversized integers with `ValueError`.
+  - `Hub.publish` isolates subscriber exceptions and logs them.
+  - `GuiServer` wraps `handle()` and replies with a `bad_request` error.
+  - `RoleManager.resume` compares tokens as bytes.
+  - The server broadcasts every accepted tune. The client coalesces tune
+    messages to at most 30 Hz, which is the rate limit.
+- **Minor findings deferred to the final review:**
+  - `.sdr/config.json` is written 0644 even though it now holds the password hash.
+  - The drop-oldest queue can drop control messages for a very slow viewer.
+  - `resume` fails if the old socket has not closed yet.
+  - PBKDF2 runs on the event loop.
+  - There are test gaps in the server paths (resume, logout, reconnect).
+- **To resume:** follow the plan from Task 8's review onward. Task 15's doc step
+  should **replace** the interim "Web GUI (in progress)" section in
+  `tools/README.md` and the interim README lines, not add a second copy.
   - The per-task progress log is `.superpowers/sdd/2026-09-29-space-raiders-sdr-gui/progress.md`.
     It is local and ignored by Git.
   - It lists the rulings made and the deferred minor findings, which the final
-    review should triage.
+    review should triage. The two lists above are copies, in case the log is
+    missing on another checkout.
   - Build the frontend before running the GUI:
     `(cd tools/sdr_web && npm install && npm run build)`.
     Install the Python side with `.venv/bin/python -m pip install -e '.[gui]'`.
@@ -133,8 +150,8 @@ The user's requirements, 2026-09-29:
 
 What already exists for it:
 
-- **Data source.** Reuse `serial_io.Session` and `protocol.LinkState`; do not
-  write a second decoder. `Session.read()` returns bytes and fills
+- **Data source.** Now implemented by `sdr_cli/hub.py`, which uses one `StreamDecoder`/`LinkState`
+  for every source. Do not write a second decoder. `Session.read()` returns bytes and fills
   `last_records` and `link`. AGENTS.md asks for CLI, TUI and GUI behavior to stay
   consistent.
 - **Waterfall axis.** Each SPECTRUM row carries its own axis:
@@ -162,22 +179,32 @@ What already exists for it:
   - The FPGA flags all of it `SYNTHETIC`; show that in the UI.
   - The user accepts that it looks artificial until the DSP stages exist.
 
-Decisions for the GUI task (ask the user; not yet made):
+Decisions made with the user (2026-09-29, third session). The spec has the details:
 
-- **GUI toolkit and dependencies.** The host is currently Python 3.9+ with
-  pyserial only. pyqtgraph/PyQt handles fast waterfalls well; a web UI is the
-  alternative.
-- **"Configure the FPGA" is not possible yet.** There is no UART RX or command
-  protocol, so the GUI can only read. Tuning, stream enables and rates need a
-  separate FPGA task: `uart_rx`, a command decoder with acknowledgements, and
-  config registers (future, dashed, on the module map). Controls can be designed
-  in the GUI but must not claim success.
-- **Offline development.** A replay source (feed a raw capture from
-  `.sdr/captures/*.bin` or `build/sdr/link_capture.bin` into `StreamDecoder`)
-  would allow GUI work without the board. It does not exist yet.
-- **Bandwidth.** The link carries about 11 kB/s of about 100 kB/s. More bins or a
-  higher row rate for a smoother waterfall is a protocol/FPGA change to agree
-  first.
+- **Toolkit:** web-first. An aiohttp server (the optional `gui` extra) owns the
+  UART and decoding. A Svelte 5 + TypeScript frontend in `tools/sdr_web/` builds
+  into `tools/sdr_cli/web/static/`, which is ignored by Git.
+  - It serves 127.0.0.1 only, unless `--lan` is given.
+  - Any LAN device can view it, and a Raspberry Pi can host it later using just
+    the built files.
+- **Pages:** Tune (the frequency plan and IF waterfall, merged with per-channel
+  signal quality) and Telemetry (cards the user can drag and resize; v1 content
+  is placeholders).
+- **Roles:**
+  - Everyone connects as a Viewer.
+  - One Admin at a time, protected by a password (`./sdr setup --gui-password`,
+    stored hashed).
+  - Taking over Admin asks for confirmation and notifies the previous Admin.
+  - With no password set, only the server machine can become Admin.
+- **Branding:** Space Raiders only, with brand red `#FB0000` used for chrome.
+  Logo assets are in `tools/sdr_web/src/assets/`.
+- **Configuring the FPGA is still impossible.** Tuning is shared host-side state
+  (`.sdr/gui_state.json`); only `--source sim` reacts to it. "Send to FPGA" stays
+  disabled until UART RX and a command protocol exist.
+- **Offline development:** `sources.ReplaySource` (`--source replay --file X.bin`)
+  and `sources.SimSource` (`--source sim`) exist.
+- **Bandwidth:** unchanged. A smoother waterfall is still a protocol/FPGA change
+  to agree first.
 
 ## Environment and recovery
 

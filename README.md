@@ -18,6 +18,7 @@ On the Mac, from this checkout:
 ./sdr --help              # all inline commands
 ./sdr doctor              # check local tools and serial device selection
 ./sdr receive --seconds 5 # decoded link messages without reprogramming the board
+./sdr gui --source sim    # web GUI (in progress; see tools/README.md)
 ```
 
 The current Mac already has a configured virtual environment and local connection
@@ -55,6 +56,8 @@ of 120 × 36 or larger is comfortable for the dashboard.
 | `projects/sdr/constraints/` | Basys 3 pins and clock constraints |
 | `projects/sdr/host/` | Standalone hardware link checker (`check_link.py`) |
 | `tools/sdr_cli/` | Shared host operations, UART transport, CLI, and dashboard |
+| `tools/sdr_cli/web/` | GUI web server (aiohttp); built frontend lands in its ignored `static/` |
+| `tools/sdr_web/` | Svelte source for the Space Raiders SDR web GUI |
 | `tools/tests/` | Host unit and pseudo-terminal integration tests |
 | `scripts/build.tcl` | Vivado synthesis, implementation, reports, and bitstream generation |
 | `docs/HANDOFF.md` | Verified state, outstanding decisions, and next-agent context |

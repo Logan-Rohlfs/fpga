@@ -145,6 +145,28 @@ The displayed histories are bounded; raw recording is the way to keep all data.
 Recording consumes disk space until stopped. There is no automatic reconnect
 after USB removal: reconnect explicitly with `c` when the board is back.
 
+## Web GUI (in progress)
+
+`./sdr gui` serves the Space Raiders SDR web app. Implementation is partway
+through: the server, roles, and data sources work, but the Tune and Telemetry
+pages are not built yet. The page currently shows the branded shell only. See
+the plan in `docs/superpowers/plans/2026-09-29-space-raiders-sdr-gui.md`.
+
+```sh
+.venv/bin/python -m pip install -e '.[gui]'        # once: adds aiohttp
+(cd tools/sdr_web && npm install && npm run build) # needs Node; output is ignored by Git
+./sdr gui --source sim           # host simulator; http://127.0.0.1:8080
+./sdr gui --source replay --file build/sdr/link_capture.bin --loop
+./sdr gui                        # board over UART (close the dashboard first)
+./sdr gui --lan                  # also reachable from other devices on the network
+./sdr setup --gui-password       # Admin password, stored hashed; `sdr config` masks it
+```
+
+- **Local by default:** without `--lan`, only this machine can connect.
+- **Roles:** everyone is a Viewer. One Admin, protected by the password, can
+  change tuning. With no password set, only the server machine can become Admin.
+- **The FPGA does not receive tuning yet.**
+
 ## Remote builds and artifacts
 
 Builds upload a ZIP containing **only** `scripts/build.tcl`, the selected
