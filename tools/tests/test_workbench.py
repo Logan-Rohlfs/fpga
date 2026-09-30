@@ -59,7 +59,7 @@ class RepositoryTest(unittest.TestCase):
         self.assertEqual(core.bitstream(self.root, 'sdr', demo=True), bit)
         with patch.object(core, 'run'):
             core.program(self.root, self.config, log=lines.append, demo=True)
-        self.assertTrue(any('demo variant' in line for line in lines))
+        self.assertFalse(any('demo variant' in line for line in lines))  # the demo was asked for
         with patch.object(core, 'remote', side_effect=lambda config, script, log: scripts.append(script)), \
                 patch.object(core, 'run', side_effect=self.fake_copy):
             bit = core.build(self.root, self.config, log=lambda _: None)
@@ -283,10 +283,6 @@ class DashboardTest(unittest.TestCase):
             self.ui.execute('rm -rf anything')
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class ParallelBuildTest(RepositoryTest):
     def test_thread_count_clamps(self):
         self.assertEqual(core.thread_count(12, 1), 8)
@@ -424,6 +420,64 @@ class ParallelBuildTest(RepositoryTest):
             core.build_variants(self.root, dict(self.config, project='blink'), log=lambda _: None)
         remote.assert_not_called()
 
+    def test_baseexception_in_worker_is_reported_not_keyerror(self):
+        def fake_remote(config, script, log):
+            if 'demo' in script and '-tclargs' in script:
+                raise KeyboardInterrupt()
+
+        with patch.object(core, 'remote', side_effect=fake_remote), \
+                patch.object(core, 'run', side_effect=self.fake_copy), \
+                patch.object(core, 'host_cores', return_value=12):
+            with self.assertRaisesRegex(core.ToolError, 'demo'):
+                core.build_variants(self.root, self.config, log=lambda _: None)
+
+    def test_interrupt_terminates_children_and_reports_cancelled(self):
+        import sys
+        started = threading.Event()
+        lines = []
+        real_join = threading.Thread.join
+        calls = []
+
+        def fake_remote(config, script, log):
+            if '-tclargs' in script:
+                # a real child process, like the ssh that runs Vivado
+                started.set()
+                core.run([sys.executable, '-c', 'import time; time.sleep(60)'], log=log)
+
+        def interrupting_join(self, timeout=None):
+            if timeout is None and not calls:
+                calls.append(1)
+                started.wait(10)
+                time.sleep(0.3)
+                raise KeyboardInterrupt()
+            return real_join(self, timeout)
+
+        with patch.object(core, 'remote', side_effect=fake_remote), \
+                patch.object(core, 'run', side_effect=core.run), \
+                patch.object(core, 'host_cores', return_value=12), \
+                patch.object(threading.Thread, 'join', interrupting_join):
+            begin = time.time()
+            with self.assertRaises(KeyboardInterrupt):
+                core.build_variants(self.root, self.config, log=lines.append)
+        self.assertLess(time.time() - begin, 20)
+        self.assertTrue(any(l.startswith('Cancelled:') and 'may keep running' in l for l in lines))
+        self.assertFalse(any(t.name.startswith('sdr-build-') and t.is_alive() for t in threading.enumerate()))
+        self.assertFalse(core._cancelled)
+
+    def test_program_notice_only_when_default_selected_but_demo(self):
+        with patch.object(core, 'remote'), patch.object(core, 'run', side_effect=self.fake_copy), \
+                patch.object(core, 'host_cores', return_value=12):
+            bit = core.build(self.root, self.config, log=lambda _: None, demo=True, threads=8)
+        (bit.parent.parent.parent / 'latest').write_text(bit.parent.name + '\n')  # legacy shared pointer
+        notices = []
+        with patch.object(core, 'run'):
+            core.program(self.root, self.config, log=notices.append)
+        self.assertTrue(any('no --demo' in n for n in notices))
+        notices.clear()
+        with patch.object(core, 'run'):
+            core.program(self.root, self.config, log=notices.append, demo=True)
+        self.assertFalse(any('Selected build' in n for n in notices))
+
     def test_tui_commands_start_the_same_operations(self):
         from sdr_cli import tui
         dash = tui.Dashboard.__new__(tui.Dashboard)
@@ -432,3 +486,7 @@ class ParallelBuildTest(RepositoryTest):
         for command in ('build all', 'program demo', 'build demo'):
             tui.Dashboard.execute(dash, command)
         self.assertEqual(started, ['build-all', 'program-demo', 'build-demo'])
+
+
+if __name__ == '__main__':
+    unittest.main()

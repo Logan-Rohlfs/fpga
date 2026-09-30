@@ -108,13 +108,35 @@ def remote(config, script, log=print):
     return run(ssh_base(config) + [target, ps_command("$ProgressPreference='SilentlyContinue'; " + script)], log=log)
 
 
+_processes = {}  # thread id -> running subprocesses started by run()
+_cancelled = set()  # thread ids whose workflow was cancelled
+_processes_lock = threading.Lock()
+
+
+def cancel_threads(idents):
+    """Stop the subprocesses of these threads and refuse to start new ones."""
+    with _processes_lock:
+        _cancelled.update(idents)
+        running = [p for i in idents for p in _processes.get(i, ())]
+    for process in running:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+
+
 def run(args, cwd=None, log=print):
     """Stream output without a shell; a nonzero exit always stops the workflow."""
-    try:
-        process = subprocess.Popen([str(a) for a in args], cwd=cwd, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, errors='replace')
-    except OSError as exc:
-        raise ToolError('Cannot start {}: {}'.format(args[0], exc)) from exc
+    ident = threading.get_ident()
+    with _processes_lock:
+        if ident in _cancelled:
+            raise ToolError('Cancelled.')
+        try:
+            process = subprocess.Popen([str(a) for a in args], cwd=cwd, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, errors='replace')
+        except OSError as exc:
+            raise ToolError('Cannot start {}: {}'.format(args[0], exc)) from exc
+        _processes.setdefault(ident, set()).add(process)
     try:
         for line in process.stdout:
             log(line.rstrip())
@@ -129,6 +151,8 @@ def run(args, cwd=None, log=print):
         raise
     finally:
         process.stdout.close()
+        with _processes_lock:
+            _processes[ident].discard(process)
     if result:
         raise ToolError('{} failed (exit {}).'.format(args[0], result))
 
@@ -291,15 +315,31 @@ def build_variants(root, config, variants=('default', 'demo'), log=print):
                 log('[{}] {}'.format(variant, line))
         try:
             results[variant] = build(root, config, prefixed, demo=variant == 'demo', threads=threads)
-        except Exception as exc:  # reported after the other builds finish
+        except BaseException as exc:  # reported after the other builds finish
             errors[variant] = exc
             prefixed('FAILED: {}'.format(exc))
+        finally:
+            with _processes_lock:
+                _cancelled.discard(threading.get_ident())
 
-    workers = [threading.Thread(target=work, args=(v,), name='sdr-build-' + v) for v in variants]
+    workers = [threading.Thread(target=work, args=(v,), name='sdr-build-' + v, daemon=True) for v in variants]
     for worker in workers:
         worker.start()
-    for worker in workers:
-        worker.join()
+    try:
+        for worker in workers:
+            worker.join()
+    except BaseException:
+        # Stop the local ssh/scp children, wait for the workers to unwind, then re-raise.
+        cancel_threads([w.ident for w in workers])
+        for worker in workers:
+            worker.join(timeout=10)
+        with _processes_lock:
+            _cancelled.difference_update(w.ident for w in workers)  # thread ids get reused
+        unfinished = [v for v in variants if v not in results]
+        log('Cancelled: {} not completed. Remote Vivado processes may keep running on {}; '
+            'their directories are under {}.'.format(', '.join(unfinished) or 'none', config['host'],
+                                                     config['remote_root']))
+        raise
     if errors:
         raise ToolError('Build failed for: ' + '; '.join('{} ({})'.format(v, e) for v, e in errors.items()))
     return {v: results[v] for v in variants}
@@ -331,9 +371,9 @@ def program(root, config, persist=False, path=None, log=print, demo=False):
             raise ToolError('Sources have changed since this build. Run sdr build, or deliberately select --bit PATH.')
         if manifest['bitstream_sha256'] != hashlib.sha256(bit.read_bytes()).hexdigest():
             raise ToolError('Bitstream checksum does not match the build manifest.')
-        if manifest.get('variant', 'default') != 'default':
-            log('Selected build is the {} variant (APEX flight replay). Run sdr program without --demo '
-                'for the default.'.format(manifest['variant']))
+        if manifest.get('variant', 'default') != 'default' and not demo:
+            log('Selected build is the {} variant (APEX flight replay). Use sdr program (no --demo) for '
+                'the default bundle.'.format(manifest['variant']))
     elif path is None:
         log('Using existing bitstream without a source manifest: ' + str(bit))
     log(('Writing persistent flash: ' if persist else 'Programming volatile FPGA memory: ') + str(bit))
