@@ -70,8 +70,9 @@ BUILD_ID do not change. Select it at build time; no board or wiring changes:
 
 ```sh
 ./sdr build --demo        # dashboard: ":build demo"; Vivado: -tclargs sdr demo
-./sdr program             # programs the selected bundle; it reports the demo variant
-./sdr build               # back to the default bitstream
+./sdr program --demo      # programs the demo bundle (build/sdr/latest-demo)
+./sdr program             # the default bundle (build/sdr/latest) is unaffected
+./sdr build --all         # both variants at once, Vivado threads split across them
 ```
 
 `sdr_top` parameter `DEMO_FLIGHT=1` selects it. STATUS then reports BUILD_ID

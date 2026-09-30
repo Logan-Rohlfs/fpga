@@ -52,7 +52,9 @@ stored. If automatic UART selection is ambiguous, set `--port DEVICE` using
 ./sdr sim                          # run the SDR HDL testbenches locally
 ./sdr build                        # build current files on Windows and fetch results
 ./sdr build --demo                 # opt-in APEX flight replay bitstream (sdr only)
+./sdr build --all                  # default + demo concurrently, threads sized to the host
 ./sdr program                      # temporary FPGA configuration; lost on power-off
+./sdr program --demo               # the demo bundle (build/sdr/latest-demo)
 ./sdr receive --seconds 5           # decoded link messages, then a per-type summary
 ./sdr receive --format records      # decoded messages as JSON lines
 ./sdr receive --format text         # undecoded UART bytes as ASCII
@@ -213,8 +215,18 @@ included; no push/pull needed.
 
 `--demo` (dashboard `build demo`) passes `demo` to `build.tcl`, which sets the
 `sdr_top` generic `DEMO_FLIGHT=1`. The manifest records `variant` (`default` or
-`demo`), and `program` reports a demo selection. Both variants share the
-`latest` pointer; run `sdr build` again to return to the default bitstream.
+`demo`), and `program` reports a demo selection.
+
+`--all` (dashboard `build all`) builds the default and demo variants at the
+same time. Each has its own remote directory, local temp directory and bundle,
+and its log lines are prefixed `[default]` or `[demo]`. The build host core count
+is read once per invocation (`$env:NUMBER_OF_PROCESSORS` over SSH; 12 if that
+fails), or set with `--cores N` or the `host_cores` config key (0 = detect).
+Each build gets `clamp(cores // concurrent_builds, 1, 8)` Vivado threads,
+passed to `build.tcl` as `general.maxThreads` (8 is Vivado's cap; one build
+alone also gets up to 8). The manifest records `threads`. A failed variant
+does not stop the other; the command reports the failure at the end. A run on
+the 24-thread Windows host built both in 202 s, against about 420 s serially.
 
 Every build gets a unique directory beneath `remote_root`. Windows retains these
 directories and Vivado logs for diagnosis; remove old directories manually when
@@ -223,7 +235,10 @@ it cannot overwrite another build's files.
 
 Successful downloads go to `build/PROJECT/artifacts/BUILD_ID/`, containing the
 bitstream, timing/utilization/DRC reports, and a source/bitstream SHA-256 manifest.
-An atomic `build/PROJECT/latest` pointer selects a complete bundle. A failed
+An atomic `build/PROJECT/latest` pointer selects the newest complete **default**
+bundle and `build/PROJECT/latest-demo` the newest demo bundle, so concurrent
+builds never race over one pointer. `sdr program` uses `latest`; `sdr program
+--demo` (dashboard `program demo`) uses `latest-demo`. A failed
 build leaves the previous selection intact. Programming checks the selected
 bundle against current sources and rejects changed sources or a corrupt bitstream.
 `--bit PATH` deliberately selects an external/older bitstream and bypasses these
