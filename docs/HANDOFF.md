@@ -27,11 +27,22 @@ New simulation evidence includes exact packets recovered from independent Gaussi
 ADC vectors (clean, noisy/offset, corrupted CRC), RTL-generated ADC samples,
 no-signal/recovery, and complete UART/CONFIG tests. Host/GUI checks pass following
 independent review fixes. This is **not yet a newly verified board checkpoint**:
-the initial Vivado run synthesized but failed timing at -16.941 ns and used 97%
-of LUTs. Measurement arithmetic/buffering optimization and fresh timing/board
-verification are still in progress. Do not select the previous bitstream as proof
-of the new receiver. Reports are preserved under
-`build/sdr/failed-20260929-190956-6f3870be/`.
+the bitstream has not been programmed or checked on the board.
+
+Timing/area closure: the first Vivado run failed setup at -16.941 ns with 97% LUTs
+(`build/sdr/failed-20260929-190956-6f3870be/`). The committed pre-closure RTL
+still failed by -12.430 ns at 44% LUTs (`failed-20260930-101513-6765bf0b`). The
+worst paths were the decimator's constant divider, the ADC model's bit/tone
+arithmetic, and wide observer/transport snapshot registers. The observer now
+reads from RAMs, the divider is a pipelined reciprocal multiply, and the ADC model
+logic is pipelined. Every payload value is unchanged: full-UART captures differ
+from the old RTL only in timestamps, which are at most 1 µs later. Bundle
+`build/sdr/artifacts/20260930-103603-a1d0abba/`: WNS +0.120 ns, WHS +0.023 ns at
+100 MHz, 0 failing endpoints; 5,241 LUTs (25.2%), 6,911 FFs (16.6%),
+0 BRAM, 41 DSPs. DRC has no errors. It shows the known CFGBVS/CONFIG_VOLTAGE
+warning plus DSP pipelining advisories. The worst remaining path is in
+`source_combiner` (frame_key -> a_older, 12 logic levels). Intermediate failed
+reports are preserved under `build/sdr/failed-20260930-*`.
 
 ## Source combiner implementation status
 

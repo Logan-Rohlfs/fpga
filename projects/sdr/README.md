@@ -25,6 +25,14 @@ the existing producer ports. `sdr_top.sv` defaults to this chain.
 `LEGACY_LINK_TEST=1` selects the old transport-only fixture; it is retained for
 independent link regression and is not the receiver's default source.
 
+Each `rx_observer` keeps its captured I/Q and spectrum bytes in small inferred
+RAMs with registered byte read ports. `receiver_link_sources` streams SPECTRUM and
+IQ_SNAPSHOT bodies straight from those ports and releases the observer (`ready`)
+only after both messages have been sent, so there is no second wide copy. The DFT
+is time-multiplexed (one complex multiply-accumulate per three clocks); the
+decimator's divide and the ADC model's bit/tone arithmetic are registered
+pipelines. These latency-only changes leave every payload value unchanged.
+
 ## Provisional configurable profile
 
 | Setting | Default | Where to change |
@@ -117,6 +125,8 @@ No XADC electrical interface or physical PLL driver is asserted to exist.
 Tests include clean/noisy/offset Gaussian ADC vectors, deliberate CRC corruption,
 synthesizable ADC output, framing recovery, stalls, signal disable/recovery,
 DFT placement/scaling, command validation, whole-UART payload checks, and the
-independent legacy transport tests. Generated captures and reports remain in
+independent legacy transport tests. `utilization.rpt` includes a per-module
+hierarchy table, and `timing.rpt` ends with a one-line-per-endpoint summary of the
+100 worst paths. Generated captures and reports remain in
 ignored `build/` and `.sdr/captures/` directories. Close other UART readers before
 hardware checks; two readers split the byte stream.
