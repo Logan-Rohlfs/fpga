@@ -66,8 +66,14 @@ programs the demo. Ctrl-C cancels concurrent builds cleanly.
   both channels, no tuning/CONFIG exercise, no retained capture).
 - The GUI "Disconnected, retrying" the user saw after programming was likely
   conflicting GUI instances (a stale preview server on another port was found).
-  It could not be reproduced with a single instance. GUI overhaul Task 25 adds
-  reconnect handling and instance-conflict detection.
+  It could not be reproduced with a single instance. GUI overhaul Task 25 added
+  serial auto-reconnect and HTTP port-conflict detection.
+- Newly run for Task 25 (2026-09-30), on this machine with the board attached: a
+  second `./sdr gui` on the same HTTP port exited 1 with the port-in-use message;
+  with the UART held by another process (a pyserial `exclusive=True` holder), the
+  serial GUI reported `busy` with the "held by another process" detail, then
+  returned to `running` on its own after the holder released the port. USB unplug
+  and `./sdr program` during a GUI session were **not** exercised for this task.
 
 ## GUI overhaul progress (in progress)
 
@@ -94,7 +100,7 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: Tasks 1-7 complete (the 6-7 pair has landed; the GUI is functional on the new binary/subscribe protocol); next is Task 25.** Task 7 added the frontend data layer (`wire.ts`, `series.ts`, `subscriptions.ts`, per-page `subscribe`, and freeze that stops drawing only).
+**Current task: Tasks 1-7 and 25 complete; next is Task 8.** Task 25 added serial auto-reconnect with back-off (`waiting`/`busy`/`reconnecting` states, `lib/status.ts` banner and pill) and the HTTP port-in-use check.
 
 **Preflight rulings: made.** Every finding in the
 [preflight scan](superpowers/plans/2026-09-30-gui-cards-preflight.md) is ruled, and
@@ -104,12 +110,13 @@ per-task sections to carry into each dispatch. One user clarification is recorde
 there and in the spec (§10): "events" means flight-state events, and link events are
 a separate category with their own event-log view.
 
-**Paused after Task 7 at the user's request.** Resume at Task 25, then 8-15, 26,
-16-23, 24. Deferred minor findings from the task reviews are listed in the local ledger
-for the final whole-branch review. The most relevant are:
-- the send loop dies silently on unexpected exceptions (`server.py`); fold this into Task 25;
+Continue at Task 8, then 9-15, 26, 16-23, 24. Deferred minor findings from the task
+reviews are listed in the local ledger for the final whole-branch review. The most
+relevant open ones are:
 - `metrics_history` carries no SYNTHETIC flag;
 - no browser check of the 6-7 pair has been done yet.
+(The send-loop finding was fixed in Task 25: an unexpected send error is logged and
+closes the socket with code 1011.)
 
 The ledgers under `.superpowers/sdd/` are git-ignored local files. On another
 machine they won't exist. Rebuild progress from `git log` (task commits name

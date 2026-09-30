@@ -64,6 +64,7 @@ class Hub:
         self.arrivals = deque()
         self.active_source = None
         self.client_counts = None   # optional callable returning {operators, viewers}
+        self.last_error = None      # why the last run() ended 'down', for the source supervisor
         self.source = dict(kind='none', state='starting', detail='', responds_to_tuning=False)
 
     def subscribe(self, fn):
@@ -197,8 +198,12 @@ class Hub:
     def stats_outgoing(self, clients=None):
         return Outgoing('stats', 'slot', 'stats', dumps(self.stats_message(clients)))
 
-    def set_source(self, source, state, detail=''):
-        """Record the source state; ``source`` None means no source could be opened."""
+    def set_source(self, source, state, detail='', retry_in_s=None):
+        """Record the source state; ``source`` None means no source could be opened.
+
+        A source with a ``port`` (serial) reports it; ``retry_in_s`` is the delay before the
+        supervisor's next open attempt. Events come only from state changes (EventDeriver dedups).
+        """
         profile = self.source.get('profile')
         self.active_source = source
         if source is None:
@@ -208,6 +213,10 @@ class Hub:
                                responds_to_tuning=source.responds_to_tuning)
         if profile is not None:
             self.source['profile'] = profile
+        if getattr(source, 'port', None):
+            self.source['port'] = source.port
+        if retry_in_s is not None:
+            self.source['retry_in_s'] = retry_in_s
         if source is not None and hasattr(source, 'source_state'):
             self.source.update(source.source_state())
         self.publish(self.stats_outgoing())
@@ -217,6 +226,7 @@ class Hub:
     async def run(self, source):
         """Consume a source until it ends or fails. Link state survives; the decoder restarts."""
         self.decoder = StreamDecoder()
+        self.last_error = None
         self.set_source(source, 'running')
         try:
             async for data in source.chunks():
@@ -225,10 +235,12 @@ class Hub:
             self.set_source(source, 'stopped')
             raise
         except (ToolError, OSError) as exc:
+            self.last_error = exc
             self.set_source(source, 'down', str(exc))
             return
         except Exception as exc:
             logger.exception('GUI source failed')
+            self.last_error = exc
             self.set_source(source, 'down', str(exc))
             return
         self.set_source(source, 'ended')

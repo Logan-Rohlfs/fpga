@@ -1,4 +1,5 @@
 # tools/tests/test_sources.py
+import errno
 from pathlib import Path
 import tempfile
 import unittest
@@ -111,6 +112,44 @@ class SerialSourceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out, b'abcd')
         self.assertTrue(source.session.closed)
         self.assertEqual(source.detail, 'fake0 @ 1000000 baud')
+
+
+class BackoffTest(unittest.TestCase):
+    def test_sequence_and_reset(self):
+        backoff = sources.Backoff()
+        self.assertEqual([backoff.next() for _ in range(6)], [0.5, 1, 2, 4, 8, 8])
+        backoff.reset()
+        self.assertEqual([backoff.next() for _ in range(2)], [0.5, 1])
+
+
+class ClassifyOpenErrorTest(unittest.TestCase):
+    def chained(self, cause):
+        try:
+            raise ToolError('Cannot open /dev/x') from cause
+        except ToolError as exc:
+            return exc
+
+    def test_errno_of_the_cause(self):
+        self.assertEqual(sources.classify_open_error(
+            self.chained(OSError(errno.ENOENT, 'No such file or directory'))), 'missing')
+        self.assertEqual(sources.classify_open_error(self.chained(OSError(errno.ENXIO, 'Device not configured'))),
+                         'missing')
+        self.assertEqual(sources.classify_open_error(self.chained(OSError(errno.EBUSY, 'Resource busy'))), 'busy')
+        self.assertEqual(sources.classify_open_error(self.chained(OSError(errno.EACCES, 'Permission denied'))),
+                         'busy')
+
+    def test_message_text(self):
+        self.assertEqual(sources.classify_open_error(ToolError(
+            "could not open port COM4: PermissionError(13, 'Access is denied.')")), 'busy')
+        self.assertEqual(sources.classify_open_error(ToolError(
+            'Cannot open /dev/x: could not open port /dev/x: No such file or directory')), 'missing')
+        self.assertEqual(sources.classify_open_error(ValueError('x')), 'other')
+
+    def test_exclusive_lock_conflict_is_busy(self):
+        # pyserial's posix exclusive=True flock fails with EAGAIN when another process holds the port.
+        self.assertEqual(sources.classify_open_error(self.chained(OSError(
+            errno.EAGAIN, 'Could not exclusively lock port /dev/x: [Errno 35] Resource temporarily unavailable'))),
+            'busy')
 
 
 class FactoryTest(unittest.TestCase):

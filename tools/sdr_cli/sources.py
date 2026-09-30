@@ -5,6 +5,7 @@ Every source yields raw link bytes, so all of them go through the one StreamDeco
 in hub.py. Serial tuning is enabled only after a receiver CONFIG capability report.
 """
 import asyncio
+import errno
 import math
 from pathlib import Path
 import random
@@ -14,6 +15,49 @@ from . import apex, freqplan, protocol as p
 from .core import ToolError
 
 LINK_BYTES_PER_S = 100000   # 1 Mbaud, 8N1
+
+_MISSING_ERRNOS = (errno.ENOENT, errno.ENXIO)
+# EAGAIN: pyserial's exclusive flock fails this way when another ./sdr process holds the port.
+_BUSY_ERRNOS = (errno.EBUSY, errno.EACCES, errno.EPERM, errno.EAGAIN)
+# pyserial on Windows reports these as message text only, without an errno.
+_MISSING_TEXT = ('No such file', 'cannot find the file')
+_BUSY_TEXT = ('Resource busy', 'Access is denied', 'Could not exclusively lock')
+
+
+class Backoff:
+    """Serial retry delays (spec 18): 0.5, 1, 2, 4, 8 s, then every 8 s until reset()."""
+
+    def __init__(self, initial=0.5, maximum=8.0):
+        self.initial, self.maximum = initial, maximum
+        self._delay = initial
+
+    def next(self):
+        delay = self._delay
+        self._delay = min(self._delay * 2, self.maximum)
+        return delay
+
+    def reset(self):
+        self._delay = self.initial
+
+
+def classify_open_error(exc):
+    """'missing', 'busy' or 'other' for a failed port open, from the errno or text of exc and its causes."""
+    chain = []
+    while exc is not None and exc not in chain:
+        chain.append(exc)
+        exc = exc.__cause__
+    for item in chain:
+        code = getattr(item, 'errno', None)
+        if code in _MISSING_ERRNOS:
+            return 'missing'
+        if code in _BUSY_ERRNOS:
+            return 'busy'
+    text = ' '.join(str(item) for item in chain)
+    if any(t in text for t in _MISSING_TEXT):
+        return 'missing'
+    if any(t in text for t in _BUSY_TEXT):
+        return 'busy'
+    return 'other'
 
 
 class SerialSource:
@@ -36,8 +80,19 @@ class SerialSource:
         return self.control.snapshot() if self.control else {}
 
     @property
+    def port(self):
+        return self.session.port or self.session.config['port']
+
+    @property
     def detail(self):
-        return '{} @ {} baud'.format(self.session.port or self.session.config['port'], self.session.config['baud'])
+        return '{} @ {} baud'.format(self.port, self.session.config['baud'])
+
+    def open(self):
+        """Open the port now (raises ToolError); chunks() then reuses the open session."""
+        self.session.connect()
+
+    def close(self):
+        self.session.close()
 
     async def chunks(self):
         self.session.connect()

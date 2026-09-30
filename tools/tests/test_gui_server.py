@@ -1,18 +1,22 @@
 # tools/tests/test_gui_server.py
 import asyncio
+import errno
 import json
+import socket
 from pathlib import Path
 import tempfile
 import unittest
 
 from link_samples import rom_flight_frames, sample_stream
 from sdr_cli import fanout, gui_wire, protocol as p, roles as r
-from sdr_cli import freqplan
+from sdr_cli import freqplan, sources
+from sdr_cli.core import ToolError
 from sdr_cli.hub import Hub
 
 try:
     from aiohttp import WSMsgType
     from aiohttp.test_utils import TestClient, TestServer
+    from sdr_cli.web import server as web_server
     from sdr_cli.web.server import GuiServer
 except ImportError:   # the gui extra is optional
     GuiServer = None
@@ -55,6 +59,50 @@ class SampleOnce:
         await asyncio.sleep(3600)
 
 
+class FakeSession:
+    """Serial session whose opens follow a shared script; an empty script opens fine."""
+    script = []            # shared: each connect() pops an action
+    fail_read = False      # one-shot read failure
+
+    def __init__(self, config):
+        self.config, self.port = config, config['port']
+        self.connected = False
+
+    def connect(self):
+        if self.connected:
+            return
+        action = FakeSession.script.pop(0) if FakeSession.script else 'ok'
+        if isinstance(action, Exception):
+            raise ToolError('Cannot open {}: {}'.format(self.port, action)) from action
+        self.connected = True
+
+    def read(self):
+        if FakeSession.fail_read:
+            FakeSession.fail_read = False
+            self.connected = False
+            raise ToolError('UART disconnected') from OSError(errno.EIO, 'I/O error')
+        return b''
+
+    def send(self, data):
+        pass
+
+    def close(self):
+        self.connected = False
+
+
+def serial_factory(get_tuning):
+    return sources.SerialSource(dict(port='/dev/fake0', baud=1000000), session_factory=FakeSession,
+                                get_tuning=get_tuning)
+
+
+def distinct(states):
+    out = []
+    for s in states:
+        if not out or out[-1] != s:
+            out.append(s)
+    return out
+
+
 @unittest.skipIf(GuiServer is None, 'aiohttp not installed: pip install -e ".[gui]"')
 class GuiServerTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -69,10 +117,12 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         self.server, self.client = await self.start(
             lambda get_tuning: SampleOnce(lambda: self.server is not None and self.server.clients))
 
-    async def start(self, factory, hub=None):
+    async def start(self, factory, hub=None, sleep=None):
         roles = r.RoleManager(r.hash_password('pw', iterations=1000))
         server = GuiServer(factory, roles, self.state_path, static_dir=self.static, hub=hub)
         server.BAD_PASSWORD_DELAY_S = 0
+        if sleep is not None:
+            server.sleep = sleep
         client = TestClient(TestServer(server.app()))
         await client.start_server()
         self.addAsyncCleanup(client.close)
@@ -343,3 +393,151 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
             await self.recv(ws,lambda m:m['type']=='stats' and m['source']['kind']=='sim' and m['source']['state']=='running')
         self.assertEqual(events,['start','closed','start'])
         await ws.close()
+
+    # ---- serial supervisor (spec 18)
+    def recorder(self, hub):
+        """Source dicts from every stats Outgoing, and source_state event texts, before any outbox."""
+        stats, events = [], []
+
+        def record(out):
+            if out.channel == 'stats':
+                stats.append(json.loads(out.data)['source'])
+            elif out.channel == 'events':
+                events.extend(e['text'] for e in json.loads(out.data)['items'] if e['kind'] == 'source_state')
+        hub.subscribe(record)
+        return stats, events
+
+    async def until(self, predicate, timeout=3.0):
+        async def poll():
+            while not predicate():
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(poll(), timeout)
+
+    def serial_setup(self, script):
+        FakeSession.script, FakeSession.fail_read = list(script), False
+        self.addCleanup(setattr, FakeSession, 'script', [])
+        self.addCleanup(setattr, FakeSession, 'fail_read', False)
+
+    async def test_serial_supervisor_reports_waiting_busy_running_and_reconnects(self):
+        self.serial_setup([OSError(errno.ENOENT, 'No such file or directory'), OSError(errno.EBUSY, 'Resource busy'),
+                           'ok'])
+        sleeps = []
+
+        async def sleep(delay):
+            sleeps.append(delay)
+        hub = Hub()
+        stats, _ = self.recorder(hub)
+        server, _ = await self.start(serial_factory, hub=hub, sleep=sleep)
+        await self.until(lambda: stats and stats[-1]['state'] == 'running')
+        self.assertEqual(distinct([s['state'] for s in stats]), ['waiting', 'busy', 'running'])
+        busy = next(s for s in stats if s['state'] == 'busy')
+        self.assertIn('/dev/fake0', busy['detail'])
+        self.assertIn('another process', busy['detail'])
+        self.assertEqual(busy['port'], '/dev/fake0')
+        self.assertEqual(busy['retry_in_s'], 1.0)
+        self.assertEqual(next(s for s in stats if s['state'] == 'waiting')['retry_in_s'], 0.5)
+        mark = len(stats)
+        FakeSession.fail_read = True
+        await self.until(lambda: stats[-1]['state'] == 'running' and 'reconnecting' in [s['state'] for s in stats[mark:]])
+        after = distinct([s['state'] for s in stats[mark:]])
+        self.assertEqual(after[after.index('reconnecting'):], ['reconnecting', 'running'])
+        reconnecting = next(s for s in stats[mark:] if s['state'] == 'reconnecting')
+        self.assertEqual(reconnecting['retry_in_s'], 0.5)
+        self.assertIn('UART disconnected', reconnecting['detail'])
+        self.assertEqual(sleeps, [0.5, 1.0, 0.5])   # the back-off resets after running
+        self.assertNotIn('retry_in_s', stats[-1])
+
+    async def test_only_state_changes_emit_source_state_events(self):
+        self.serial_setup([OSError(errno.EBUSY, 'Resource busy'), OSError(errno.EBUSY, 'Resource busy'), 'ok'])
+        sleeps = []
+
+        async def sleep(delay):
+            sleeps.append(delay)
+        hub = Hub()
+        stats, events = self.recorder(hub)
+        await self.start(serial_factory, hub=hub, sleep=sleep)
+        await self.until(lambda: stats and stats[-1]['state'] == 'running')
+        self.assertEqual(sleeps, [0.5, 1.0])
+        self.assertEqual([t.split(' (')[0] for t in events], ['Source busy', 'Source running'])
+
+    async def test_operator_reconnect_cuts_a_long_wait_short(self):
+        self.serial_setup([OSError(errno.ENOENT, 'No such file or directory')])
+        sleeps = []
+
+        async def sleep(delay):
+            sleeps.append(delay)
+            await asyncio.sleep(3600)
+        hub = Hub()
+        stats, _ = self.recorder(hub)
+        server, client = await self.start(serial_factory, hub=hub, sleep=sleep)
+        await self.until(lambda: stats and stats[-1]['state'] == 'waiting')
+        viewer, _ = await self.connect(client)
+        await viewer.send_json(dict(type='reconnect_source'))
+        self.assertEqual((await self.recv(viewer, self.of('error')))['code'], 'not_admin')
+        self.assertEqual(stats[-1]['state'], 'waiting')
+        operator, _ = await self.connect(client)
+        await operator.send_json(dict(type='login', password='pw', label='gs'))
+        await self.recv(operator, self.of('role', role='admin'))
+        await operator.send_json(dict(type='reconnect_source'))
+        await self.until(lambda: stats[-1]['state'] == 'running', timeout=1.0)
+        self.assertEqual(sleeps, [0.5])
+        await viewer.close()
+        await operator.close()
+
+    async def test_replay_does_not_reconnect_after_ended(self):
+        made, sleeps = [], []
+
+        class Short:
+            kind, responds_to_tuning, detail = 'replay', False, 'short'
+
+            async def chunks(self):
+                yield b''
+
+        def factory(get_tuning):
+            made.append(1)
+            return Short()
+
+        async def sleep(delay):
+            sleeps.append(delay)
+        hub = Hub()
+        stats, _ = self.recorder(hub)
+        await self.start(factory, hub=hub, sleep=sleep)
+        await self.until(lambda: stats and stats[-1]['state'] == 'ended')
+        await asyncio.sleep(0.1)
+        self.assertEqual((len(made), sleeps, stats[-1]['state']), (1, [], 'ended'))
+
+    async def test_send_loop_failure_is_logged_and_closes_the_socket(self):
+        ws, _ = await self.connect()
+        client = next(iter(self.server.clients.values()))
+
+        def broken():
+            raise ValueError('encoder bug')
+        client.outbox.next = broken
+        with self.assertLogs('sdr_cli.web.server', 'ERROR'):
+            client.ready.set()
+            msg = await asyncio.wait_for(self._until_closed(ws), 3)
+        self.assertEqual(msg.type, WSMsgType.CLOSE)
+        self.assertEqual(ws.close_code, 1011)
+
+    async def _until_closed(self, ws):
+        while True:
+            msg = await ws.receive()
+            if msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.CLOSING):
+                return msg
+
+
+@unittest.skipIf(GuiServer is None, 'aiohttp not installed: pip install -e ".[gui]"')
+class PreflightBindTest(unittest.TestCase):
+    def test_port_in_use_raises_and_free_port_passes(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
+            held.bind(('127.0.0.1', 0))
+            held.listen()
+            port = held.getsockname()[1]
+            with self.assertRaises(ToolError) as caught:
+                web_server.preflight_bind('127.0.0.1', port)
+            self.assertIn(str(port), str(caught.exception))
+            self.assertIn('--http-port', str(caught.exception))
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(('127.0.0.1', 0))
+            free = probe.getsockname()[1]
+        self.assertIsNone(web_server.preflight_bind('127.0.0.1', free))

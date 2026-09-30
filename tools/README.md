@@ -186,10 +186,25 @@ For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
 - **Telemetry:** Edit layout enables drag reorder, corner/arrow-key resizing,
   and earlier/later buttons (also usable on touch devices). Layout and theme
   are saved locally in the browser; Reset layout restores the defaults.
-- **Disconnection:** the browser retries automatically and dims old data. Source
-  failures stay visible; an Admin can Reconnect after fixing the cause. Receiving
-  continues while the display is frozen. Tuning is saved in ignored
-  `.sdr/gui_state.json`.
+- **Disconnection:** the browser retries automatically and dims old data. The
+  banner tells the two failures apart: "Server unreachable" means the browser
+  cannot reach the GUI server; "Server up. …" means the server runs but the board
+  UART is not delivering. Receiving continues while the display is frozen.
+  Tuning is saved in ignored `.sdr/gui_state.json`.
+- **Serial auto-reconnect:** with the UART source, the server survives losing the
+  port (USB unplugged, board reprogrammed) and reopens it by itself after 0.5, 1,
+  2, 4 and 8 s, then every 8 s. A successful open resets the delay. The status
+  pill and banner show the state: `connected`; `waiting for port` (the device is
+  absent); `port busy` (another process such as a second `./sdr gui`,
+  `./sdr tui` or `./sdr receive` holds it; close that process); or
+  `reconnecting in N s` (a read failure or another open error). One link event is
+  logged per state change, not per retry. The Operator's Reconnect button retries
+  at once. Replay and sim sources never auto-reconnect; an ended replay stays
+  ended, and a failed one can be restarted with Reconnect.
+- **Port conflicts:** `./sdr gui` checks its HTTP port before starting. If another
+  process (probably another `./sdr gui`) already listens there, it exits non-zero
+  with "HTTP port 8080 on 127.0.0.1 is already in use, probably by another
+  ./sdr gui. Stop it, or choose another port with --http-port."
 - **Replay limitations:** pacing uses capture byte count, not recorded time.
   Loop boundaries restart original sequence numbers and can increment the gap
   counter; a capture cut mid-frame can also yield a decode error at the boundary.

@@ -5,7 +5,8 @@
   import Notices from './components/Notices.svelte';
   import RoleMenu from './components/RoleMenu.svelte';
   import StatusBar from './components/StatusBar.svelte';
-  import { connection, frozen, link, stats } from './lib/link';
+  import { connection, frozen, hello, link, stats } from './lib/link';
+  import { connectionBanner } from './lib/status';
   import { channelsFor } from './lib/subscriptions';
   import { type ThemeChoice, applyTheme, loadTheme, nextTheme, refreshAppearance } from './lib/theme';
   import { tuneChannel } from './lib/view';
@@ -21,6 +22,7 @@
   let hidden = $state(document.hidden);
   // The current Telemetry cards read only link and frame records (Task 10 derives this from the preset).
   const TELEMETRY_CHANNELS = ['link', 'frames'];
+  const banner = $derived(connectionBanner($connection, $stats?.source ?? $hello?.source));
 
   $effect(() => {
     link.setSubscriptions(channelsFor(page, { tuneChannel: $tuneChannel, cardChannels: TELEMETRY_CHANNELS, hidden }));
@@ -84,9 +86,8 @@
   </div>
 </header>
 
-{#if $connection !== 'open'}<p class="connection-note" role="status">Disconnected — retrying. Showing last received data.</p>
-{:else if $stats && $stats.source.state !== 'running'}<p class="connection-note" role="status">Source {$stats.source.state}: {$stats.source.detail}. Showing last received data.</p>{/if}
-<main class:stale={$connection !== 'open' || (!!$stats && $stats.source.state !== 'running')}>
+{#if banner}<p class="connection-note {banner.level}" role="status">{banner.text}</p>{/if}
+<main class:stale={!!banner}>
   {#if page === 'tune'}<Tune />{:else}<Telemetry />{/if}
 </main>
 <Notices />
@@ -105,7 +106,9 @@
   .tabs button[aria-current='page'] { background: var(--panel-2); color: var(--fg); box-shadow: inset 0 -2px 0 var(--brand); }
   .status { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .stale { opacity: 0.55; }
-  .connection-note { margin: 0; padding: 8px 16px; color: var(--warn); background: var(--panel); }
+  .connection-note { margin: 0; padding: 8px 16px; color: var(--muted); background: var(--panel); }
+  .connection-note.warn { color: var(--warn); }
+  .connection-note.bad { color: var(--bad); }
   main { padding: 14px 16px 24px; }
   @media (max-width: 700px) { .status { margin-left: 0; } }
 </style>

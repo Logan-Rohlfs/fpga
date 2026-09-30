@@ -4,6 +4,7 @@ See docs/superpowers/specs/2026-09-29-gui-design.md. All logic lives in the
 toolkit-free modules (hub, roles, freqplan, sources); this file is glue.
 """
 import asyncio
+import errno
 import json
 import logging
 from pathlib import Path
@@ -20,13 +21,17 @@ from ..fanout import CHANNELS, Outbox
 from ..hub import Hub, dumps
 from ..protocol import PROTOCOL_VERSION
 from ..roles import ADMIN, RoleManager
-from ..sources import from_args
+from ..sources import Backoff, classify_open_error, from_args
 
 STATIC_DIR = Path(__file__).resolve().parent / 'static'
 QUEUE_MAX = 400   # control messages; fanout.CONTROL_MAX enforces it
 DROPPED_PERIOD_S = 1.0
 LOCAL_ADDRESSES = ('127.0.0.1', '::1')
 BUILD_HINT = 'GUI is not built. Run: cd tools/sdr_web && npm install && npm run build'
+BUSY_DETAIL = '{} is held by another process (another ./sdr gui, ./sdr tui or receive?). Close it; retrying.'
+WSAEADDRINUSE = 10048
+
+logger = logging.getLogger(__name__)
 
 
 def error(code, text):
@@ -70,6 +75,8 @@ class Client:
 class GuiServer:
     STATS_PERIOD_S = 0.5
     BAD_PASSWORD_DELAY_S = 1.0
+    RETRY = Backoff
+    sleep = staticmethod(asyncio.sleep)   # injectable: the serial supervisor's retry wait
 
     def __init__(self, source_factory, roles, state_path, static_dir=STATIC_DIR, hub=None, clock=time.monotonic):
         self.source_factory = source_factory
@@ -84,6 +91,8 @@ class GuiServer:
         self.source_task = None
         self.tasks = []
         self.source_lock = asyncio.Lock()
+        self.retry_wake = asyncio.Event()
+        self.retrying = False
         self.hub.client_counts = self.client_counts
         self.hub.subscribe(self.offer)
 
@@ -123,12 +132,64 @@ class GuiServer:
             if self.source_task and not self.source_task.done():
                 self.source_task.cancel()
                 await asyncio.gather(self.source_task, return_exceptions=True)
+            source = self._make_source()
+            if source is not None:
+                self.source_task = asyncio.ensure_future(self._supervise(source))
+
+    def _make_source(self):
+        try:
+            return self.source_factory(lambda: self.tuning)
+        except ToolError as exc:
+            self.hub.set_source(None, 'down', str(exc))
+            return None
+
+    async def _supervise(self, source):
+        """Run the source; a serial port is reopened with back-off after any failure (spec 18).
+
+        State changes go through Hub.set_source, whose EventDeriver emits one source_state
+        event per change, so repeated retries in the same state log nothing new.
+        """
+        if source.kind != 'serial':
+            await self.hub.run(source)
+            return
+        backoff = self.RETRY()
+        while True:
             try:
-                source = self.source_factory(lambda: self.tuning)
-            except ToolError as exc:
-                self.hub.set_source(None, 'down', str(exc))
+                source.open()
+            except Exception as exc:
+                reason = classify_open_error(exc)
+                if reason == 'missing':
+                    state, detail = 'waiting', source.detail
+                elif reason == 'busy':
+                    state, detail = 'busy', BUSY_DETAIL.format(source.port)
+                else:
+                    state, detail = 'reconnecting', str(exc)
+            else:
+                backoff.reset()
+                try:
+                    await self.hub.run(source)
+                finally:
+                    source.close()
+                state, detail = 'reconnecting', str(self.hub.last_error or 'The serial source stopped.')
+            delay = backoff.next()
+            self.hub.set_source(source, state, detail, retry_in_s=delay)
+            await self._retry_wait(delay)
+            source = self._make_source()
+            if source is None:
                 return
-            self.source_task = asyncio.ensure_future(self.hub.run(source))
+
+    async def _retry_wait(self, delay):
+        """Sleep before the next open; an operator reconnect_source cuts it short."""
+        self.retry_wake.clear()
+        self.retrying = True
+        sleeper = asyncio.ensure_future(self.sleep(delay))
+        waker = asyncio.ensure_future(self.retry_wake.wait())
+        try:
+            await asyncio.wait({sleeper, waker}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            self.retrying = False
+            sleeper.cancel()
+            waker.cancel()
 
     async def _housekeeping(self):
         while True:
@@ -220,6 +281,11 @@ class GuiServer:
                     await ws.send_str(data)
         except (ConnectionResetError, RuntimeError):
             return
+        except Exception:
+            # Without this, the socket would stay open while this client silently gets nothing.
+            logger.exception('GUI send loop failed')
+            client.closing = True
+            await ws.close(code=1011, message=b'Server send error: reconnect')
 
     # ---- incoming
     async def websocket(self, request):
@@ -250,7 +316,7 @@ class GuiServer:
                 try:
                     await self.handle(client, data)
                 except Exception:
-                    logging.getLogger(__name__).exception('GUI message handler failed')
+                    logger.exception('GUI message handler failed')
                     client.put(error('bad_request', 'The server could not handle that message.'))
         finally:
             sender.cancel()
@@ -312,7 +378,10 @@ class GuiServer:
             if not is_admin:
                 client.put(error('not_admin', 'Only the Admin can reconnect the source.'))
                 return
-            await self.start_source()
+            if self.retrying and self.source_task and not self.source_task.done():
+                self.retry_wake.set()   # the serial supervisor retries at once, keeping its back-off
+            else:
+                await self.start_source()
         else:
             client.put(error('unknown_type', 'Unknown message type: {}'.format(kind)))
 
@@ -365,6 +434,21 @@ def lan_addresses():
     return sorted(found)
 
 
+def preflight_bind(host, port):
+    """Fail loudly if another process (probably another ./sdr gui) already listens on the port."""
+    family = socket.AF_INET6 if ':' in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        try:
+            probe.bind((host, port))
+            probe.listen()
+        except OSError as exc:
+            if exc.errno == errno.EADDRINUSE or getattr(exc, 'winerror', None) == WSAEADDRINUSE:
+                raise ToolError('HTTP port {} on {} is already in use, probably by another ./sdr gui. Stop it, '
+                                'or choose another port with --http-port.'.format(port, host)) from exc
+            raise ToolError('Cannot listen on {} port {}: {}'.format(host, port, exc)) from exc
+
+
 def run_gui(root, config, args):
     if not (STATIC_DIR / 'index.html').is_file():
         raise ToolError(BUILD_HINT)
@@ -372,6 +456,7 @@ def run_gui(root, config, args):
     roles = RoleManager(config.get('gui_admin_hash', ''))
     server = GuiServer(factory, roles, root / '.sdr/gui_state.json')
     host = '0.0.0.0' if args.lan else '127.0.0.1'
+    preflight_bind(host, args.http_port)
     url = 'http://127.0.0.1:{}/'.format(args.http_port)
     print('SDR GUI at {} (source: {})'.format(url, args.source))
     if args.lan:
