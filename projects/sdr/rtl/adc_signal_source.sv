@@ -144,14 +144,36 @@ module adc_signal_source #(
             else clamp=x[11:0];
         end
     endfunction
-    wire signed [2:0] nrz=packet_bit ? 3'sd1 : -3'sd1;
+    // Every input to the bit, step and tone logic changes only on a sample
+    // edge, so this logic runs as a three-register pipeline that settles
+    // before the next sample edge (DIVIDER >= 4). It keeps the bit lookup,
+    // deviation multiply and tone multiply off the phase/sample registers
+    // without changing any sample value.
+    reg packet_bit_q;
+    reg signed [7:0] shaped_q;
+    reg signed [31:0] step_q;
+    reg signed [11:0] sine_q;
+    reg signed [31:0] noise_a_q, noise_b_q, noise_a_q2, noise_b_q2, tone_a_q, tone_b_q;
+    reg signed [11:0] next_a, next_b;
+    wire signed [2:0] nrz=packet_bit_q ? 3'sd1 : -3'sd1;
     wire signed [7:0] shaped=nrz+4*shape0+6*shape1+4*shape2+shape3;
-    wire signed [63:0] deviation_product=$signed(DEV_STEP)*$signed(shaped);
+    wire signed [63:0] deviation_product=$signed(DEV_STEP)*$signed(shaped_q);
     wire signed [31:0] step=carrier_ftw+(deviation_product >>> 4);
     wire signed [31:0] noise_a=($signed({1'b0,random_a[7:0]})-128)*NOISE_A/128;
     wire signed [31:0] noise_b=($signed({1'b0,random_b[7:0]})-128)*NOISE_B/128;
-    wire signed [31:0] tone_a=(active && enable) ? ($signed(sine(phase[31:24]))*AMPLITUDE_A) >>> 11 : 0;
-    wire signed [31:0] tone_b=(active && enable) ? ($signed(sine(phase[31:24]))*AMPLITUDE_B) >>> 11 : 0;
+    always @(posedge clk) begin
+        packet_bit_q<=packet_bit;
+        shaped_q<=shaped;
+        step_q<=step;
+        // A zero sine gives the same zero tone as gating the product.
+        sine_q<=(active && enable) ? sine(phase[31:24]) : 12'sd0;
+        noise_a_q<=noise_a; noise_b_q<=noise_b;
+        tone_a_q<=($signed(sine_q)*AMPLITUDE_A) >>> 11;
+        tone_b_q<=($signed(sine_q)*AMPLITUDE_B) >>> 11;
+        noise_a_q2<=noise_a_q; noise_b_q2<=noise_b_q;
+        next_a<=clamp(tone_a_q+noise_a_q2);
+        next_b<=clamp(tone_b_q+noise_b_q2);
+    end
     always @(posedge clk) begin
         sample_valid<=0;
         if(rst) begin
@@ -163,11 +185,11 @@ module adc_signal_source #(
             for(j=0;j<B_DEPTH;j=j+1) b_delay[j]<=0;
         end else if(clock_count==DIVIDER-1) begin
             clock_count<=0;sample_valid<=1;
-            sample_a<=clamp(tone_a+noise_a);
-            b_delay[0]<=clamp(tone_b+noise_b);
+            sample_a<=next_a;
+            b_delay[0]<=next_b;
             for(j=1;j<B_DEPTH;j=j+1) b_delay[j]<=b_delay[j-1];
-            sample_b<=DELAY_B_SAMPLES==0 ? clamp(tone_b+noise_b) : b_delay[B_DEPTH-1];
-            phase<=phase+step;
+            sample_b<=DELAY_B_SAMPLES==0 ? next_b : b_delay[B_DEPTH-1];
+            phase<=phase+step_q;
             random_a<={random_a[14:0],random_a[15]^random_a[13]^random_a[12]^random_a[10]};
             random_b<={random_b[14:0],random_b[15]^random_b[13]^random_b[12]^random_b[10]};
             if(quarter_count==QUARTER-1) begin
@@ -179,7 +201,7 @@ module adc_signal_source #(
                 active<=1;bit_position<=0;bit_sample<=0;crc<=16'hffff;
             end else if(active) begin
                 if(bit_sample==0 && bit_position>=DATA_START && bit_position<CRC_START)
-                    crc<=(crc<<1)^((crc[15]^packet_bit) ? 16'h1021 : 16'h0000);
+                    crc<=(crc<<1)^((crc[15]^packet_bit_q) ? 16'h1021 : 16'h0000);
                 if(bit_sample==SPS-1) begin
                     bit_sample<=0;
                     if(bit_position==END_BIT+1) begin active<=0;sequence_number<=sequence_number+1;end
@@ -190,6 +212,7 @@ module adc_signal_source #(
     end
 `ifndef SYNTHESIS
     initial begin
+        if(DIVIDER<4) $fatal(1,"ADC source needs at least four clocks per sample for its register stages");
         if(CLK_HZ % SAMPLE_RATE_HZ != 0 || SAMPLE_RATE_HZ % BIT_RATE != 0 || SPS<4 || SPS%4!=0)
             $fatal(1,"ADC source requires integer clocks/sample and samples/bit divisible by four");
         if(PACKET_SAMPLES < (END_BIT+3)*SPS) $fatal(1,"Packet interval too short");
