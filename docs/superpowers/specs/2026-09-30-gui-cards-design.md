@@ -518,7 +518,7 @@ default), `A`, `B`, and, where noted, `both` (A and B overlaid).
 | `plot` | `series: [{field, source}]` 1–6 (`[{alt_agl_m, best}]`); `window_s`: 10/30/60/120/300/0 = all (60); `y: 'auto' \| {min, max}` in display units ('auto'); `show_events` (true); `units` ({}) | `flight` / `flight.A` / `flight.B` per series source; `events` if `show_events`; `link` for metric series | 3×4 |
 | `number` | `field` (alt_agl_m); `source` best/A/B/both (best); `digits` 0–3 (field default); `thresholds: [{above, level}]` with `above` in SI and level good/warn/bad ([]); `track_minmax` (false); `units` | flight channel of the source | 2×2 |
 | `state` | `source` (best); `show_time_in_phase` (true) | flight channel | 2×2 |
-| `events` | `kinds` (all); `newest_first` (true) | `events` | 3×4 |
+| `events` | `category` flight/link (flight); `kinds` (all kinds of that category); `newest_first` (true) | `events` | 3×4 |
 | `map` | `site` (first registry site); `layer` imagery/topo (imagery); `follow` (true); `show_track` (true); `source` (best) | flight channel | 3×5 |
 | `trajectory3d` | `site`; `layer` (imagery); `exaggeration` 1–5 (1); `source` (best) | flight channel | 4×6 |
 | `camera` | `url` (null); `mode` mjpeg/video (mjpeg); `fit` contain/cover (contain) | none | 3×4 |
@@ -551,7 +551,8 @@ Behaviour per card:
   `PHASE_COLORS` hues adapted to the theme tokens), the time in phase (mm:ss,
   since the last phase change on that source), and seq. An unknown phase value
   shows `UNKNOWN (n)`.
-- **Event log**: virtualized list (§11.2), a kind filter chip row, timestamps
+- **Event log**: titled "Flight events" or "Link events" by its `category`;
+  the kind filter chips list only that category's kinds. Virtualized list (§11.2), timestamps
   (local time and T+ from the last launch when one exists), and value with
   units via `units.ts`.
 - **Map** and **3D**: §13.
@@ -663,8 +664,17 @@ decisions file lists "event derivation" under frontend tests. Derivation lives i
 Python because late-joiner history and every viewer must see identical events.
 The frontend tests cover event filtering and formatting (`lib/events.ts`).
 
-Event object: `{id: int (monotonic), t: float, kind, text, channel: 'A'|'B'|null,
-value: number|null, quantity: string|null, segment: int, synthetic: bool}`.
+Event object: `{id: int (monotonic), t: float, kind, category: 'flight'|'link',
+text, channel: 'A'|'B'|null, value: number|null, quantity: string|null,
+segment: int, synthetic: bool}`.
+
+**Refinement (user, 2026-09-30):** "events" primarily means flight-state
+events (phase transitions such as launch and burnout). Link events are a
+separate, secondary feature. Every event carries `category`: `flight` for the
+flight kinds below, `link` for the link kinds (`source_state` included). Both
+categories share the `events` channel and history, but the UI never mixes them
+by default: the event-log card shows one category (see §7), plot markers and
+preset triggers use flight events only.
 
 **Flight events** use BEST rows only (origin `best`):
 
