@@ -19,8 +19,9 @@ LINK_BYTES_PER_S = 100000   # 1 Mbaud, 8N1
 _MISSING_ERRNOS = (errno.ENOENT, errno.ENXIO)
 # EAGAIN: pyserial's exclusive flock fails this way when another ./sdr process holds the port.
 _BUSY_ERRNOS = (errno.EBUSY, errno.EACCES, errno.EPERM, errno.EAGAIN)
-# pyserial on Windows reports these as message text only, without an errno.
-_MISSING_TEXT = ('No such file', 'cannot find the file')
+# pyserial on Windows reports these as message text only, without an errno. serial_io's
+# 'auto' port resolution reports an absent board as "Cannot select a unique Basys 3 UART".
+_MISSING_TEXT = ('No such file', 'cannot find the file', 'Cannot select a unique')
 _BUSY_TEXT = ('Resource busy', 'Access is denied', 'Could not exclusively lock')
 
 

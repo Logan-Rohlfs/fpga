@@ -7,6 +7,7 @@ import asyncio
 import errno
 import json
 import logging
+import os
 from pathlib import Path
 import socket
 import time
@@ -90,11 +91,23 @@ class GuiServer:
         self.clients = {}
         self.source_task = None
         self.tasks = []
-        self.source_lock = asyncio.Lock()
-        self.retry_wake = asyncio.Event()
+        # Created lazily inside the running loop: run_gui builds this object outside any loop,
+        # and on Python 3.9 asyncio primitives bind to the loop current at construction.
+        self._source_lock = None
+        self._retry_wake = None
         self.retrying = False
         self.hub.client_counts = self.client_counts
         self.hub.subscribe(self.offer)
+
+    def lock(self):
+        if self._source_lock is None:
+            self._source_lock = asyncio.Lock()
+        return self._source_lock
+
+    def wake(self):
+        if self._retry_wake is None:
+            self._retry_wake = asyncio.Event()
+        return self._retry_wake
 
     # ---- lifecycle
     def app(self):
@@ -128,7 +141,7 @@ class GuiServer:
         self.save_if_dirty()
 
     async def start_source(self):
-        async with self.source_lock:
+        async with self.lock():
             if self.source_task and not self.source_task.done():
                 self.source_task.cancel()
                 await asyncio.gather(self.source_task, return_exceptions=True)
@@ -149,6 +162,13 @@ class GuiServer:
         State changes go through Hub.set_source, whose EventDeriver emits one source_state
         event per change, so repeated retries in the same state log nothing new.
         """
+        try:
+            await self._supervise_loop(source)
+        except Exception as exc:
+            logger.exception('GUI source supervisor failed')
+            self.hub.set_source(source, 'down', 'Source supervisor failed: {}'.format(exc))
+
+    async def _supervise_loop(self, source):
         if source.kind != 'serial':
             await self.hub.run(source)
             return
@@ -180,12 +200,16 @@ class GuiServer:
 
     async def _retry_wait(self, delay):
         """Sleep before the next open; an operator reconnect_source cuts it short."""
-        self.retry_wake.clear()
+        wake = self.wake()
+        wake.clear()
         self.retrying = True
         sleeper = asyncio.ensure_future(self.sleep(delay))
-        waker = asyncio.ensure_future(self.retry_wake.wait())
+        waker = asyncio.ensure_future(wake.wait())
         try:
             await asyncio.wait({sleeper, waker}, return_when=asyncio.FIRST_COMPLETED)
+            for task in (sleeper, waker):
+                if task.done() and not task.cancelled() and task.exception() is not None:
+                    raise task.exception()   # never spin on a wait that failed at once
         finally:
             self.retrying = False
             sleeper.cancel()
@@ -379,7 +403,7 @@ class GuiServer:
                 client.put(error('not_admin', 'Only the Admin can reconnect the source.'))
                 return
             if self.retrying and self.source_task and not self.source_task.done():
-                self.retry_wake.set()   # the serial supervisor retries at once, keeping its back-off
+                self.wake().set()   # the serial supervisor retries at once, keeping its back-off
             else:
                 await self.start_source()
         else:
@@ -438,7 +462,14 @@ def preflight_bind(host, port):
     """Fail loudly if another process (probably another ./sdr gui) already listens on the port."""
     family = socket.AF_INET6 if ':' in host else socket.AF_INET
     with socket.socket(family, socket.SOCK_STREAM) as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        if os.name == 'nt':
+            # Windows SO_REUSEADDR would let the probe steal a live port; exclusive use refuses it.
+            if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            # POSIX SO_REUSEADDR still refuses an active listener, but ignores TIME_WAIT leftovers
+            # from a server that just stopped, as aiohttp's own bind does.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind((host, port))
             probe.listen()

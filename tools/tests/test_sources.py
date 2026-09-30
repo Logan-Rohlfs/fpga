@@ -144,6 +144,9 @@ class ClassifyOpenErrorTest(unittest.TestCase):
         self.assertEqual(sources.classify_open_error(ToolError(
             'Cannot open /dev/x: could not open port /dev/x: No such file or directory')), 'missing')
         self.assertEqual(sources.classify_open_error(ValueError('x')), 'other')
+        # port 'auto' with no board attached
+        self.assertEqual(sources.classify_open_error(ToolError(
+            'Cannot select a unique Basys 3 UART. Run sdr ports, then sdr setup --port DEVICE.')), 'missing')
 
     def test_exclusive_lock_conflict_is_busy(self):
         # pyserial's posix exclusive=True flock fails with EAGAIN when another process holds the port.

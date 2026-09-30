@@ -527,6 +527,54 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
 
 
 @unittest.skipIf(GuiServer is None, 'aiohttp not installed: pip install -e ".[gui]"')
+class OutsideLoopTest(unittest.TestCase):
+    """run_gui builds GuiServer outside any loop; web.run_app then runs it on a new loop."""
+
+    def test_retry_wait_really_waits_on_a_fresh_loop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = GuiServer(lambda get_tuning: Idle(), r.RoleManager(''), Path(tmp) / 'state.json',
+                               static_dir=Path(tmp))
+            loop = asyncio.new_event_loop()
+            try:
+                start = loop.time()
+                loop.run_until_complete(server._retry_wait(0.2))
+                self.assertGreaterEqual(loop.time() - start, 0.18)
+
+                async def locked():
+                    async with server.lock():
+                        return True
+                self.assertTrue(loop.run_until_complete(locked()))
+            finally:
+                loop.close()
+
+    def test_supervisor_failure_is_logged_and_reported_down(self):
+        class Broken:
+            kind, responds_to_tuning, detail, port = 'serial', False, 'broken', '/dev/broken'
+
+            def open(self):
+                pass
+
+            def close(self):
+                pass
+
+        async def run():
+            hub = Hub()
+
+            async def boom(source):
+                raise KeyError('bug')
+            hub.run = boom
+            with tempfile.TemporaryDirectory() as tmp:
+                server = GuiServer(lambda get_tuning: Broken(), r.RoleManager(''), Path(tmp) / 's.json',
+                                   static_dir=Path(tmp), hub=hub)
+                with self.assertLogs('sdr_cli.web.server', 'ERROR'):
+                    await server._supervise(Broken())
+            return hub.source
+        source = asyncio.run(run())
+        self.assertEqual(source['state'], 'down')
+        self.assertIn('bug', source['detail'])
+
+
+@unittest.skipIf(GuiServer is None, 'aiohttp not installed: pip install -e ".[gui]"')
 class PreflightBindTest(unittest.TestCase):
     def test_port_in_use_raises_and_free_port_passes(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
@@ -541,3 +589,16 @@ class PreflightBindTest(unittest.TestCase):
             probe.bind(('127.0.0.1', 0))
             free = probe.getsockname()[1]
         self.assertIsNone(web_server.preflight_bind('127.0.0.1', free))
+
+    def test_time_wait_connections_do_not_block_a_restart(self):
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # as aiohttp does
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        client = socket.create_connection(('127.0.0.1', port))
+        accepted, _ = listener.accept()
+        accepted.close()   # the server side closes first, so its port is left in TIME_WAIT
+        client.close()
+        listener.close()
+        self.assertIsNone(web_server.preflight_bind('127.0.0.1', port))
