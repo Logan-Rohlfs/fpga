@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
@@ -20,7 +21,10 @@ class ToolError(Exception):
 DEFAULTS = dict(project="sdr", port="auto", baud=1000000, host="", user="",
                 identity="", remote_root="C:/sdr-builds",
                 vivado="C:/AMDDesignTools/2026.1/Vivado/bin/vivado.bat",
-                gui_admin_hash="")
+                gui_admin_hash="", host_cores=0)
+
+FALLBACK_HOST_CORES = 12
+MAX_VIVADO_THREADS = 8  # general.maxThreads limit
 
 
 def repo_root():
@@ -51,7 +55,9 @@ def validate_config(config):
         raise ToolError('Project must be sdr or blink.')
     if type(config['baud']) is not int or not 300 <= config['baud'] <= 4000000:
         raise ToolError('Baud must be an integer between 300 and 4000000.')
-    for field in DEFAULTS.keys() - {'baud'}:
+    if type(config['host_cores']) is not int or not 0 <= config['host_cores'] <= 1024:
+        raise ToolError('host_cores must be an integer from 0 (detect on the remote) to 1024.')
+    for field in DEFAULTS.keys() - {'baud', 'host_cores'}:
         if not isinstance(config[field], str) or any(ord(c) < 32 for c in config[field]):
             raise ToolError('Invalid {} in configuration.'.format(field))
     for field in ('host', 'user'):
@@ -168,11 +174,41 @@ def simulate(root, project, log=print):
     run(['make', 'sim', 'PROJECT=' + project], cwd=root, log=log)
 
 
-def build(root, config, log=print, demo=False):
+def thread_count(cores, concurrent):
+    """Vivado threads per build: an even share of the host, within 1..8."""
+    return max(1, min(MAX_VIVADO_THREADS, cores // max(1, concurrent)))
+
+
+def host_cores(config, log=print):
+    """Core count of the build host: config override, else the remote, else 12."""
+    if config.get('host_cores'):
+        return config['host_cores']
+    lines = []
+    try:
+        remote(config, 'Write-Output ("CORES=" + $env:NUMBER_OF_PROCESSORS)', lines.append)
+        for line in lines:
+            match = re.fullmatch(r'CORES=(\d+)', line.strip())
+            if match and int(match.group(1)) > 0:
+                return int(match.group(1))
+    except ToolError:
+        pass
+    log('Could not read the build host core count; assuming {}.'.format(FALLBACK_HOST_CORES))
+    return FALLBACK_HOST_CORES
+
+
+def pointer_name(variant):
+    """Bundle pointer per variant, so concurrent variants never fight over one."""
+    return 'latest' if variant == 'default' else 'latest-' + variant
+
+
+def build(root, config, log=print, demo=False, threads=None):
     """Build uncommitted sources in an isolated remote directory, then fetch results.
 
     demo=True selects the opt-in APEX flight replay variant of the sdr project
-    (sdr_top DEMO_FLIGHT=1). The default build is unchanged.
+    (sdr_top DEMO_FLIGHT=1). The default build is unchanged. threads is the
+    Vivado general.maxThreads for this build; None sizes it for a lone build.
+    The completed bundle is selected by build/PROJECT/latest (default variant)
+    or build/PROJECT/latest-demo.
     """
     project = config['project']
     variant = 'demo' if demo else 'default'
@@ -182,10 +218,14 @@ def build(root, config, log=print, demo=False):
     remote_dir = config['remote_root'].rstrip('/') + '/' + identifier
     target = config['user'] + '@' + config['host']
     ssh_base(config)  # validate before creating anything
+    if threads is None:
+        threads = thread_count(host_cores(config, log), 1)
+    if type(threads) is not int or not 1 <= threads <= MAX_VIVADO_THREADS:
+        raise ToolError('Vivado threads must be an integer from 1 to {}.'.format(MAX_VIVADO_THREADS))
     output_root = root / 'build' / project
     output_root.mkdir(parents=True, exist_ok=True)
-    log('Building {}{} snapshot {} on {}'.format(project, ' (flight replay demo)' if demo else '',
-                                                 identifier, config['host']))
+    log('Building {}{} snapshot {} on {} with {} Vivado threads'.format(
+        project, ' (flight replay demo)' if demo else '', identifier, config['host'], threads))
     with tempfile.TemporaryDirectory(prefix='sdr-build-') as temp:
         local = Path(temp)
         archive = local / 'sources.zip'
@@ -196,7 +236,7 @@ def build(root, config, log=print, demo=False):
         script = ("$ErrorActionPreference='Stop'; Set-Location " + ps_literal(remote_dir) + '; '
                   "Expand-Archive -LiteralPath sources.zip -DestinationPath . -Force; "
                   '& ' + ps_literal(config['vivado']) +
-                  ' -mode batch -source scripts/build.tcl -tclargs ' + project + (' demo' if demo else '') +
+                  ' -mode batch -source scripts/build.tcl -tclargs ' + project + ' ' + variant + ' ' + str(threads) +
                   '; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; '
                   'if (!(Test-Path ' + ps_literal('build/' + project + '/' + project + '.bit') +
                   ")) { throw 'Vivado did not produce a bitstream' }")
@@ -206,18 +246,18 @@ def build(root, config, log=print, demo=False):
                                         for name in names] + [str(local)], log=log)
         if not (local / (project + '.bit')).stat().st_size:
             raise ToolError('Downloaded bitstream is empty; previous build was preserved.')
-        manifest = dict(project=project, variant=variant, source_sha256=digest,
+        manifest = dict(project=project, variant=variant, source_sha256=digest, threads=threads,
                         bitstream_sha256=hashlib.sha256((local / (project + '.bit')).read_bytes()).hexdigest(),
                         built_at=time.time(), remote_dir=remote_dir, host=config['host'])
-        # Keep completed builds as immutable sets. A single pointer selects the whole set.
+        # Keep completed builds as immutable sets. A per-variant pointer selects the whole set.
         bundle = output_root / 'artifacts' / identifier
         bundle.mkdir(parents=True)
         for name in names:
             shutil.copy2(local / name, bundle / name)
         (bundle / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-        pointer = output_root / ('latest-' + identifier + '.tmp')
+        pointer = output_root / (pointer_name(variant) + '-' + identifier + '.tmp')
         pointer.write_text(identifier + '\n')
-        pointer.replace(output_root / 'latest')
+        pointer.replace(output_root / pointer_name(variant))
         log('Build complete ({} variant): {}'.format(variant, bundle / (project + '.bit')))
         if source_digest(root, project) != digest:
             log('Sources changed during this build. Rebuild before programming the current source.')
@@ -225,19 +265,63 @@ def build(root, config, log=print, demo=False):
         return bundle / (project + '.bit')
 
 
-def bitstream(root, project):
+def build_variants(root, config, variants=('default', 'demo'), log=print):
+    """Build several variants at the same time; returns {variant: bitstream path}.
+
+    The host core count is read once and split evenly. Every build has its own
+    remote directory, local temp directory and bundle. Log lines are prefixed
+    with the variant. All builds run to completion; any failure is then raised.
+    """
+    variants = list(dict.fromkeys(variants))
+    if len(variants) == 1:
+        return {variants[0]: build(root, config, log, demo=variants[0] == 'demo')}
+    if 'demo' in variants and config['project'] != 'sdr':
+        raise ToolError('The flight replay demo exists only for the sdr project.')
+    ssh_base(config)
+    cores = host_cores(config, log)
+    threads = thread_count(cores, len(variants))
+    log('Building {} concurrently: {} host cores, {} Vivado threads each.'.format(
+        ' + '.join(variants), cores, threads))
+    lock = threading.Lock()
+    results, errors = {}, {}
+
+    def work(variant):
+        def prefixed(line):
+            with lock:
+                log('[{}] {}'.format(variant, line))
+        try:
+            results[variant] = build(root, config, prefixed, demo=variant == 'demo', threads=threads)
+        except Exception as exc:  # reported after the other builds finish
+            errors[variant] = exc
+            prefixed('FAILED: {}'.format(exc))
+
+    workers = [threading.Thread(target=work, args=(v,), name='sdr-build-' + v) for v in variants]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    if errors:
+        raise ToolError('Build failed for: ' + '; '.join('{} ({})'.format(v, e) for v, e in errors.items()))
+    return {v: results[v] for v in variants}
+
+
+def bitstream(root, project, demo=False):
     out = root / 'build' / project
-    pointer = out / 'latest'
+    pointer = out / pointer_name('demo' if demo else 'default')
     if pointer.exists():
         name = pointer.read_text().strip()
         if not re.fullmatch(r'[A-Za-z0-9-]+', name):
-            raise ToolError('Invalid build/latest pointer.')
+            raise ToolError('Invalid build/{} pointer.'.format(pointer.name))
         return out / 'artifacts' / name / (project + '.bit')
+    if demo:
+        raise ToolError('No demo build found. Run sdr build --demo (or --all) first.')
     return out / (project + '.bit')
 
 
-def program(root, config, persist=False, path=None, log=print):
-    bit = Path(path).expanduser().resolve() if path else bitstream(root, config['project'])
+def program(root, config, persist=False, path=None, log=print, demo=False):
+    """Program the default bundle (build/PROJECT/latest), or with demo=True the
+    flight replay bundle (latest-demo). Concurrent builds never share a pointer."""
+    bit = Path(path).expanduser().resolve() if path else bitstream(root, config['project'], demo)
     if not bit.is_file() or bit.stat().st_size == 0:
         raise ToolError('No bitstream found. Run sdr build first, or specify --bit PATH.')
     manifest_path = bit.parent / 'manifest.json'
@@ -248,8 +332,8 @@ def program(root, config, persist=False, path=None, log=print):
         if manifest['bitstream_sha256'] != hashlib.sha256(bit.read_bytes()).hexdigest():
             raise ToolError('Bitstream checksum does not match the build manifest.')
         if manifest.get('variant', 'default') != 'default':
-            log('Selected build is the {} variant (APEX flight replay). Run sdr build for the default.'.format(
-                manifest['variant']))
+            log('Selected build is the {} variant (APEX flight replay). Run sdr program without --demo '
+                'for the default.'.format(manifest['variant']))
     elif path is None:
         log('Using existing bitstream without a source manifest: ' + str(bit))
     log(('Writing persistent flash: ' if persist else 'Programming volatile FPGA memory: ') + str(bit))

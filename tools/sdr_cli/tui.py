@@ -8,7 +8,7 @@ import shlex
 import threading
 import time
 
-from .core import ToolError, bitstream, build, program, save_config, simulate
+from .core import ToolError, bitstream, build, build_variants, program, save_config, simulate
 from .display import WaterfallScale
 from .protocol import CHANNELS, PROTOCOL_VERSION, SPECTRUM, bin_frequency, describe, power_db
 from .serial_io import Session, safe_text
@@ -22,7 +22,8 @@ HELP = [
     'v  cycle RAW / LINK / SPECTRUM views of pane 03',
     ':  command entry                   ?  help       q  quit',
     '',
-    'Commands: connect, disconnect, sim, build, build demo, program, flash, record, stop,',
+    'Commands: connect, disconnect, sim, build, build demo, build all (both, concurrent),',
+    '          program, program demo, flash, record, stop,',
     '          port DEVICE, baud RATE, send TEXT, send-hex aa 01 ff, clear, quit',
     'Use quotes for text with spaces. Arrow up/down scroll the receive pane.',
     '',
@@ -67,7 +68,7 @@ class Dashboard:
         self.events.append((time.strftime('%H:%M:%S'), safe_text(message)))
 
     def connect(self):
-        if self.busy in ('program', 'flash'):
+        if self.busy.startswith(('program', 'flash')):
             raise ToolError('Wait for programming to finish before connecting.')
         self.session.connect()
         self.log('Connected: {} @ {} baud'.format(self.session.port, self.config['baud']))
@@ -86,8 +87,8 @@ class Dashboard:
     def start(self, operation):
         if self.busy:
             raise ToolError('Already running {}. Wait for it to finish.'.format(self.busy))
-        self.reconnect = self.session.connected and operation in ('program', 'flash')
-        if operation in ('program', 'flash'):
+        self.reconnect = self.session.connected and operation.startswith(('program', 'flash'))
+        if operation.startswith(('program', 'flash')):
             if self.session.capture_file:
                 self.record()
             self.session.disconnect()
@@ -114,8 +115,11 @@ class Dashboard:
                         build(self.root, self.config.copy(), log)
                     elif operation == 'build-demo':
                         build(self.root, self.config.copy(), log, demo=True)
+                    elif operation == 'build-all':
+                        build_variants(self.root, self.config.copy(), log=log)
                     else:
-                        program(self.root, self.config.copy(), persist=operation == 'flash', log=log)
+                        program(self.root, self.config.copy(), persist=operation.startswith('flash'),
+                                log=log, demo=operation.endswith('-demo'))
             except Exception as exc:
                 error = str(exc)
             self.messages.put(('done', error))
@@ -131,6 +135,10 @@ class Dashboard:
             self.start(cmd)
         elif cmd == 'build' and args == ['demo']:
             self.start('build-demo')
+        elif cmd == 'build' and args == ['all']:
+            self.start('build-all')
+        elif cmd == 'program' and args == ['demo']:
+            self.start('program-demo')
         elif cmd == 'flash' and not args:
             if self.busy:
                 raise ToolError('Wait for the active operation to finish.')

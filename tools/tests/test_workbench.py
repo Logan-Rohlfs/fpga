@@ -1,7 +1,9 @@
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -52,15 +54,16 @@ class RepositoryTest(unittest.TestCase):
         with patch.object(core, 'remote', side_effect=lambda config, script, log: scripts.append(script)), \
                 patch.object(core, 'run', side_effect=self.fake_copy):
             bit = core.build(self.root, self.config, log=lambda _: None, demo=True)
-        self.assertIn('-tclargs sdr demo;', scripts[-1])
+        self.assertRegex(scripts[-1], r'-tclargs sdr demo \d+;')
         self.assertEqual(json.loads(bit.with_name('manifest.json').read_text())['variant'], 'demo')
+        self.assertEqual(core.bitstream(self.root, 'sdr', demo=True), bit)
         with patch.object(core, 'run'):
-            core.program(self.root, self.config, log=lines.append)
+            core.program(self.root, self.config, log=lines.append, demo=True)
         self.assertTrue(any('demo variant' in line for line in lines))
         with patch.object(core, 'remote', side_effect=lambda config, script, log: scripts.append(script)), \
                 patch.object(core, 'run', side_effect=self.fake_copy):
             bit = core.build(self.root, self.config, log=lambda _: None)
-        self.assertIn('-tclargs sdr;', scripts[-1])
+        self.assertRegex(scripts[-1], r'-tclargs sdr default \d+;')
         self.assertEqual(json.loads(bit.with_name('manifest.json').read_text())['variant'], 'default')
 
     def test_demo_build_is_sdr_only(self):
@@ -72,6 +75,16 @@ class RepositoryTest(unittest.TestCase):
         from sdr_cli import cli
         self.assertTrue(cli.parser().parse_args(['build', '--demo']).demo)
         self.assertFalse(cli.parser().parse_args(['build']).demo)
+
+    def test_cli_parallel_build_flags(self):
+        from sdr_cli import cli
+        args = cli.parser().parse_args(['build', '--all', '--cores', '8'])
+        self.assertTrue(args.all)
+        self.assertEqual(args.cores, 8)
+        self.assertFalse(cli.parser().parse_args(['build']).all)
+        self.assertTrue(cli.parser().parse_args(['program', '--demo']).demo)
+        with self.assertRaises(SystemExit), patch('sys.stderr'):
+            cli.parser().parse_args(['build', '--all', '--demo'])
 
     def test_config_roundtrip_and_validation(self):
         core.save_config(self.root, self.config)
@@ -272,3 +285,150 @@ class DashboardTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ParallelBuildTest(RepositoryTest):
+    def test_thread_count_clamps(self):
+        self.assertEqual(core.thread_count(12, 1), 8)
+        self.assertEqual(core.thread_count(12, 2), 6)
+        self.assertEqual(core.thread_count(12, 3), 4)
+        self.assertEqual(core.thread_count(4, 2), 2)
+        self.assertEqual(core.thread_count(1, 2), 1)
+        self.assertEqual(core.thread_count(64, 2), 8)
+
+    def test_host_cores_from_remote_override_and_fallback(self):
+        def reply(text):
+            return lambda config, script, log: log(text)
+        with patch.object(core, 'remote', side_effect=reply('CORES=12')) as remote:
+            self.assertEqual(core.host_cores(self.config), 12)
+            self.assertIn('NUMBER_OF_PROCESSORS', remote.call_args.args[1])
+        with patch.object(core, 'remote', side_effect=reply('CORES=16')):
+            self.assertEqual(core.host_cores(self.config), 16)
+        with patch.object(core, 'remote') as remote:
+            self.assertEqual(core.host_cores(dict(self.config, host_cores=6)), 6)
+            remote.assert_not_called()
+        for side in (core.ToolError('ssh down'), None):
+            lines = []
+            with patch.object(core, 'remote', side_effect=side or reply('garbage')):
+                self.assertEqual(core.host_cores(self.config, lines.append), 12)
+            self.assertTrue(any('assuming 12' in line for line in lines))
+
+    def test_host_cores_config_validation(self):
+        for bad in (-1, 'x', 2000, True):
+            with self.subTest(bad=bad), self.assertRaises(core.ToolError):
+                core.validate_config(dict(self.config, host_cores=bad))
+        core.validate_config(dict(self.config, host_cores=0))
+
+    def test_build_tcl_takes_thread_argument(self):
+        repo = Path(__file__).resolve().parents[2]
+        tcl = (repo / 'scripts/build.tcl').read_text()
+        self.assertIn('set_param general.maxThreads $threads', tcl)
+        self.assertNotRegex(tcl, r'maxThreads\s+\d')
+
+    def test_single_build_uses_one_build_share(self):
+        scripts = []
+        with patch.object(core, 'remote', side_effect=lambda c, s, log: scripts.append(s)), \
+                patch.object(core, 'run', side_effect=self.fake_copy), \
+                patch.object(core, 'host_cores', return_value=12):
+            bit = core.build(self.root, self.config, log=lambda _: None)
+        self.assertIn('-tclargs sdr default 8;', scripts[-1])
+        self.assertEqual(json.loads(bit.with_name('manifest.json').read_text())['threads'], 8)
+
+    def test_invalid_thread_count_is_rejected_before_remote_work(self):
+        with patch.object(core, 'remote') as remote, self.assertRaisesRegex(core.ToolError, 'threads'):
+            core.build(self.root, self.config, log=lambda _: None, threads=9)
+        remote.assert_not_called()
+
+    def run_parallel(self, cores=12, fail_variant=None):
+        scripts, lines, uploads = {}, [], []
+        lock = threading.Lock()
+        both_in_vivado = threading.Barrier(2, timeout=10)
+
+        def fake_remote(config, script, log):
+            match = re.search(r'-tclargs sdr (\w+) (\d+);', script)
+            if match:
+                with lock:
+                    scripts[match.group(1)] = (script, int(match.group(2)))
+                log('vivado output')
+                both_in_vivado.wait()  # proves the builds overlap
+                if match.group(1) == fail_variant:
+                    raise core.ToolError('Vivado failed')
+            elif 'Directory' in script:
+                with lock:
+                    uploads.append(re.findall(r"'([^']+)'", script)[-1])
+
+        def fake_run(args, **kwargs):
+            self.fake_copy(args, **kwargs)
+
+        with patch.object(core, 'remote', side_effect=fake_remote), \
+                patch.object(core, 'run', side_effect=fake_run), \
+                patch.object(core, 'host_cores', return_value=cores) as detect:
+            try:
+                result = core.build_variants(self.root, self.config, log=lines.append)
+            except core.ToolError as exc:
+                result = exc
+        return result, scripts, lines, uploads, detect
+
+    def test_parallel_build_isolates_paths_threads_and_pointers(self):
+        result, scripts, lines, uploads, detect = self.run_parallel()
+        self.assertEqual(set(result), {'default', 'demo'})
+        detect.assert_called_once()  # cores read once per invocation
+        self.assertEqual({v: s[1] for v, s in scripts.items()}, {'default': 6, 'demo': 6})
+        self.assertEqual(len(set(uploads)), 2)  # distinct remote directories
+        self.assertNotEqual(result['default'].parent, result['demo'].parent)
+        self.assertEqual(core.bitstream(self.root, 'sdr'), result['default'])
+        self.assertEqual(core.bitstream(self.root, 'sdr', demo=True), result['demo'])
+        for variant, bit in result.items():
+            manifest = json.loads(bit.with_name('manifest.json').read_text())
+            self.assertEqual((manifest['variant'], manifest['threads']), (variant, 6))
+        self.assertEqual(sorted(p.name for p in (self.root / 'build/sdr').glob('*.tmp')), [])
+        for variant in ('default', 'demo'):
+            self.assertTrue(any(line.startswith('[{}] '.format(variant)) for line in lines))
+        self.assertTrue(all(line.startswith('[') or not line.startswith(' ') for line in lines))
+        # both programs stay unambiguous and pass their own freshness check
+        for demo in (False, True):
+            with patch.object(core, 'run') as run:
+                core.program(self.root, self.config, log=lambda _: None, demo=demo)
+            self.assertEqual(Path(run.call_args.args[0][-1]), result['demo' if demo else 'default'])
+
+    def test_parallel_threads_follow_core_count(self):
+        _, scripts, *_ = self.run_parallel(cores=4)
+        self.assertEqual({s[1] for s in scripts.values()}, {2})
+        _, scripts, *_ = self.run_parallel(cores=1)
+        self.assertEqual({s[1] for s in scripts.values()}, {1})
+
+    def test_parallel_failure_keeps_other_build_and_reports(self):
+        result, _, lines, *_ = self.run_parallel(fail_variant='demo')
+        self.assertIsInstance(result, core.ToolError)
+        self.assertIn('demo', str(result))
+        self.assertTrue(any(line.startswith('[demo] FAILED') for line in lines))
+        self.assertTrue(core.bitstream(self.root, 'sdr').is_file())  # default completed
+        with self.assertRaisesRegex(core.ToolError, 'No demo build'):
+            core.bitstream(self.root, 'sdr', demo=True)
+
+    def test_source_change_check_is_per_build(self):
+        lines = []
+
+        def fake_remote(config, script, log):
+            if '-tclargs' in script and 'demo' in script:
+                (self.root / 'projects/sdr/rtl/top.sv').write_text('changed mid-build')
+
+        with patch.object(core, 'remote', side_effect=fake_remote), \
+                patch.object(core, 'run', side_effect=self.fake_copy), \
+                patch.object(core, 'host_cores', return_value=12):
+            core.build(self.root, self.config, log=lines.append, demo=True, threads=6)
+        self.assertTrue(any('Sources changed during this build' in line for line in lines))
+
+    def test_parallel_demo_needs_sdr_project(self):
+        with patch.object(core, 'remote') as remote, self.assertRaisesRegex(core.ToolError, 'sdr project'):
+            core.build_variants(self.root, dict(self.config, project='blink'), log=lambda _: None)
+        remote.assert_not_called()
+
+    def test_tui_commands_start_the_same_operations(self):
+        from sdr_cli import tui
+        dash = tui.Dashboard.__new__(tui.Dashboard)
+        started = []
+        dash.start = started.append
+        for command in ('build all', 'program demo', 'build demo'):
+            tui.Dashboard.execute(dash, command)
+        self.assertEqual(started, ['build-all', 'program-demo', 'build-demo'])

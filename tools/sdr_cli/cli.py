@@ -10,7 +10,7 @@ import time
 
 from . import __version__
 from .protocol import format_record, summarize
-from .core import (ToolError, build, load_config, program, remote, repo_root,
+from .core import (ToolError, build, build_variants, load_config, program, remote, repo_root,
                    run, save_config, simulate, ps_literal)
 from .serial_io import Session, ports, resolve_port, serial_module
 
@@ -43,9 +43,17 @@ def parser():
         command.add_argument('--project', choices=['sdr', 'blink'])
         if name in ('program', 'flash'):
             command.add_argument('--bit', type=Path, help='Explicit bitstream (bypasses source freshness check)')
-        if name == 'build':
+        if name in ('program', 'flash'):
             command.add_argument('--demo', action='store_true',
-                                 help='Opt-in APEX flight replay variant (sdr only; synthetic ADC input)')
+                                 help='Program the flight replay bundle (latest-demo) instead of the default')
+        if name == 'build':
+            which = command.add_mutually_exclusive_group()
+            which.add_argument('--demo', action='store_true',
+                               help='Opt-in APEX flight replay variant (sdr only; synthetic ADC input)')
+            which.add_argument('--all', action='store_true',
+                               help='Build the default and demo variants concurrently (sdr only)')
+            command.add_argument('--cores', type=int, metavar='N',
+                                 help='Build host core count for sizing Vivado threads (default: ask the host)')
     receive = sub.add_parser('receive', aliases=['rx', 'connect'], help='Read UART until Ctrl-C or a duration expires')
     receive.add_argument('--port')
     receive.add_argument('--baud', type=int)
@@ -225,9 +233,16 @@ def main(root=None):
         elif args.command == 'sim':
             simulate(root, config['project'])
         elif args.command == 'build':
-            build(root, config, demo=args.demo)
+            if args.cores is not None:
+                config['host_cores'] = args.cores
+                validate_config(config)
+            if args.all:
+                build_variants(root, config)
+            else:
+                build(root, config, demo=args.demo)
         elif args.command in ('program', 'flash'):
-            program(root, config, persist=args.command == 'flash', path=args.bit)
+            program(root, config, persist=args.command == 'flash', path=args.bit,
+                    demo=getattr(args, 'demo', False))
         elif args.command in ('receive', 'rx', 'connect'):
             receive(config, args)
         elif args.command == 'send':

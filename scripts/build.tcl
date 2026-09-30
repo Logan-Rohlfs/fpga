@@ -7,15 +7,24 @@
 # projects/<project>/rtl/*.v and *.sv, projects/<project>/rom/*.mem memory
 # images, and constraints/basys3.xdc. The optional "demo" variant sets the
 # sdr_top generic DEMO_FLIGHT=1 (APEX flight replay); the default is unchanged.
+#
+# Optional third argument: general.maxThreads (1..8), chosen by the host tool so
+# concurrent builds share the machine. Omitted, Vivado keeps its own default.
+# Use "default" as the variant to set threads without the demo:
+# vivado -mode batch -source scripts/build.tcl -tclargs sdr default 6
 
-if {$argc < 1 || $argc > 2} {
-    error "Usage: vivado -mode batch -source scripts/build.tcl -tclargs blink|sdr \[demo\]"
+if {$argc < 1 || $argc > 3} {
+    error "Usage: vivado -mode batch -source scripts/build.tcl -tclargs blink|sdr \[default|demo \[threads\]\]"
 }
 set project [lindex $argv 0]
 if {$project ni {blink sdr}} {
     error "Unknown project '$project'; expected blink or sdr"
 }
-set variant [expr {$argc == 2 ? [lindex $argv 1] : "default"}]
+set variant [expr {$argc >= 2 ? [lindex $argv 1] : "default"}]
+set threads [expr {$argc == 3 ? [lindex $argv 2] : ""}]
+if {$threads ne "" && (![string is integer -strict $threads] || $threads < 1 || $threads > 8)} {
+    error "Thread count '$threads' must be an integer from 1 to 8 (general.maxThreads limit)"
+}
 if {$variant ni {default demo}} {
     error "Unknown variant '$variant'; expected demo"
 }
@@ -38,6 +47,9 @@ if {[llength $sources] == 0} {
 }
 
 file mkdir $out_dir
+if {$threads ne ""} {
+    set_param general.maxThreads $threads
+}
 create_project -in_memory -part $part
 set_property target_language Verilog [current_project]
 
