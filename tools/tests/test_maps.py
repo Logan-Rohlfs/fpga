@@ -217,6 +217,17 @@ class FetcherTest(unittest.TestCase):
     def test_rate_capped_at_eight(self):
         self.assertAlmostEqual(self.fetcher(FakeOpener(), rate=100).interval, 0.125)
 
+    def test_incomplete_read_and_empty_body_are_retryable(self):
+        import http.client
+
+        class Truncated(FakeResponse):
+            def read(self):
+                raise http.client.IncompleteRead(b'ab')
+        opener = FakeOpener(script=[Truncated(), FakeResponse(b'')])
+        stats = self.fetcher(opener).fetch(self.site, 'imagery', progress=lambda *_: None)
+        self.assertEqual(self.time.sleeps[:2], [2.0, 4.0])
+        self.assertEqual((stats['fetched'], stats['failed']), (len(self.tiles), 0))
+
     def test_default_opener_built_lazily(self):
         self.assertIsNone(maps.Fetcher(self.root).opener)
 

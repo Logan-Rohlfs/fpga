@@ -5,6 +5,7 @@ contacts the network except Fetcher.fetch.
 """
 import argparse
 import contextlib
+import http.client
 import json
 import math
 import os
@@ -293,8 +294,10 @@ class Fetcher:
                     self._pace()
                     try:
                         status, content_type, body = self._request(url)
-                    except OSError:
+                    except (OSError, http.client.HTTPException):
                         status, content_type, body = 0, '', b''
+                    if status == 200 and content_type in EXTENSIONS and not body:
+                        status = 0  # empty image body: retryable failure
                     if status == 200 and content_type in EXTENSIONS:
                         consecutive, delay = 0, BACKOFF_START
                         directory = maps_dir(self.root) / layer / str(z) / str(x)
