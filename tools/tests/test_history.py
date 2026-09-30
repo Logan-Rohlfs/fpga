@@ -112,6 +112,30 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(hist[0]['power_unit'], 'dBm')
         self.assertEqual(hist[1]['crc_bad'], [2])
 
+    def test_non_finite_becomes_null(self):
+        h = History()
+        h.add_metrics('A', 1.0, math.nan, -90.0, math.inf, -math.inf, 1, 0, 'dBm')
+        h.add_event({'id': 1, 't': 1.0, 'kind': 'x', 'category': 'link', 'value': math.nan})
+        metrics = json.loads(h.snapshot('link', 0.0)[0], parse_constant=self.fail)
+        self.assertEqual((metrics['rssi'], metrics['snr'], metrics['df']), ([None], [None], [None]))
+        events = json.loads(h.snapshot('events', 0.0)[0], parse_constant=self.fail)
+        self.assertIsNone(events['items'][0]['value'])
+
+    def test_flight_origins_isolated(self):
+        h = History()
+        h.add_flight('A', 1.0, row(1.0))
+        h.add_flight('B', 2.0, row(2.0))
+        h.add_flight('B', 3.0, row(3.0))
+        for ch, origin, ts in (('flight.A', 0, [1.0]), ('flight.B', 1, [2.0, 3.0]), ('flight', 2, [])):
+            snap = h.snapshot(ch, 3.0)
+            self.assertEqual([t for m in snap[1:] for t in rows_in(m)], ts)
+            if ts:
+                self.assertEqual(snap[1][2], origin)
+
+    def test_empty_flight_snapshot(self):
+        self.assertEqual(History().snapshot('flight', 10.0),
+                         ['{"type":"history","channel":"flight","count":0}'])
+
     def test_frames(self):
         h = History()
         for i in range(205):

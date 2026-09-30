@@ -83,7 +83,7 @@ def _f32(x):
     return struct.unpack('<f', struct.pack('<f', x))[0]
 
 
-def _json_num(x):
+def json_num(x):
     return None if isinstance(x, float) and not math.isfinite(x) else x
 
 
@@ -111,7 +111,7 @@ def _flight_vector(name, origin, rows):
     expect_rows = []
     for raw in encoded:
         t, flags, _reserved, *values = ROW.unpack(raw)
-        expect_rows.append(dict(t=t, flags=flags, values=[_json_num(v) for v in values]))
+        expect_rows.append(dict(t=t, flags=flags, values=[json_num(v) for v in values]))
     expect = dict(kind='flight', origin=origin, fieldCount=len(FIELD_KEYS), n=len(rows), rows=expect_rows)
     return dict(name=name, hex=data.hex(), expect=expect)
 

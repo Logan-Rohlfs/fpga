@@ -17,8 +17,17 @@ _METRIC_COLUMNS = ('t', 'rssi', 'noise', 'snr', 'df', 'crc_good', 'crc_bad')
 _FLIGHT_CHANNELS = {'flight': 'best', 'flight.A': 'A', 'flight.B': 'B'}
 
 
+def _clean(x):
+    """Deep copy with non-finite floats mapped to None, so the JSON is always valid."""
+    if isinstance(x, dict):
+        return {k: _clean(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_clean(v) for v in x]
+    return gui_wire.json_num(x)
+
+
 def _marker(channel, count):
-    return json.dumps({'type': 'history', 'channel': channel, 'count': count}, separators=(',', ':'))
+    return json.dumps({'type': 'history', 'channel': channel, 'count': count}, separators=(',', ':'), allow_nan=False)
 
 
 class History:
@@ -35,7 +44,7 @@ class History:
         self._flight[origin].append((t, row_bytes))
 
     def add_event(self, event):
-        self._events.append(event)
+        self._events.append(_clean(event))
 
     def add_spectrum(self, channel, row_bytes):
         self._spectrum[channel].append(row_bytes)
@@ -44,7 +53,7 @@ class History:
         self._latest[key] = json_str
 
     def add_metrics(self, channel, t, rssi, noise, snr, df, crc_good, crc_bad, power_unit):
-        self._metrics[channel].append((t, rssi, noise, snr, df, crc_good, crc_bad))
+        self._metrics[channel].append(tuple(gui_wire.json_num(v) for v in (t, rssi, noise, snr, df, crc_good, crc_bad)))
         self._power_unit[channel] = power_unit
 
     def add_frame(self, json_str):
@@ -55,7 +64,7 @@ class History:
             return self._flight_snapshot(channel, _FLIGHT_CHANNELS[channel], now)
         if channel == 'events':
             return [json.dumps({'type': 'events', 'items': list(self._events), 'reset': True},
-                               separators=(',', ':'))]
+                               separators=(',', ':'), allow_nan=False)]
         kind, _, sub = channel.partition('.')
         if kind == 'spectrum' and sub in self._spectrum:
             rows = list(self._spectrum[sub])
@@ -89,5 +98,5 @@ class History:
             msg = {'type': 'metrics_history', 'channel': ch}
             msg.update({name: list(col) for name, col in zip(_METRIC_COLUMNS, cols)})
             msg['power_unit'] = self._power_unit.get(ch)
-            out.append(json.dumps(msg, separators=(',', ':')))
+            out.append(json.dumps(msg, separators=(',', ':'), allow_nan=False))
         return out
