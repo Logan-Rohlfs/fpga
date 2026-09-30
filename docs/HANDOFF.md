@@ -96,20 +96,20 @@ plan "Task 6 GUI flight readout".
 
 **Current task: Tasks 1-7 complete (the 6-7 pair has landed; the GUI is functional on the new binary/subscribe protocol); next is Task 25.** Task 7 added the frontend data layer (`wire.ts`, `series.ts`, `subscriptions.ts`, per-page `subscribe`, and freeze that stops drawing only).
 
-**Before Task 1:** the pre-flight conflict scan is done. See
-[gui-cards-preflight](superpowers/plans/2026-09-30-gui-cards-preflight.md):
-105 rows, each finding with a suggested ruling. Most important:
-- the T9 scheduler default throws at import under vitest's node environment
-- T25 cannot observe `busy`, and `Hub.run` swallows the open error
-- T5 has no latest-wins control slot, which T6 assumes
-- T2/T6 disagree on the `best_from` type, and NaN appears in the golden vectors
-- T7's freeze semantics contradict the existing test
-- the Event/GuiEvent type clash
-- T10's missing store/type files and `registry.sanitize`
-- the unowned `source_state` event dedup
-No rulings have been made yet. Rule on each finding with the spec as authority,
-record the rulings in the ledger, and fold them into the affected task dispatches
-before Task 1.
+**Preflight rulings: made.** Every finding in the
+[preflight scan](superpowers/plans/2026-09-30-gui-cards-preflight.md) is ruled, and
+the rulings are committed in
+[gui-cards-rulings](superpowers/plans/2026-09-30-gui-cards-rulings.md). They include
+per-task sections to carry into each dispatch. One user clarification is recorded
+there and in the spec (§10): "events" means flight-state events, and link events are
+a separate category with their own event-log view.
+
+**Paused after Task 7 at the user's request.** Resume at Task 25, then 8-15, 26,
+16-23, 24. Deferred minor findings from the task reviews are listed in the local ledger
+for the final whole-branch review. The most relevant are:
+- the send loop dies silently on unexpected exceptions (`server.py`); fold this into Task 25;
+- `metrics_history` carries no SYNTHETIC flag;
+- no browser check of the 6-7 pair has been done yet.
 
 The ledgers under `.superpowers/sdd/` are git-ignored local files. On another
 machine they won't exist. Rebuild progress from `git log` (task commits name
