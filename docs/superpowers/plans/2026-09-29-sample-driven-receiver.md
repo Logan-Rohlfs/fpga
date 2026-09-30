@@ -73,3 +73,59 @@ Update `docs/HANDOFF.md`, `projects/sdr/README.md`, relevant tool READMEs and
 this plan's checklist with the verified checkpoint, the operating envelope,
 exact commands, and explicit remaining limitations (XADC acquisition, physical
 PLL, calibrated dBm, guessed radio profile). Check links and commands.
+
+### Task 5: APEX flight replay demo (opt-in build variant)
+
+User request (2026-09-30): replay the IREC 2026 flight as if transmitted by the
+APEX RF4463 at 441.480 MHz 2GFSK, with noise and signal loss, through the full
+digital receiver. It is an add-on to show off: the default bitstream, its
+profile and its resource use stay unchanged. The demo is selected at build time
+(e.g. `./sdr build --demo`), and no board or wiring changes are needed.
+
+Source facts: `.superpowers/sdd/2026-09-29-sample-driven-receiver/apex-radio-facts.md`
+(extracted from `apex/fsw/src/radio.cpp` and related files, with citations).
+Use its values. Where it says UNKNOWN or INFERRED, pick a documented,
+configurable assumption and label it (e.g. Gaussian BT 0.5).
+
+- Demo radio profile, from the firmware: 10 kbit/s, +/-25 kHz deviation, 64-bit
+  0xAA preamble, 16-bit sync 0x2DD4, type byte + body (FLIGHT 0x02 = 41-byte
+  body), CRC16-CCITT 0x1021/0xFFFF big-endian over type+body, no whitening,
+  20 Hz cadence. Bit order is taken from the facts file. Keep the existing
+  1 MS/s ADC and 100 kHz IF (an analog-frontend assumption); 441.480 MHz is the
+  RF label the GUI frequency plan shows.
+- ROM content: a Python generator reads
+  `/Users/loganrohlfs/git/apex/sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800/IREC-2026-SRAD-TELEMETRY.csv`.
+  - It takes SAMPLE rows from 2 s before LAUNCH_DETECTED through 3 s after
+    apogee (the phase change out of COAST).
+  - It resamples at 20 Hz (latest sample at or before each tick) and packs the
+    FLIGHT struct exactly per the facts file.
+  - The radio seq is a counter from 0, because the CSV seq is a log counter.
+    Fields absent from the CSV are zero. Both choices are documented.
+  - Output is a checked-in `.mem` file under `projects/sdr/`, plus a regeneration
+    command. The CSV lives outside this repo, so the build must not depend on it.
+    Add the ROM asset to BOTH `scripts/build.tcl` and `core.py:source_files`.
+- The ROM feeds the existing `adc_signal_source` test transmitter, which does the
+  live GFSK modulation into ADC samples. Playback loops with a short, documented
+  gap. It stays SYNTHETIC provenance.
+- Impairments: additive noise plus a deterministic per-loop signal-loss window.
+  Channels A and B get different loss windows, so the source combiner visibly
+  covers one channel's dropout with the other.
+- The demo receiver is configured for the demo profile. Extend `rx_frame_decoder`
+  configurability for 16-bit sync and a type-implied length only as far as
+  needed, keeping default-profile behaviour and tests unchanged.
+- Tests:
+  - A focused testbench decodes the demo ROM frames bit-exact from the RTL
+    transmitter, including the loss windows.
+  - An independent Python reference checks the generated frames against the CSV
+    rows they came from.
+  - `./sdr sim` covers both the default and demo builds.
+  - A demo `./sdr build` meets timing (WNS/WHS >= 0) with no DRC errors.
+
+### Task 6: GUI flight readout for APEX FLIGHT frames
+
+Host-side decode of the APEX FLIGHT (0x02) payload layout from the facts file
+into named fields (altitude, velocity, vertical acceleration, phase, and so on).
+Show a compact flight card in the Telemetry view: current values plus an altitude
+trace, labelled "Replayed flight data (synthetic ADC)" when SYNTHETIC is set.
+The decode lives in Python (toolkit-free module), and the frontend only draws.
+Unknown payload types show raw bytes as they do today. No new dependencies.
