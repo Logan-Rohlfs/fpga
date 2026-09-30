@@ -27,7 +27,11 @@ export function createScheduler(raf: Raf = defaultRaf): Scheduler {
     for (const e of [...entries.values()]) {
       if (!e.dirty || !e.visible) continue;
       e.dirty = false;
-      e.draw();
+      try {
+        e.draw();
+      } catch (err) {
+        console.error('card draw failed', err);
+      }
     }
   }
   function request(): void {

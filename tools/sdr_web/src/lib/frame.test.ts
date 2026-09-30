@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createScheduler } from './frame';
 
 function setup() {
@@ -66,5 +66,17 @@ describe('scheduler', () => {
   it('the default scheduler is usable without rAF (node)', async () => {
     const mod = await import('./frame');
     expect(typeof mod.scheduler.markDirty).toBe('function');
+  });
+  it('a throwing draw does not stop the other cards', () => {
+    const { s, frame } = setup();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let n = 0;
+    s.register('bad', () => { throw new Error('boom'); });
+    s.register('good', () => n++);
+    s.markDirty('bad'); s.markDirty('good'); frame();
+    expect(n).toBe(1);
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
+    s.markDirty('good'); frame(); expect(n).toBe(2);
   });
 });

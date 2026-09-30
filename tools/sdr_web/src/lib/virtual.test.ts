@@ -28,4 +28,11 @@ describe('windowRange', () => {
       expect(r.padTop + (r.end - r.start) * 18 + r.padBottom).toBe(count * 18);
     }
   });
+  it('non-finite scroll or viewport never yields NaN', () => {
+    for (const [top, h] of [[NaN, 100], [0, NaN], [Infinity, 100], [NaN, NaN]]) {
+      const r = windowRange(top, h, 20, 100, 8);
+      for (const v of Object.values(r)) expect(Number.isFinite(v)).toBe(true);
+      expect(r.padTop + (r.end - r.start) * 20 + r.padBottom).toBe(2000);
+    }
+  });
 });

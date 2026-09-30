@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import catalogue from './units.catalogue.json';
 import { convert, format, loadUnitPrefs, saveUnitPrefs, toSI, unitFor, unitLabel } from './units';
 
@@ -51,7 +51,9 @@ describe('format', () => {
 });
 
 describe('prefs storage', () => {
-  beforeEach(() => { delete (globalThis as { localStorage?: unknown }).localStorage; });
+  const clear = () => { delete (globalThis as { localStorage?: unknown }).localStorage; };
+  beforeEach(clear);
+  afterEach(clear);
   it('falls back to metric without storage', () => {
     expect(loadUnitPrefs()).toEqual({ system: 'metric', overrides: {} });
     expect(() => saveUnitPrefs(imperial)).not.toThrow();
