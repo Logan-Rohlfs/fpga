@@ -14,7 +14,9 @@ export interface Derived {
 }
 export interface AdminInfo { label: string; since: number }
 export interface RfReference { lo_hz: number; injection: Injection; inferred?: boolean }
+export interface ReceiverProfile { id: string; label: string; rf_label?: string }
 export interface SourceState {
+  profile?: ReceiverProfile;
   control_state?: string; control_error?: string; applied?: RfReference | null;
   kind: 'serial' | 'replay' | 'sim' | 'none'; state: string; detail: string; responds_to_tuning: boolean;
 }
@@ -25,28 +27,57 @@ export interface RecordJson {
   raw: string | null;
 }
 
+export type Budget = 'operator' | 'viewer';
+
+/** hello.flight_schema (spec section 4): field order of every FLIGHT_ROWS row. */
+export interface FlightField {
+  key: string; label: string; quantity: string; digits?: number;
+  enum?: string[]; enum_map?: Record<string, string>; bits?: Record<string, string>;
+}
+export interface FlightSchema { version: number; fields: FlightField[] }
+
+/** A derived event (spec section 10). Flight and link events share the `events` channel. */
+export interface GuiEvent {
+  id: number; t: number; kind: string; category: 'flight' | 'link'; text: string;
+  channel: Channel | null; value: number | null; quantity: string | null; segment: number; synthetic: boolean;
+}
+
 export interface TuningMsg { type: 'tuning'; state: TuningState; derived: Derived }
 export interface RoleMsg {
-  type: 'role'; role: Role; admin: AdminInfo | null; can_admin: boolean; reason: string; token?: string; by?: string;
+  type: 'role'; role: Role; budget: Budget; admin: AdminInfo | null; can_admin: boolean; reason: string; token?: string; by?: string;
 }
 export interface HelloMsg {
   type: 'hello'; server_version: string; protocol_version: number; source: SourceState; role: RoleMsg; tuning: TuningMsg;
+  flight_schema: FlightSchema; channels: string[]; budget: Budget; sites: unknown[];
 }
 export interface RecordMsg { type: 'record'; record: RecordJson; text: string }
+/** Decoded SPECTRUM_ROW binary frame (spec 3.4); the server no longer sends it as JSON. */
 export interface SpectrumMsg {
-  rf_reference?: RfReference | null;
+  rf_reference: RfReference | null;
   type: 'spectrum'; channel: Channel; row: number; t_us: number; f0_hz: number; bin_hz: number; bins: number;
-  db10: number[]; low: number; high: number; synthetic: boolean;
+  db10: Int16Array; low: number; high: number; synthetic: boolean;
 }
 export interface StatsMsg {
   type: 'stats'; byte_rate: number; rates: Record<string, number>; source: SourceState;
   decoder: { bytes: number; messages: number; crc_errors: number; cobs_errors: number; length_errors: number;
     resync_bytes: number; seq_gaps: number; synthetic: number; by_type: Record<string, number> };
+  clients?: { operators: number; viewers: number };
 }
 export interface TakeoverMsg { type: 'takeover_required'; held_by: string; since: number }
 export interface ErrorMsg { type: 'error'; code: string; text: string }
-export type ServerMsg = HelloMsg | RecordMsg | SpectrumMsg | StatsMsg | TuningMsg | RoleMsg | TakeoverMsg | ErrorMsg
-  | { type: 'pong' };
+export interface SubscribedMsg { type: 'subscribed'; channels: string[] }
+/** Snapshot start: the channel's store is cleared, and the following rows are its history. */
+export interface HistoryMsg { type: 'history'; channel: string; count: number }
+export interface EventsMsg { type: 'events'; items: GuiEvent[]; reset: boolean }
+/** Link snapshot for sparklines; null stands in for a non-finite value. */
+export interface MetricsHistoryMsg {
+  type: 'metrics_history'; channel: Channel; t: number[]; rssi: (number | null)[]; noise: (number | null)[];
+  snr: (number | null)[]; df: (number | null)[]; crc_good: (number | null)[]; crc_bad: (number | null)[];
+  power_unit: string | null;
+}
+export interface DroppedMsg { type: 'dropped'; channel: 'frames'; count: number }
+export type ServerMsg = HelloMsg | RecordMsg | StatsMsg | TuningMsg | RoleMsg | TakeoverMsg | ErrorMsg
+  | SubscribedMsg | HistoryMsg | EventsMsg | MetricsHistoryMsg | DroppedMsg | { type: 'pong' };
 
 export type ClientMsg =
   | { type: 'login'; password: string; label: string; takeover: boolean }
@@ -55,4 +86,10 @@ export type ClientMsg =
   | { type: 'tune'; changes: TuningChanges }
   | { type: 'reconnect_source' }
   | { type: 'use_compiled_profile' }
-  | { type: 'ping' };
+  | { type: 'ping' }
+  | { type: 'subscribe'; channels: string[] }
+  | { type: 'preset_save'; preset: unknown; base_revision: number | null }
+  | { type: 'preset_delete'; id: string }
+  | { type: 'preset_set_live'; id: string }
+  | { type: 'preset_set_default'; id: string }
+  | { type: 'preset_auto_switch'; enabled: boolean };

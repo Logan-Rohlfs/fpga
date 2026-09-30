@@ -18,7 +18,7 @@ let client: LinkClient;
 beforeEach(() => {
   vi.useFakeTimers(); vi.stubGlobal('WebSocket', Socket); Socket.instances = []; resetState();
   client = new LinkClient(); client.start('ws://test/ws'); Socket.instances[0].onopen?.();
-  role.set({type:'role', role:'admin', admin:null, can_admin:true, reason:'login'});
+  role.set({type:'role', role:'admin', budget:'operator', admin:null, can_admin:true, reason:'login'});
 });
 afterEach(() => { client.stop(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('does not reconnect after stopping during the retry delay', () => {

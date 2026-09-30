@@ -94,7 +94,7 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: Task 6 complete; Task 7 in progress (atomic pair: the frontend cannot decode binary spectrum until Task 7 lands).** Tasks 1-6 wired `apex`, `gui_wire`, `events`, `history` and `fanout` into `hub.py` and `web/server.py` (encode-once outgoing, `subscribe`, history snapshots, binary spectrum/flight frames).
+**Current task: Tasks 1-7 complete (the 6-7 pair has landed; the GUI is functional on the new binary/subscribe protocol); next is Task 25.** Task 7 added the frontend data layer (`wire.ts`, `series.ts`, `subscriptions.ts`, per-page `subscribe`, and freeze that stops drawing only).
 
 **Before Task 1:** the pre-flight conflict scan is done. See
 [gui-cards-preflight](superpowers/plans/2026-09-30-gui-cards-preflight.md):

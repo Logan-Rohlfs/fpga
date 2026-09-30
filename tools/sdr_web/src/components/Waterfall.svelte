@@ -2,10 +2,11 @@
   import { appearanceVersion } from '../lib/theme';
   // Live IF spectrum trace over a scrolling waterfall for one channel.
   // Colours come from the server's auto scale unless the viewer chose a manual scale.
+  // Freeze stops drawing only: rows keep filling the offscreen image, so unfreezing shows no gap.
   import { onMount } from 'svelte';
   import { PAD, makeAxis, xOf } from '../lib/axis';
   import { type Overlay, cssVar, drawBands, drawDbGrid, drawFreqTicks, drawLines, drawTrace, fitCanvas } from '../lib/draw';
-  import { onSpectrum } from '../lib/link';
+  import { frozen, onSpectrum, onSpectrumReset } from '../lib/link';
   import type { Channel, SpectrumMsg } from '../lib/types';
   import { scaleOverride } from '../lib/view';
   import { WaterfallImage } from '../lib/waterfall';
@@ -21,30 +22,42 @@
   let last: SpectrumMsg | null = null;
   let dirty = true;
   let dragX: number | null = null;
+  // While frozen, draw a copy of the picture taken at freeze time (it still redraws on theme changes).
+  let still: { last: SpectrumMsg | null; canvas: HTMLCanvasElement | null } | null = null;
 
-  function limits(): [number, number] {
+  function limits(row = last): [number, number] {
     const s = $scaleOverride;
     if (s.mode === 'manual') return [s.low, s.high];
-    return last ? [last.low, last.high] : [-120, -60];
+    return row ? [row.low, row.high] : [-120, -60];
   }
 
-  function axisFor(width: number) {
-    if (!last) return makeAxis(0, 1, width);
-    const f0 = last.f0_hz - last.bin_hz / 2;
-    return makeAxis(f0, f0 + last.bins * last.bin_hz, width);
+  function axisFor(width: number, row = last) {
+    if (!row) return makeAxis(0, 1, width);
+    const f0 = row.f0_hz - row.bin_hz / 2;
+    return makeAxis(f0, f0 + row.bins * row.bin_hz, width);
+  }
+
+  function copyOf(src: HTMLCanvasElement): HTMLCanvasElement {
+    const c = document.createElement('canvas');
+    c.width = src.width;
+    c.height = src.height;
+    c.getContext('2d')!.drawImage(src, 0, 0);
+    return c;
   }
 
   function draw() {
+    const row = still ? still.last : last;
+    const picture = still ? still.canvas : image?.canvas ?? null;
     const t = fitCanvas(traceCv);
-    const a = axisFor(t.w);
-    const [low, high] = limits();
+    const a = axisFor(t.w, row);
+    const [low, high] = limits(row);
     const top = 8;
     const bot = t.h - 18;
     t.ctx.clearRect(0, 0, t.w, t.h);
-    if (last) {
+    if (row) {
       drawDbGrid(t.ctx, a, top, bot, low, high);
       drawBands(t.ctx, a, top, bot, overlays);
-      drawTrace(t.ctx, top, bot, last, low, high, colorVar, (f) => xOf(a, f));
+      drawTrace(t.ctx, top, bot, row, low, high, colorVar, (f) => xOf(a, f));
       drawLines(t.ctx, a, top, bot, overlays);
       drawFreqTicks(t.ctx, a, t.h - 4, 10e3, (f) => (f / 1e3).toFixed(0), 'kHz');
     } else {
@@ -56,17 +69,23 @@
     const f = fitCanvas(fallCv);
     f.ctx.fillStyle = cssVar('--wf-bg');
     f.ctx.fillRect(0, 0, f.w, f.h);
-    if (image) {
+    if (picture) {
       f.ctx.imageSmoothingEnabled = false;
-      f.ctx.drawImage(image.canvas, PAD.left, 0, f.w - PAD.left - PAD.right, f.h);
+      f.ctx.drawImage(picture, PAD.left, 0, f.w - PAD.left - PAD.right, f.h);
     }
-    if (last) drawLines(f.ctx, axisFor(f.w), 0, f.h, overlays.filter((o) => o.onFall), false);
+    if (row) drawLines(f.ctx, axisFor(f.w, row), 0, f.h, overlays.filter((o) => o.onFall), false);
   }
 
   $effect(() => {
     void channel;   // a new channel starts a fresh picture
     image = null;
     last = null;
+    if (still) still = { last: null, canvas: null };
+    dirty = true;
+  });
+  $effect(() => {
+    // Freeze stops drawing only; `image` and `last` keep following the data.
+    still = $frozen ? { last, canvas: image ? copyOf(image.canvas) : null } : null;
     dirty = true;
   });
   $effect(() => {
@@ -83,8 +102,16 @@
       last = m;
       const [low, high] = limits();
       image.push(m.db10, low, high);
+      if (still) return;   // frozen: keep ingesting, draw nothing new
       dirty = true;
       onrow?.(m);
+    });
+    // A history marker (subscribe or resync) restarts the picture; the snapshot rows follow.
+    const offReset = onSpectrumReset((ch) => {
+      if (ch !== channel) return;
+      image = null;
+      last = null;
+      dirty = true;
     });
     let raf = 0;
     const loop = () => {
@@ -99,6 +126,7 @@
     ro.observe(traceCv);
     return () => {
       off();
+      offReset();
       cancelAnimationFrame(raf);
       ro.disconnect();
     };

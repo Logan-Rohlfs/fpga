@@ -93,7 +93,7 @@ export function drawFreqTicks(
   ctx.fillText(unit, 4, y);
 }
 
-export interface TraceRow { f0_hz: number; bin_hz: number; db10: number[] }
+export interface TraceRow { f0_hz: number; bin_hz: number; db10: ArrayLike<number> }
 
 /** Spectrum trace with area fill. `toX` maps an IF frequency to a pixel x. */
 export function drawTrace(
@@ -105,13 +105,16 @@ export function drawTrace(
   const color = cssVar(colorVar);
   ctx.beginPath();
   ctx.moveTo(x(0), bot);
-  row.db10.forEach((v, k) => ctx.lineTo(x(k), y(v)));
+  for (let k = 0; k < row.db10.length; k++) ctx.lineTo(x(k), y(row.db10[k]));
   ctx.lineTo(x(row.db10.length - 1), bot);
   ctx.closePath();
   ctx.fillStyle = withAlpha(color, 0.15);
   ctx.fill();
   ctx.beginPath();
-  row.db10.forEach((v, k) => (k ? ctx.lineTo(x(k), y(v)) : ctx.moveTo(x(k), y(v))));
+  for (let k = 0; k < row.db10.length; k++) {
+    if (k) ctx.lineTo(x(k), y(row.db10[k]));
+    else ctx.moveTo(x(k), y(row.db10[k]));
+  }
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.stroke();

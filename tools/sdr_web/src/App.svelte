@@ -6,7 +6,9 @@
   import RoleMenu from './components/RoleMenu.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import { connection, frozen, link, stats } from './lib/link';
+  import { channelsFor } from './lib/subscriptions';
   import { type ThemeChoice, applyTheme, loadTheme, nextTheme, refreshAppearance } from './lib/theme';
+  import { tuneChannel } from './lib/view';
   import Telemetry from './pages/Telemetry.svelte';
   import Tune from './pages/Tune.svelte';
 
@@ -16,6 +18,13 @@
 
   let page = $state<PageId>(fromHash());
   let theme = $state<ThemeChoice>(loadTheme());
+  let hidden = $state(document.hidden);
+  // The current Telemetry cards read only link and frame records (Task 10 derives this from the preset).
+  const TELEMETRY_CHANNELS = ['link', 'frames'];
+
+  $effect(() => {
+    link.setSubscriptions(channelsFor(page, { tuneChannel: $tuneChannel, cardChannels: TELEMETRY_CHANNELS, hidden }));
+  });
 
   onMount(() => {
     link.start();
@@ -23,6 +32,7 @@
     media.addEventListener('change', refreshAppearance);
     document.fonts.ready.then(refreshAppearance);
     const onHash = () => (page = fromHash());
+    const onVisibility = () => (hidden = document.hidden);
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (e.code === 'Space' && !t.closest('input, select, textarea, button, [role="spinbutton"]')) {
@@ -32,7 +42,9 @@
     };
     addEventListener('hashchange', onHash);
     addEventListener('keydown', onKey);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
       removeEventListener('hashchange', onHash);
       removeEventListener('keydown', onKey);
       media.removeEventListener('change', refreshAppearance);
@@ -64,7 +76,7 @@
   <div class="status">
     <StatusBar />
     <button class="btn" aria-pressed={$frozen} onclick={() => frozen.update((f) => !f)}
-      title="Freeze the display (Space). Receiving continues.">{$frozen ? 'Frozen' : 'Freeze'}</button>
+      title="Freeze the display (Space). Data keeps arriving.">{$frozen ? 'Frozen' : 'Freeze'}</button>
     <button class="btn" onclick={cycleTheme} title="Theme: follow the system, dark, or light">
       {theme === 'system' ? 'Auto' : theme === 'dark' ? 'Dark' : 'Light'}
     </button>
