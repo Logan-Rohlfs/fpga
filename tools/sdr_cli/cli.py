@@ -9,6 +9,7 @@ import sys
 import time
 
 from . import __version__
+from . import maps as maps_cmd
 from .protocol import format_record, summarize
 from .core import (ToolError, build, build_variants, load_config, program, remote, repo_root,
                    run, save_config, simulate, ps_literal)
@@ -79,6 +80,8 @@ def parser():
     gui.add_argument('--no-browser', action='store_true', help='Do not open a browser window')
     gui.add_argument('--port', help='UART device override')
     gui.add_argument('--baud', type=int)
+    maps = sub.add_parser('maps', help='Offline map tiles for the GUI')
+    maps_cmd.add_arguments(maps)
     return p
 
 
@@ -262,6 +265,8 @@ def main(root=None):
             except ImportError as exc:
                 raise ToolError('The GUI needs aiohttp. Install with: .venv/bin/python -m pip install -e ".[gui]"') from exc
             run_gui(root, config, args)
+        elif args.command == 'maps':
+            return maps_cmd.run(args, root)
         return 0
     except KeyboardInterrupt:
         return 130
