@@ -94,7 +94,30 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: none started (next: Task 1)**
+**Current task: none started (next: Task 1).** The session paused on 2026-09-30
+before any GUI implementation. The working tree is clean, and `./sdr sim`, host
+tests and both bitstreams were passing at the last check.
+
+**Before Task 1:** a pre-flight conflict scan of the plan was running at the pause.
+Its table goes to `.superpowers/sdd/2026-09-30-gui-cards/preflight.md`. If that
+file is missing or incomplete, rerun the scan: produce one row per task pair that
+shares a file or interface, and one row per task for self-consistency. Rule on
+each conflict, with the spec as authority, and record the rulings in the ledger
+before dispatching Task 1.
+
+The ledgers under `.superpowers/sdd/` are git-ignored local files. On another
+machine they won't exist. Rebuild progress from `git log` (task commits name
+their task), and read the rulings recorded in this section.
+
+Controller rulings already made:
+- Implementers commit their own work, overriding the plan's "controller
+  commits".
+- `build.tcl`, `core.py` and `tui.py` stay untouched by GUI tasks. Task 18's
+  `cli.py` `maps` subparser is additive.
+- Execution order is as listed above.
+- `AGENTS.md` still says "no command receiver or acknowledgement exists yet".
+  That is stale: UART tuning is acknowledged with CONFIG. Fix it in the final
+  docs task.
 
 **How to resume:** read the ledger and skip every task with a "Task N: complete"
 line. Continue in the execution order above, following
