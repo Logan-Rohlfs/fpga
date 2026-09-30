@@ -12,8 +12,12 @@ CRC_BURST_S = 1.0
 SWITCH_HOLD = 5        # consecutive BEST frames from a new source before source_switch
 
 FLIGHT_KINDS = ('launch', 'burnout', 'apogee', 'landing')
-ALL_KINDS = ('phase', 'launch', 'burnout', 'apogee', 'max_velocity', 'landing', 'flight_reset',
-             'signal_loss', 'reacquire', 'crc_burst', 'source_switch', 'source_state')
+# FLIGHT_KINDS are the milestone kinds (plot markers, preset triggers). Category 'flight' covers
+# every kind in the spec's flight-event table; category 'link' covers the link kinds.
+FLIGHT_CATEGORY_KINDS = ('phase', 'launch', 'burnout', 'apogee', 'max_velocity', 'landing', 'flight_reset')
+LINK_KINDS = ('signal_loss', 'reacquire', 'crc_burst', 'source_switch', 'source_state')
+ALL_KINDS = FLIGHT_CATEGORY_KINDS + LINK_KINDS
+CATEGORY = dict([(k, 'flight') for k in FLIGHT_CATEGORY_KINDS] + [(k, 'link') for k in LINK_KINDS])
 
 RESET_TEXT = 'New flight segment (replay loop or flight-computer restart)'
 _PRE_LAUNCH = ('IDLE', 'ARMED')
@@ -47,7 +51,7 @@ class EventDeriver:
         self._apogee_done = False
 
     def _event(self, t, kind, text, synthetic, channel=None, value=None, quantity=None):
-        ev = dict(id=self._next_id, t=t, kind=kind, text=text, channel=channel, value=value,
+        ev = dict(id=self._next_id, t=t, kind=kind, category=CATEGORY[kind], text=text, channel=channel, value=value,
                   quantity=quantity, segment=self.segment, synthetic=bool(synthetic))
         self._next_id += 1
         return ev

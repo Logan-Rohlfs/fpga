@@ -3,7 +3,7 @@ import unittest
 from link_samples import rom_flight_frames, with_crc
 from sdr_cli import apex, events, protocol as p
 
-KEYS = {'id', 't', 'kind', 'text', 'channel', 'value', 'quantity', 'segment', 'synthetic'}
+KEYS = {'id', 't', 'kind', 'category', 'text', 'channel', 'value', 'quantity', 'segment', 'synthetic'}
 
 
 def best(raw, n=0, t=None, src=0, flags=p.FLAG_SYNTHETIC):
@@ -160,6 +160,23 @@ class LinkEventsTest(unittest.TestCase):
         self.assertEqual(out[0]['t'], 3.0)
         self.assertEqual(d.source_state('down', 'still unplugged', 4.0), [])
         self.assertEqual(kinds(d.source_state('running', '', 5.0)), ['source_state'])
+
+    def test_category_matches_kind(self):
+        d = events.EventDeriver()
+        out = []
+        for n, raw in enumerate(rom_flight_frames()):
+            out += d.feed(best(raw, n, src=n // 10 % 2))
+        out += d.feed(best(rom_flight_frames()[0], 400))
+        for n in range(3):
+            out += d.feed(chan(0, False, 500 + n * 0.1))
+        out += d.feed(chan(1, True, 500.0)) + d.feed(chan(1, True, 501.0)) + d.tick(510)
+        out += d.source_state('down', 'x', 511.0)
+        seen = set(e['kind'] for e in out)
+        self.assertEqual(seen, set(events.ALL_KINDS) - {'landing'})
+        for e in out:
+            self.assertEqual(e['category'], 'link' if e['kind'] in events.LINK_KINDS else 'flight')
+        self.assertTrue(set(events.FLIGHT_KINDS) <= set(events.FLIGHT_CATEGORY_KINDS))
+        self.assertEqual(events.ALL_KINDS, events.FLIGHT_CATEGORY_KINDS + events.LINK_KINDS)
 
     def test_constants(self):
         self.assertEqual(events.FLIGHT_KINDS, ('launch', 'burnout', 'apogee', 'landing'))
