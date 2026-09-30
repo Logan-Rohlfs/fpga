@@ -133,6 +133,38 @@ class OutboxTest(unittest.TestCase):
         self.assertEqual(box.take_resync(), set())
         self.assertEqual(len(drain(box)), 2001)
 
+    def test_snapshot_survives_after_live_drained(self):
+        box, _ = make()
+        box.subscribe(['flight'])
+        for i in range(590):
+            box.offer(stream('flight', i))
+        box.subscribe(['flight', 'flight.A'])
+        box.put_snapshot('flight.A', list(range(4000)))
+        for _ in range(590):
+            box.next()
+        for i in range(11):
+            box.offer(stream('flight', i))
+        self.assertEqual(box.take_resync(), set())
+        self.assertEqual(len(drain(box)), 4011)
+
+    def test_cap_holds_after_snapshot_purge(self):
+        box, _ = make()
+        box.subscribe(['flight', 'events'])
+        for i in range(500):
+            box.offer(stream('flight', i))
+        box.put_snapshot('events', list(range(1000)))
+        box.subscribe(['flight'])
+        for i in range(101):
+            box.offer(stream('flight', i))
+        self.assertEqual(box.take_resync(), {'flight'})
+
+    def test_bad_inputs(self):
+        box, _ = make()
+        with self.assertRaises(TypeError):
+            box.subscribe('flight')
+        with self.assertRaises(ValueError):
+            box.offer(Outgoing('flight', 'bogus', 'flight', 'x'))
+
     def test_control_slot(self):
         box, _ = make()
         box.subscribe(['flight'])

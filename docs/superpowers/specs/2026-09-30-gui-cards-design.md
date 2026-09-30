@@ -239,10 +239,13 @@ Each client has one `Outbox`:
   role budget.
 - **stream**: an ordered deque of stream items for the subscribed stream
   channels. Its maximum length is 2000 for the operator and 600 for a viewer. On
-  overflow, the outbox discards every queued item of the overflowing channel
-  and marks it `resync`. The send loop then enqueues a fresh history snapshot for
-  that channel, so the client's store is rebuilt rather than silently gapped. The
-  client is never disconnected for data.
+  overflow (more than the maximum of live items queued; snapshot items do not
+  count), the outbox clears the whole stream queue and marks every channel that
+  had queued items `resync`. Discarding only the busiest channel would leave the
+  queue near the cap after a quiet channel's items remained, so it would
+  re-overflow at once. The send loop then enqueues a fresh history snapshot for
+  each resync channel, so the client's store is rebuilt rather than silently
+  gapped. The client is never disconnected for data.
 
 Send order: control first, then stream (FIFO), then due slots (oldest first). The
 send loop awaits `ws.send_*`, so a slow TCP connection makes messages coalesce in
