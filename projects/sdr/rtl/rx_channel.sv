@@ -27,7 +27,6 @@ module rx_channel #(
     localparam integer ACC_BITS = 21 + $clog2(DECIMATION);
     localparam integer DEC_BITS = DECIMATION < 2 ? 1 : $clog2(DECIMATION);
     localparam integer SYMBOL_BITS = $clog2(SAMPLES_PER_SYMBOL);
-    localparam signed [ACC_BITS-1:0] SCALE_DIVISOR = DECIMATION * 16;
     // Quarter-wave lookup: no external ROM file or vendor primitive.
     function signed [7:0] sine;
         input [4:0] phase;
@@ -43,14 +42,20 @@ module rx_channel #(
             sine = phase[4] ? -$signed(level) : $signed(level);
         end
     endfunction
-    function signed [15:0] scale;
-        input signed [ACC_BITS-1:0] value;
-        reg signed [ACC_BITS-1:0] normalized;
+    // Exact truncating division by DECIMATION*16 as a reciprocal multiply
+    // (Granlund-Montgomery signed magic): q = (v*M >> SHIFT) + (v<0). The
+    // multiply is pipelined over two registers after each decimated dump
+    // instead of a combinational constant divider on the sample path.
+    localparam integer SCALE_SHIFT = ACC_BITS - 1 + $clog2(DECIMATION * 16);
+    localparam [63:0] SCALE_ONE = 64'd1;
+    localparam [63:0] SCALE_MAGIC_WIDE = (SCALE_ONE << SCALE_SHIFT) / (DECIMATION * 16) + 1;
+    localparam signed [ACC_BITS:0] SCALE_MAGIC = SCALE_MAGIC_WIDE[ACC_BITS:0];
+    function signed [15:0] saturate;
+        input signed [ACC_BITS-1:0] normalized;
         begin
-            normalized = value / SCALE_DIVISOR;
-            if(normalized > 32767) scale=32767;
-            else if(normalized < -32768) scale=-32768;
-            else scale=normalized[15:0];
+            if(normalized > 32767) saturate=32767;
+            else if(normalized < -32768) saturate=-32768;
+            else saturate=normalized[15:0];
         end
     endfunction
     function [15:0] absolute;
@@ -74,6 +79,14 @@ module rx_channel #(
     reg [DEC_BITS-1:0] decimation_count;
     wire signed [ACC_BITS-1:0] accumulated_i = sum_i + {{(ACC_BITS-20){mixed_i[19]}},mixed_i};
     wire signed [ACC_BITS-1:0] accumulated_q = sum_q + {{(ACC_BITS-20){mixed_q[19]}},mixed_q};
+    reg dump_valid, product_valid;
+    reg signed [ACC_BITS-1:0] dump_i, dump_q;
+    reg signed [2*ACC_BITS:0] product_i, product_q;
+    reg negative_i, negative_q;
+    wire signed [2*ACC_BITS:0] shifted_i = product_i >>> SCALE_SHIFT;
+    wire signed [2*ACC_BITS:0] shifted_q = product_q >>> SCALE_SHIFT;
+    wire signed [ACC_BITS-1:0] quotient_i = shifted_i[ACC_BITS-1:0] + {{(ACC_BITS-1){1'b0}},negative_i};
+    wire signed [ACC_BITS-1:0] quotient_q = shifted_q[ACC_BITS-1:0] + {{(ACC_BITS-1){1'b0}},negative_q};
     reg signed [15:0] previous_i, previous_q;
     reg previous_valid;
     reg cross_valid;
@@ -96,6 +109,8 @@ module rx_channel #(
             frequency_offset_hz<=0; previous_quadrant<=0; phase_sum<=0; frequency_count<=0;
             phase<=0; mix_valid<=0; mixed_i<=0; mixed_q<=0;
             sum_i<=0; sum_q<=0; decimation_count<=0;
+            dump_valid<=0; product_valid<=0; dump_i<=0; dump_q<=0;
+            product_i<=0; product_q<=0; negative_i<=0; negative_q<=0;
             iq_valid<=0; iq_i<=0; iq_q<=0;
             previous_i<=0; previous_q<=0; previous_valid<=0;
             cross_valid<=0; cross_a<=0; cross_b<=0; cross_magnitude<=0;
@@ -104,7 +119,7 @@ module rx_channel #(
             have_decision<=0; symbol_phase<=0; stable_count<=0;
         end else begin
             mix_valid<=sample_valid;
-            iq_valid<=0; bit_valid<=0;
+            iq_valid<=0; bit_valid<=0; dump_valid<=0;
             if(sample_valid) begin
                 phase<=phase+nco_step;
                 mixed_i <= sample_data * sine(phase[31:27]+5'd8);
@@ -112,12 +127,20 @@ module rx_channel #(
             end
             if(mix_valid) begin
                 if(decimation_count == DECIMATION-1) begin
-                    iq_i<=scale(accumulated_i); iq_q<=scale(accumulated_q);
-                    iq_valid<=1; sum_i<=0; sum_q<=0; decimation_count<=0;
+                    dump_i<=accumulated_i; dump_q<=accumulated_q;
+                    dump_valid<=1; sum_i<=0; sum_q<=0; decimation_count<=0;
                 end else begin
                     sum_i<=accumulated_i; sum_q<=accumulated_q;
                     decimation_count<=decimation_count+1;
                 end
+            end
+            product_valid<=dump_valid;
+            if(dump_valid) begin
+                product_i<=dump_i*SCALE_MAGIC; product_q<=dump_q*SCALE_MAGIC;
+                negative_i<=dump_i[ACC_BITS-1]; negative_q<=dump_q[ACC_BITS-1];
+            end
+            if(product_valid) begin
+                iq_i<=saturate(quotient_i); iq_q<=saturate(quotient_q); iq_valid<=1;
             end
             cross_valid<=iq_valid && previous_valid;
             if(iq_valid) begin
