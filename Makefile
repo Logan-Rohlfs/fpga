@@ -2,7 +2,8 @@ PROJECT ?= blink
 BIT := build/$(PROJECT)/$(PROJECT).bit
 SDR_RTL := $(sort $(wildcard projects/sdr/rtl/*.sv))
 # Unit testbenches first, then the full top-level link test.
-SDR_TESTS := uart_tx_tb crc16_ccitt_tb cobs_encoder_tb link_tx_tb source_combiner_tb adc_signal_source_tb rx_channel_tb rx_frame_decoder_tb rx_observer_tb receiver_control_tb rx_pipeline_tb sdr_top_tb receiver_top_tb receiver_signal_loss_tb receiver_control_top_tb
+SDR_TESTS := uart_tx_tb crc16_ccitt_tb cobs_encoder_tb link_tx_tb source_combiner_tb adc_signal_source_tb rx_channel_tb rx_frame_decoder_tb rx_observer_tb receiver_control_tb rx_pipeline_tb sdr_top_tb receiver_top_tb receiver_signal_loss_tb receiver_control_top_tb \
+	flight_decoder_tb flight_replay_tb flight_top_tb
 
 .PHONY: sim build program flash clean
 
@@ -26,11 +27,14 @@ sim:
 		PYTHONPATH=tools python3 -m sdr_cli.protocol --check build/sdr/link_capture.bin && \
 		PYTHONPATH=tools python3 -m sdr_cli.protocol --check build/sdr/receiver_capture.bin && \
 		python3 projects/sdr/host/check_receiver.py --file build/sdr/receiver_capture.bin && \
-		python3 projects/sdr/host/check_receiver.py --file build/sdr/receiver_control_capture.bin; \
+		python3 projects/sdr/host/check_receiver.py --file build/sdr/receiver_control_capture.bin && \
+		PYTHONPATH=tools python3 -m sdr_cli.protocol --check build/sdr/flight_capture.bin && \
+		python3 projects/sdr/host/check_receiver.py --file build/sdr/flight_capture.bin --demo --rom projects/sdr/rom/apex_flight.mem; \
 	else echo "Unknown project: $(PROJECT)"; exit 1; fi
 
+# DEMO=1 builds the opt-in APEX flight replay variant of the sdr project.
 build:
-	vivado -mode batch -source scripts/build.tcl -tclargs $(PROJECT)
+	vivado -mode batch -source scripts/build.tcl -tclargs $(PROJECT) $(if $(DEMO),demo)
 
 program:
 	@test -f "$(BIT)" || (echo "Missing $(BIT). Build in Vivado first."; exit 1)

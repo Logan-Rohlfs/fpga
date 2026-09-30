@@ -14,7 +14,10 @@ module sdr_top #(
     parameter integer LEGACY_LINK_TEST=0,
     parameter [31:0] ADC_CARRIER_FTW=32'd429496730,
     parameter [31:0] RX_NCO_FTW=32'd429496730,
-    parameter integer ADC_ENABLE=1
+    parameter integer ADC_ENABLE=1,
+    // Opt-in APEX flight replay demo (./sdr build --demo). STATUS then reports
+    // BUILD_ID "SDRF" (0x53445246) instead of BUILD_ID.
+    parameter integer DEMO_FLIGHT=0
 ) (
     input  wire clk,
     input  wire btnC,
@@ -40,6 +43,9 @@ module sdr_top #(
     wire [7:0] msg_data, sent_type, enc_data;
     wire msg_valid, msg_last, msg_ready, sent_pulse, enc_valid, enc_ready;
 
+`ifndef SYNTHESIS
+    initial if(LEGACY_LINK_TEST && DEMO_FLIGHT) $fatal(1,"DEMO_FLIGHT needs the receiver, not LEGACY_LINK_TEST");
+`endif
     generate if(LEGACY_LINK_TEST) begin: legacy
     link_test_sources #(
         .CLK_HZ(CLK_HZ), .TICK_CYCLES(TICK_CYCLES), .STATUS_TICKS(STATUS_TICKS), .BUILD_ID(BUILD_ID), .N(N)
@@ -68,7 +74,8 @@ module sdr_top #(
             .cmd_seq(cmd_seq),.carrier_ftw(requested_carrier),.nco_ftw(requested_nco),.enable(requested_enable),
             .rejected_count(rejected_commands),.dropped_count(dropped_commands));
         receiver_link_sources #(.CLK_HZ(CLK_HZ),.TICK_CYCLES(TICK_CYCLES),
-            .STATUS_TICKS(STATUS_TICKS),.BUILD_ID(BUILD_ID),.N(11)) sources(
+            .STATUS_TICKS(STATUS_TICKS),.BUILD_ID(DEMO_FLIGHT ? 32'h53445246 : BUILD_ID),.N(11),
+            .DEMO_FLIGHT(DEMO_FLIGHT)) sources(
             .clk(clk),.rst(rst),.cfg_reset(cfg_reset),.pause(quiesce),.carrier_ftw(applied_carrier),.nco_step(applied_nco),
             .adc_enable(applied_enable),.req(req[N-1:1]),.p_type(p_type[8*N-1:8]),.p_flags(p_flags[8*N-1:8]),.p_len(p_len[16*N-1:16]),
             .grant(grant[N-1:1]),.p_data(p_data[8*N-1:8]),.p_valid(p_valid[N-1:1]),.p_ready(p_ready[N-1:1]));

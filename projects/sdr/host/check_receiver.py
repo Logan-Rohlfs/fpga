@@ -5,6 +5,12 @@ old messages. Otherwise verifies exact APEX TEST payloads and each BEST's select
 channel bytes/timestamp. Capture boundaries may omit a matching channel record;
 only records whose complete A/B pair is present are ranked, and at least one
 complete comparison is required. CONFIG changes delimit independent epochs.
+
+--demo checks the APEX flight replay bitstream instead: 44-byte FLIGHT frames
+(type 0x02, callsign KG5LDI, seq u16 at byte 7), BUILD_ID SDRF, and with --rom
+each CRC-good frame must equal that ROM frame plus its CRC. A BEST whose seq
+has exactly one channel record (the other antenna in its loss window) must
+equal that record; it is counted as a single-antenna cover.
 """
 import argparse
 from collections import Counter
@@ -16,8 +22,32 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'tools'))
 from sdr_cli.protocol import StreamDecoder, crc16_ccitt  # noqa: E402
 
+TEST_BUILD_ID, FLIGHT_BUILD_ID = 0x53445231, 0x53445246
+FLIGHT_FRAME_BYTES = 44
 
-def validate(raw, *, no_frames=False, build_id=0x53445231):
+
+def frame_key(data, demo):
+    return int.from_bytes(data[7:9], 'little') if demo else data[1]
+
+
+def payload_error(data, demo, rom):
+    """Why a recovered frame does not match the configured transmitter, or None."""
+    if not demo:
+        if len(data) != 19 or data[0] != 1 or data[2:17] != b'APEX RADIO TEST':
+            return 'decoded payload does not match configured TEST transmitter'
+        return None
+    if len(data) != FLIGHT_FRAME_BYTES or data[0] != 2 or data[1:7] != b'KG5LDI':
+        return 'decoded payload is not an APEX FLIGHT frame'
+    seq = frame_key(data, demo)
+    crc_ok = crc16_ccitt(data[:-2]) == int.from_bytes(data[-2:], 'big')
+    if rom is not None and crc_ok and (seq >= len(rom) or data[:-2] != rom[seq]):
+        return f'FLIGHT seq {seq} differs from the replay ROM'
+    return None
+
+
+def validate(raw, *, no_frames=False, build_id=None, demo=False, rom=None):
+    if build_id is None:
+        build_id = FLIGHT_BUILD_ID if demo else TEST_BUILD_ID
     decoder = StreamDecoder()
     records = decoder.feed(raw)
     errors = []
@@ -63,15 +93,16 @@ def validate(raw, *, no_frames=False, build_id=0x53445231):
                 errors.append(f'{record.name} missing relative dBFS flag')
         if record.name in ('CHAN_FRAME', 'BEST_TELEM'):
             data = f['raw']
-            if len(data) != 19 or data[0] != 1 or data[2:17] != b'APEX RADIO TEST':
-                errors.append('decoded payload does not match configured TEST transmitter')
+            problem = payload_error(data, demo, rom)
+            if problem:
+                errors.append(problem)
                 continue
             crc_ok = crc16_ccitt(data[:-2]) == int.from_bytes(data[-2:], 'big')
             if record.name == 'CHAN_FRAME':
                 if f['crc_ok'] != crc_ok:
                     errors.append('channel CRC status disagrees with recovered bytes')
                 good += int(crc_ok)
-                frames.setdefault((epoch, data[1], f['channel']), []).append(record)
+                frames.setdefault((epoch, frame_key(data, demo), f['channel']), []).append(record)
             else:
                 if not crc_ok:
                     errors.append('BEST contains corrupt APEX payload')
@@ -92,13 +123,19 @@ def validate(raw, *, no_frames=False, build_id=0x53445231):
             errors.append(f'{name} missing an antenna channel')
     if not no_frames and (not nonflat_spectrum or not nonzero_iq):
         errors.append('decoded traffic lacks nonflat spectrum/nonzero I/Q')
-    compared = 0
+    compared = covers = 0
     for epoch, best in bests:
         f = best.fields
-        seq = f['raw'][1]
+        seq = frame_key(f['raw'], demo)
         groups = [frames.get((epoch, seq, channel), []) for channel in ('A', 'B')]
         candidates = [min(group, key=lambda r: abs(r.fields['t_us'] - f['t_us'])) if group else None
                       for group in groups]
+        present = [r for r in candidates if r]
+        if demo and len(present) == 1 and present[0].fields['channel'] == f['source']:
+            only = present[0].fields
+            if not only['crc_ok'] or only['raw'] != f['raw'] or only['t_us'] != f['t_us']:
+                errors.append('single-antenna BEST differs from its channel record')
+            covers += 1
         if not all(candidates):
             continue
         candidates = [r for r in candidates if r.fields['crc_ok']]
@@ -114,7 +151,7 @@ def validate(raw, *, no_frames=False, build_id=0x53445231):
             errors.append(f'expected no decoded frames; saw {len(bests)} BEST and {good} CRC-good channel frames')
     elif not compared:
         errors.append('no complete BEST/A/B selection comparison')
-    return errors, counts, compared, decoder.stats
+    return errors, counts, compared, decoder.stats, covers
 
 
 def main():
@@ -126,8 +163,15 @@ def main():
     parser.add_argument('--baud', type=int, default=1000000)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--no-frames', action='store_true')
-    parser.add_argument('--build-id', type=lambda value: int(value, 0), default=0x53445231)
+    parser.add_argument('--build-id', type=lambda value: int(value, 0),
+                        help='Expected STATUS build_id (default SDR1, or SDRF with --demo)')
+    parser.add_argument('--demo', action='store_true', help='APEX flight replay bitstream (FLIGHT frames)')
+    parser.add_argument('--rom', type=Path, help='With --demo: replay ROM .mem to compare frames against')
     args = parser.parse_args()
+    rom = None
+    if args.rom:
+        from apex_flight_rom import read_mem
+        rom = read_mem(args.rom)
     if args.file:
         raw = args.file.read_bytes()
     else:
@@ -145,8 +189,10 @@ def main():
     if args.output:
         with args.output.open('xb') as stream:
             stream.write(raw)
-    errors, counts, compared, stats = validate(raw, no_frames=args.no_frames, build_id=args.build_id)
-    print(f'{stats["messages"]} messages {dict(counts)}; {compared} exact BEST selections')
+    errors, counts, compared, stats, covers = validate(raw, no_frames=args.no_frames, build_id=args.build_id,
+                                                        demo=args.demo, rom=rom)
+    print(f'{stats["messages"]} messages {dict(counts)}; {compared} exact BEST selections'
+          + (f', {covers} single-antenna covers' if args.demo else ''))
     if errors:
         print('FAIL: ' + '; '.join(dict.fromkeys(errors)), file=sys.stderr)
         return 1

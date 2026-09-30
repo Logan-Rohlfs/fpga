@@ -11,7 +11,10 @@ module receiver_link_sources #(
     parameter integer BIT_RATE=10000,
     parameter integer DEVIATION_HZ=20000,
     parameter integer ADC_AMPLITUDE_A=1400,
-    parameter integer ADC_AMPLITUDE_B=1000
+    parameter integer ADC_AMPLITUDE_B=1000,
+    // 1 selects the APEX flight replay demo profile below (opt-in bitstream).
+    parameter integer DEMO_FLIGHT=0,
+    parameter FLIGHT_ROM_FILE="projects/sdr/rom/apex_flight.mem"
 )(
     input wire clk,rst,
     input wire cfg_reset,
@@ -31,6 +34,22 @@ module receiver_link_sources #(
     localparam integer METRICS_TICKS=10,SPECTRUM_TICKS=10,IQ_TICKS=10,TELEM_TICKS=5;
     localparam integer IQ_RATE=SAMPLE_RATE_HZ/10;
     localparam [7:0] T_BEST=8'h10,T_FRAME=8'h11,T_METRICS=8'h20,T_LINK=8'h21,T_STATUS=1,T_SPECTRUM=8'h30,T_IQ=8'h31;
+    // ------------------------------------------------------------ radio profile
+    // Default: the provisional TEST profile (19-byte frame, sync D391D391).
+    // DEMO_FLIGHT: APEX RF4463 framing from apex fsw/src/radio.cpp: 64-bit 0xAA
+    // preamble (first bit 1), 16-bit sync 2DD4, type 0x02 + 41-byte FLIGHT body
+    // + CRC16 (44 bytes after sync), +/-25 kHz deviation, seq u16 LE at byte 7.
+    // The same 1 MS/s ADC and 100 kHz IF are kept (analog-frontend assumption).
+    // The ROM replays FLIGHT_ROM_FRAMES frames at 20 Hz, then FLIGHT_GAP_SLOTS
+    // silent 50 ms slots, and loops. Each antenna loses the tone for 0.5 s per
+    // loop at a different flight time: A in slots 60-69 (coast, ~1 s after
+    // launch detect), B in slots 228-237 (across the COAST->DESCENT change at
+    // slot 233). Additive ADC noise is +/-256 LSB uniform on both channels.
+    localparam integer DEMO=DEMO_FLIGHT!=0;
+    localparam integer FRAME_BYTES=DEMO ? 44 : 19;
+    localparam integer FLIGHT_ROM_FRAMES=293, FLIGHT_GAP_SLOTS=20;
+    localparam integer FLIGHT_LOSS_A_FIRST=60, FLIGHT_LOSS_A_LAST=69;
+    localparam integer FLIGHT_LOSS_B_FIRST=228, FLIGHT_LOSS_B_LAST=237;
     // ------------------------------------------------------------ timebase
     reg [31:0] tick_div = 0;
     reg tick = 1'b0;
@@ -106,12 +125,18 @@ module receiver_link_sources #(
     wire sample_valid;
     wire signed [11:0] sample_a,sample_b;
     adc_signal_source #(.CLK_HZ(CLK_HZ),.SAMPLE_RATE_HZ(SAMPLE_RATE_HZ),.BIT_RATE(BIT_RATE),
-        .DEVIATION_HZ(DEVIATION_HZ),.PACKET_SAMPLES(SAMPLE_RATE_HZ/20),
-        .AMPLITUDE_A(ADC_AMPLITUDE_A),.AMPLITUDE_B(ADC_AMPLITUDE_B)) adc(
+        .DEVIATION_HZ(DEMO ? 25000 : DEVIATION_HZ),.PACKET_SAMPLES(SAMPLE_RATE_HZ/20),
+        .AMPLITUDE_A(ADC_AMPLITUDE_A),.AMPLITUDE_B(ADC_AMPLITUDE_B),
+        .NOISE_A(DEMO ? 256 : 8),.NOISE_B(DEMO ? 256 : 16),
+        .PREAMBLE_FIRST_BIT(DEMO),.SYNC_WORD(DEMO ? 32'h00002dd4 : 32'hd391d391),.SYNC_BITS(DEMO ? 16 : 32),
+        .PAYLOAD_ROM(DEMO),.DATA_BYTES(FRAME_BYTES-2),.ROM_FILE(FLIGHT_ROM_FILE),
+        .ROM_FRAMES(FLIGHT_ROM_FRAMES),.GAP_SLOTS(FLIGHT_GAP_SLOTS),
+        .LOSS_A_FIRST(DEMO ? FLIGHT_LOSS_A_FIRST : -1),.LOSS_A_LAST(DEMO ? FLIGHT_LOSS_A_LAST : -1),
+        .LOSS_B_FIRST(DEMO ? FLIGHT_LOSS_B_FIRST : -1),.LOSS_B_LAST(DEMO ? FLIGHT_LOSS_B_LAST : -1)) adc(
         .clk(clk),.rst(datapath_rst),.enable(adc_enable),.carrier_ftw(carrier_ftw),
         .sample_valid(sample_valid),.sample_a(sample_a),.sample_b(sample_b));
     wire [1:0] frame_valid,frame_ready,frame_crc_ok,comb_ready;
-    wire [151:0] frame_data[0:1];
+    wire [FRAME_BYTES*8-1:0] frame_data[0:1];
     wire [7:0] frame_len[0:1],frame_type[0:1],frame_quality[0:1];
     wire [15:0] frame_seq[0:1],frame_magnitude[0:1];
     wire [31:0] frame_t[0:1],frame_frequency[0:1];
@@ -130,8 +155,8 @@ module receiver_link_sources #(
     wire comb_valid,comb_synthetic,stats_synthetic;
     wire [7:0] comb_source,comb_len;
     wire [31:0] comb_t,from_a,from_b,both_ok,neither_ok,best_sent,duplicates,rejected;
-    wire [151:0] comb_frame;
-    source_combiner #(.MAX_FRAME_BYTES(19),.MATCH_CYCLES(CLK_HZ/100),
+    wire [FRAME_BYTES*8-1:0] comb_frame;
+    source_combiner #(.MAX_FRAME_BYTES(FRAME_BYTES),.MATCH_CYCLES(CLK_HZ/100),
         .DEDUPE_CYCLES(CLK_HZ/25),.DEDUPE_ENTRIES(4)) combiner(
         .clk(clk),.rst(datapath_rst),.in_valid(frame_valid & {2{!pause}} & { !req[P_FRAME+1],!req[P_FRAME]}),.in_ready(comb_ready),
         .in_crc_ok(frame_crc_ok),.in_synthetic(2'b11),.in_type({frame_type[1],frame_type[0]}),
@@ -142,11 +167,11 @@ module receiver_link_sources #(
         .out_synthetic(comb_synthetic),.out_t_us(comb_t),.out_len(comb_len),.out_frame(comb_frame),
         .from_a(from_a),.from_b(from_b),.both_ok(both_ok),.neither_ok(neither_ok),.best_sent(best_sent),
         .duplicate_count(duplicates),.rejected_count(rejected),.stats_synthetic(stats_synthetic));
-    reg [199:0] best_payload;
+    reg [(FRAME_BYTES+6)*8-1:0] best_payload;
     assign mtype[P_BEST]=T_BEST;
-    assign len[P_BEST]=25;
+    assign len[P_BEST]=FRAME_BYTES+6;
     assign trigger[P_BEST]=!pause && comb_valid && !req[P_BEST];
-    always @(posedge clk) if(accept[P_BEST]) best_payload<={comb_frame,8'd19,comb_source,comb_t};
+    always @(posedge clk) if(accept[P_BEST]) best_payload<={comb_frame,8'(FRAME_BYTES),comb_source,comb_t};
     assign data[P_BEST]=best_payload[8*idx[P_BEST]+:8];
     generate for(g=0;g<2;g=g+1) begin: channel
         localparam [7:0] CH=g;
@@ -156,7 +181,10 @@ module receiver_link_sources #(
         wire [31:0] frequency_offset;
         wire [7:0] quality;
         rx_pipeline #(.DECIMATION(10),.SAMPLES_PER_SYMBOL(SAMPLE_RATE_HZ/10/BIT_RATE),
-            .IQ_RATE_HZ(IQ_RATE)) receiver(
+            .IQ_RATE_HZ(IQ_RATE),.FRAME_BYTES(FRAME_BYTES),
+            .SYNC_WORD(DEMO ? 32'h00002dd4 : 32'hd391d391),.SYNC_BITS(DEMO ? 16 : 32),
+            .SEQ_OFFSET(DEMO ? 7 : 1),.SEQ_BYTES(DEMO ? 2 : 1),
+            .TYPE_FILTER(DEMO),.FRAME_TYPE(DEMO ? 8'h02 : 8'h00)) receiver(
             .clk(clk),.rst(datapath_rst),.t_us(t_us),.nco_step(nco_step),.sample_valid(sample_valid),
             .sample_data(g==0 ? sample_a : sample_b),.sample_synthetic(1'b1),
             .iq_valid(iq_valid),.iq_i(iq_i),.iq_q(iq_q),.quality(quality),
@@ -170,10 +198,10 @@ module receiver_link_sources #(
         assign frame_power[g]=relative_dbfs(frame_magnitude[g]);
         assign frame_ready[g]=!pause && comb_ready[g] && !req[PF];
         assign trigger[PF]=frame_valid[g] && frame_ready[g];
-        assign len[PF]=33;
+        assign len[PF]=FRAME_BYTES+14;
         assign mtype[PF]=T_FRAME;
-        reg [263:0] frame_payload;
-        always @(posedge clk) if(accept[PF]) frame_payload <= {frame_data[g],8'd19,frame_frequency[g],
+        reg [(FRAME_BYTES+14)*8-1:0] frame_payload;
+        always @(posedge clk) if(accept[PF]) frame_payload <= {frame_data[g],8'(FRAME_BYTES),frame_frequency[g],
             frame_quality[g],frame_power[g],frame_t[g],7'd0,frame_crc_ok[g],CH};
         assign data[PF]=frame_payload[8*idx[PF]+:8];
         wire observation_valid;

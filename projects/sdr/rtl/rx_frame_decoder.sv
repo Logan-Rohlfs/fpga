@@ -1,6 +1,10 @@
 // Configurable provisional packet decoder. Defaults are a TEST profile, not a
 // claim about RF4463 on-air settings. Sync is sent MSB first; LSB_FIRST affects
 // payload bytes only. Whitening is reset after sync and precedes byte assembly.
+// TYPE_FILTER=1 is a one-entry type-implied length (the APEX air format has no
+// length field): only frames whose type byte equals FRAME_TYPE are assembled,
+// and FRAME_BYTES is that type's length. Any other type byte returns to sync
+// hunt immediately; it counts as a sync hit but not as a good or bad frame.
 module rx_frame_decoder #(
     parameter integer FRAME_BYTES = 19,
     parameter [31:0] SYNC_WORD = 32'hd391d391,
@@ -18,7 +22,9 @@ module rx_frame_decoder #(
     parameter [15:0] CRC_INIT = 16'hffff,
     parameter [15:0] CRC_XOROUT = 16'h0000,
     parameter integer CRC_TRAILER_LITTLE_ENDIAN = 0,
-    parameter integer BIT_TIMEOUT_CYCLES = 1000000
+    parameter integer BIT_TIMEOUT_CYCLES = 1000000,
+    parameter integer TYPE_FILTER = 0,
+    parameter [7:0] FRAME_TYPE = 8'h00
 )(
     input wire clk, input wire rst,
     input wire bit_valid, input wire bit_in,
@@ -112,6 +118,9 @@ module rx_frame_decoder #(
                     byte_index <= byte_index + 1'b1;
                     if (byte_index < FRAME_BYTES-2) crc <= crc_byte(crc,next_byte);
                     if (byte_index == FRAME_BYTES-2) trailer_first <= next_byte;
+                    if (TYPE_FILTER != 0 && byte_index == TYPE_OFFSET && next_byte != FRAME_TYPE) begin
+                        locked <= 0; hunt_bits <= 0; sync_shift <= 0;
+                    end
                     if (byte_index == FRAME_BYTES-1) begin
                         locked <= 0; hunt_bits <= 0; sync_shift <= 0;
                         if (crc_pass) good_count <= good_count + 1'b1;

@@ -2,6 +2,14 @@
 // Synthetic analog-boundary stimulus only. The receiver gets samples, never bits.
 // Defaults are a configurable development profile, not measured transmitter settings.
 // Five binomial NRZ taps at quarter-symbol spacing approximate Gaussian BT~0.5.
+//
+// PAYLOAD_ROM=0 (default) sends the built-in 17-byte APEX TEST payload.
+// PAYLOAD_ROM=1 replays ROM_FRAMES frames of DATA_BYTES bytes from ROM_FILE,
+// one per PACKET_SAMPLES slot, then GAP_SLOTS silent slots, and loops. Slots
+// LOSS_x_FIRST..LOSS_x_LAST of every loop carry no tone on channel x (noise
+// only), so each antenna has a deterministic signal-loss window. The CRC is
+// always computed here over the bytes after sync and appended big-endian.
+// START_SLOT only shortens simulations; it is the first slot after reset.
 module adc_signal_source #(
     parameter integer CLK_HZ=100000000,
     parameter integer SAMPLE_RATE_HZ=1000000,
@@ -14,7 +22,19 @@ module adc_signal_source #(
     parameter integer NOISE_B=16,
     parameter integer DELAY_B_SAMPLES=3,
     parameter integer PREAMBLE_BITS=64,
-    parameter [31:0] SYNC_WORD=32'hd391d391
+    parameter integer PREAMBLE_FIRST_BIT=0,
+    parameter [31:0] SYNC_WORD=32'hd391d391,
+    parameter integer SYNC_BITS=32,
+    parameter integer PAYLOAD_ROM=0,
+    parameter integer DATA_BYTES=17,
+    parameter ROM_FILE="",
+    parameter integer ROM_FRAMES=1,
+    parameter integer GAP_SLOTS=0,
+    parameter integer LOSS_A_FIRST=-1,
+    parameter integer LOSS_A_LAST=-1,
+    parameter integer LOSS_B_FIRST=-1,
+    parameter integer LOSS_B_LAST=-1,
+    parameter integer START_SLOT=0
 )(
     input wire clk, rst, enable,
     input wire [31:0] carrier_ftw,
@@ -24,9 +44,9 @@ module adc_signal_source #(
     localparam integer DIVIDER=CLK_HZ/SAMPLE_RATE_HZ;
     localparam integer SPS=SAMPLE_RATE_HZ/BIT_RATE;
     localparam integer QUARTER=SPS/4;
-    localparam integer DATA_START=PREAMBLE_BITS+32;
-    localparam integer CRC_START=DATA_START+136;
-    localparam integer END_BIT=DATA_START+152;
+    localparam integer DATA_START=PREAMBLE_BITS+SYNC_BITS;
+    localparam integer CRC_START=DATA_START+8*DATA_BYTES;
+    localparam integer END_BIT=CRC_START+16;
     localparam integer B_DEPTH=DELAY_B_SAMPLES>0 ? DELAY_B_SAMPLES : 1;
     localparam signed [63:0] DEV_WIDE=(64'sd4294967296*DEVIATION_HZ)/SAMPLE_RATE_HZ;
     localparam signed [31:0] DEV_STEP=DEV_WIDE[31:0];
@@ -54,13 +74,17 @@ module adc_signal_source #(
     reg packet_bit;
     reg [7:0] current_byte;
     integer relative_bit;
+    // Replay controls. Constants in the default build (always on, no loss).
+    wire [7:0] rom_byte;
+    wire slot_on, loss_a, loss_b;
     always @* begin
         packet_bit=0;
         relative_bit=bit_position-DATA_START;
         current_byte=data_byte(relative_bit/8,sequence_number);
-        if(bit_position<PREAMBLE_BITS) packet_bit=bit_position[0];
-        else if(bit_position<DATA_START) packet_bit=SYNC_WORD[31-(bit_position-PREAMBLE_BITS)];
-        else if(bit_position<CRC_START) packet_bit=current_byte[7-relative_bit%8];
+        if(bit_position<PREAMBLE_BITS) packet_bit=bit_position[0]^(PREAMBLE_FIRST_BIT!=0);
+        else if(bit_position<DATA_START) packet_bit=SYNC_WORD[SYNC_BITS-1-(bit_position-PREAMBLE_BITS)];
+        else if(bit_position<CRC_START)
+            packet_bit=(PAYLOAD_ROM!=0) ? rom_byte[7-relative_bit%8] : current_byte[7-relative_bit%8];
         else if(bit_position<END_BIT) packet_bit=crc[15-(bit_position-CRC_START)];
     end
     function automatic signed [11:0] sine(input [7:0] angle);
@@ -168,8 +192,8 @@ module adc_signal_source #(
         // A zero sine gives the same zero tone as gating the product.
         sine_q<=(active && enable) ? sine(phase[31:24]) : 12'sd0;
         noise_a_q<=noise_a; noise_b_q<=noise_b;
-        tone_a_q<=($signed(sine_q)*AMPLITUDE_A) >>> 11;
-        tone_b_q<=($signed(sine_q)*AMPLITUDE_B) >>> 11;
+        tone_a_q<=loss_a ? 32'sd0 : ($signed(sine_q)*AMPLITUDE_A) >>> 11;
+        tone_b_q<=loss_b ? 32'sd0 : ($signed(sine_q)*AMPLITUDE_B) >>> 11;
         noise_a_q2<=noise_a_q; noise_b_q2<=noise_b_q;
         next_a<=clamp(tone_a_q+noise_a_q2);
         next_b<=clamp(tone_b_q+noise_b_q2);
@@ -198,7 +222,7 @@ module adc_signal_source #(
             if(packet_count==PACKET_SAMPLES-1) packet_count<=0;
             else packet_count<=packet_count+1;
             if(packet_count==0) begin
-                active<=1;bit_position<=0;bit_sample<=0;crc<=16'hffff;
+                active<=slot_on;bit_position<=0;bit_sample<=0;crc<=16'hffff;
             end else if(active) begin
                 if(bit_sample==0 && bit_position>=DATA_START && bit_position<CRC_START)
                     crc<=(crc<<1)^((crc[15]^packet_bit_q) ? 16'h1021 : 16'h0000);
@@ -210,9 +234,56 @@ module adc_signal_source #(
             end
         end else clock_count<=clock_count+1;
     end
+    generate if(PAYLOAD_ROM!=0) begin: replay
+        // Frames are packed back to back; frame_base is the first byte of the
+        // frame on air. The byte read is registered (block RAM), adding one
+        // clock to the settle budget (DIVIDER >= 5).
+        localparam integer ROM_BYTES=ROM_FRAMES*DATA_BYTES;
+        localparam integer AW=ROM_BYTES>1 ? $clog2(ROM_BYTES) : 1;
+        localparam integer LOOP_SLOTS=ROM_FRAMES+GAP_SLOTS;
+        localparam integer SW=$clog2(LOOP_SLOTS+1);
+        localparam integer START_BASE=(START_SLOT<ROM_FRAMES ? START_SLOT : ROM_FRAMES)*DATA_BYTES;
+        (* rom_style="block" *) reg [7:0] rom[0:ROM_BYTES-1];
+        initial $readmemh(ROM_FILE,rom);
+        reg [7:0] rom_q;
+        reg [AW-1:0] frame_base,next_base;
+        reg [SW-1:0] slot;
+        reg loss_a_q,loss_b_q;
+        wire in_payload=bit_position>=DATA_START && bit_position<CRC_START;
+        wire [AW-1:0] byte_offset=in_payload ? AW'((bit_position-DATA_START)>>3) : {AW{1'b0}};
+        always @(posedge clk) rom_q<=rom[frame_base+byte_offset];
+        always @(posedge clk) begin
+            if(rst) begin
+                slot<=SW'(START_SLOT);next_base<=AW'(START_BASE);frame_base<=0;loss_a_q<=0;loss_b_q<=0;
+            end else if(clock_count==DIVIDER-1 && packet_count==0) begin
+                frame_base<=next_base;
+                loss_a_q<=slot>=LOSS_A_FIRST && slot<=LOSS_A_LAST;
+                loss_b_q<=slot>=LOSS_B_FIRST && slot<=LOSS_B_LAST;
+                if(slot==LOOP_SLOTS-1) begin slot<=0;next_base<=0;end
+                else begin
+                    slot<=slot+1'b1;
+                    if(slot<ROM_FRAMES) next_base<=next_base+AW'(DATA_BYTES);
+                end
+            end
+        end
+        assign rom_byte=rom_q;
+        assign slot_on=slot<ROM_FRAMES;
+        assign loss_a=loss_a_q;
+        assign loss_b=loss_b_q;
+    end else begin: fixed_test
+        assign rom_byte=8'd0;
+        assign slot_on=1'b1;
+        assign loss_a=1'b0;
+        assign loss_b=1'b0;
+    end endgenerate
 `ifndef SYNTHESIS
     initial begin
         if(DIVIDER<4) $fatal(1,"ADC source needs at least four clocks per sample for its register stages");
+        if(PAYLOAD_ROM!=0 && DIVIDER<5) $fatal(1,"ROM replay needs at least five clocks per sample (registered ROM read)");
+        if(PAYLOAD_ROM==0 && DATA_BYTES!=17) $fatal(1,"The built-in TEST payload is 17 bytes");
+        if(SYNC_BITS<1 || SYNC_BITS>32) $fatal(1,"SYNC_BITS must be 1..32");
+        if(PAYLOAD_ROM!=0 && (ROM_FRAMES<1 || GAP_SLOTS<0 || START_SLOT<0 || START_SLOT>=ROM_FRAMES+GAP_SLOTS))
+            $fatal(1,"Invalid replay ROM slot parameters");
         if(CLK_HZ % SAMPLE_RATE_HZ != 0 || SAMPLE_RATE_HZ % BIT_RATE != 0 || SPS<4 || SPS%4!=0)
             $fatal(1,"ADC source requires integer clocks/sample and samples/bit divisible by four");
         if(PACKET_SAMPLES < (END_BIT+3)*SPS) $fatal(1,"Packet interval too short");

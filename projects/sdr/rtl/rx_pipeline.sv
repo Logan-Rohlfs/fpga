@@ -22,7 +22,9 @@ module rx_pipeline #(
     parameter [15:0] CRC_INIT=16'hffff,
     parameter [15:0] CRC_XOROUT=16'h0000,
     parameter integer CRC_TRAILER_LITTLE_ENDIAN=0,
-    parameter integer BIT_TIMEOUT_CYCLES=1000000
+    parameter integer BIT_TIMEOUT_CYCLES=1000000,
+    parameter integer TYPE_FILTER=0,
+    parameter [7:0] FRAME_TYPE=8'h00
 )(
     input wire clk, rst,
     input wire [31:0] nco_step,
@@ -99,7 +101,8 @@ module rx_pipeline #(
         .WHITEN_SEED(WHITEN_SEED),.WHITEN_POLY(WHITEN_POLY),.TYPE_OFFSET(TYPE_OFFSET),
         .SEQ_OFFSET(SEQ_OFFSET),.SEQ_BYTES(SEQ_BYTES),.SEQ_LITTLE_ENDIAN(SEQ_LITTLE_ENDIAN),
         .CRC_POLY(CRC_POLY),.CRC_INIT(CRC_INIT),.CRC_XOROUT(CRC_XOROUT),
-        .CRC_TRAILER_LITTLE_ENDIAN(CRC_TRAILER_LITTLE_ENDIAN),.BIT_TIMEOUT_CYCLES(BIT_TIMEOUT_CYCLES)) decoder(
+        .CRC_TRAILER_LITTLE_ENDIAN(CRC_TRAILER_LITTLE_ENDIAN),.BIT_TIMEOUT_CYCLES(BIT_TIMEOUT_CYCLES),
+        .TYPE_FILTER(TYPE_FILTER),.FRAME_TYPE(FRAME_TYPE)) decoder(
         .clk(clk),.rst(rst),.bit_valid(bit_valid),.bit_in(bit_data),.frame_valid(decoder_valid),.frame_complete(decoder_complete),
         .frame_ready(decoder_ready),.frame_data(decoder_data),.frame_len(frame_len),.frame_type(decoder_type),
         .frame_seq(decoder_seq),.frame_crc_ok(decoder_crc_ok),.sync_count(sync_count),.good_count(good_count),
