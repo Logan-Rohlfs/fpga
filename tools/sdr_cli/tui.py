@@ -22,7 +22,7 @@ HELP = [
     'v  cycle RAW / LINK / SPECTRUM views of pane 03',
     ':  command entry                   ?  help       q  quit',
     '',
-    'Commands: connect, disconnect, sim, build, program, flash, record, stop,',
+    'Commands: connect, disconnect, sim, build, build demo, program, flash, record, stop,',
     '          port DEVICE, baud RATE, send TEXT, send-hex aa 01 ff, clear, quit',
     'Use quotes for text with spaces. Arrow up/down scroll the receive pane.',
     '',
@@ -112,6 +112,8 @@ class Dashboard:
                         simulate(self.root, self.config['project'], log)
                     elif operation == 'build':
                         build(self.root, self.config.copy(), log)
+                    elif operation == 'build-demo':
+                        build(self.root, self.config.copy(), log, demo=True)
                     else:
                         program(self.root, self.config.copy(), persist=operation == 'flash', log=log)
             except Exception as exc:
@@ -127,6 +129,8 @@ class Dashboard:
         cmd, args = words[0], words[1:]
         if cmd in ('sim', 'build', 'program') and not args:
             self.start(cmd)
+        elif cmd == 'build' and args == ['demo']:
+            self.start('build-demo')
         elif cmd == 'flash' and not args:
             if self.busy:
                 raise ToolError('Wait for the active operation to finish.')

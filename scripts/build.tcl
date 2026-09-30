@@ -1,16 +1,31 @@
 # Usage from repository root:
 # vivado -mode batch -source scripts/build.tcl -tclargs blink
 # vivado -mode batch -source scripts/build.tcl -tclargs sdr
+# vivado -mode batch -source scripts/build.tcl -tclargs sdr demo
+#
+# Inputs (keep in step with tools/sdr_cli/core.py:source_files): direct
+# projects/<project>/rtl/*.v and *.sv, projects/<project>/rom/*.mem memory
+# images, and constraints/basys3.xdc. The optional "demo" variant sets the
+# sdr_top generic DEMO_FLIGHT=1 (APEX flight replay); the default is unchanged.
 
-if {$argc != 1} {
-    error "Usage: vivado -mode batch -source scripts/build.tcl -tclargs blink|sdr"
+if {$argc < 1 || $argc > 2} {
+    error "Usage: vivado -mode batch -source scripts/build.tcl -tclargs blink|sdr \[demo\]"
 }
 set project [lindex $argv 0]
 if {$project ni {blink sdr}} {
     error "Unknown project '$project'; expected blink or sdr"
 }
+set variant [expr {$argc == 2 ? [lindex $argv 1] : "default"}]
+if {$variant ni {default demo}} {
+    error "Unknown variant '$variant'; expected demo"
+}
+if {$variant eq "demo" && $project ne "sdr"} {
+    error "The demo variant exists only for the sdr project"
+}
 
 set repo [file normalize [file join [file dirname [info script]] ..]]
+# $readmemh paths in the RTL are relative to the repository root.
+cd $repo
 set project_dir [file join $repo projects $project]
 set rtl_dir [file join $project_dir rtl]
 set out_dir [file join $repo build $project]
@@ -29,9 +44,16 @@ set_property target_language Verilog [current_project]
 foreach src $sources {
     read_verilog -sv $src
 }
+foreach mem [lsort [glob -nocomplain -directory [file join $project_dir rom] *.mem]] {
+    read_mem $mem
+}
 read_xdc [file join $project_dir constraints basys3.xdc]
 
-synth_design -top $top -part $part
+if {$variant eq "demo"} {
+    synth_design -top $top -part $part -generic DEMO_FLIGHT=1
+} else {
+    synth_design -top $top -part $part
+}
 opt_design
 place_design
 route_design

@@ -128,12 +128,17 @@ def run(args, cwd=None, log=print):
 
 
 def source_files(root, project):
-    """Explicit allowlist: never upload the checkout or untracked personal files."""
+    """Explicit allowlist: never upload the checkout or untracked personal files.
+
+    Matches scripts/build.tcl: direct rtl/*.v and *.sv, rom/*.mem memory images
+    ($readmemh), and the one project XDC.
+    """
     paths = [root / 'scripts/build.tcl', root / 'projects' / project / 'constraints/basys3.xdc']
     rtl = root / 'projects' / project / 'rtl'
-    paths += sorted([*rtl.glob('*.v'), *rtl.glob('*.sv')])
-    if len(paths) < 3:
+    sources = sorted([*rtl.glob('*.v'), *rtl.glob('*.sv')])
+    if not sources:
         raise ToolError('No RTL sources found for {}.'.format(project))
+    paths += sources + sorted((root / 'projects' / project / 'rom').glob('*.mem'))
     for path in paths:
         if not path.is_file() or path.is_symlink():
             raise ToolError('Missing source or unsupported symlink: {}'.format(path))
@@ -163,16 +168,24 @@ def simulate(root, project, log=print):
     run(['make', 'sim', 'PROJECT=' + project], cwd=root, log=log)
 
 
-def build(root, config, log=print):
-    """Build uncommitted sources in an isolated remote directory, then fetch results."""
+def build(root, config, log=print, demo=False):
+    """Build uncommitted sources in an isolated remote directory, then fetch results.
+
+    demo=True selects the opt-in APEX flight replay variant of the sdr project
+    (sdr_top DEMO_FLIGHT=1). The default build is unchanged.
+    """
     project = config['project']
+    variant = 'demo' if demo else 'default'
+    if demo and project != 'sdr':
+        raise ToolError('The flight replay demo exists only for the sdr project.')
     identifier = time.strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:8]
     remote_dir = config['remote_root'].rstrip('/') + '/' + identifier
     target = config['user'] + '@' + config['host']
     ssh_base(config)  # validate before creating anything
     output_root = root / 'build' / project
     output_root.mkdir(parents=True, exist_ok=True)
-    log('Building {} snapshot {} on {}'.format(project, identifier, config['host']))
+    log('Building {}{} snapshot {} on {}'.format(project, ' (flight replay demo)' if demo else '',
+                                                 identifier, config['host']))
     with tempfile.TemporaryDirectory(prefix='sdr-build-') as temp:
         local = Path(temp)
         archive = local / 'sources.zip'
@@ -183,7 +196,7 @@ def build(root, config, log=print):
         script = ("$ErrorActionPreference='Stop'; Set-Location " + ps_literal(remote_dir) + '; '
                   "Expand-Archive -LiteralPath sources.zip -DestinationPath . -Force; "
                   '& ' + ps_literal(config['vivado']) +
-                  ' -mode batch -source scripts/build.tcl -tclargs ' + project +
+                  ' -mode batch -source scripts/build.tcl -tclargs ' + project + (' demo' if demo else '') +
                   '; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; '
                   'if (!(Test-Path ' + ps_literal('build/' + project + '/' + project + '.bit') +
                   ")) { throw 'Vivado did not produce a bitstream' }")
@@ -193,7 +206,7 @@ def build(root, config, log=print):
                                         for name in names] + [str(local)], log=log)
         if not (local / (project + '.bit')).stat().st_size:
             raise ToolError('Downloaded bitstream is empty; previous build was preserved.')
-        manifest = dict(project=project, source_sha256=digest,
+        manifest = dict(project=project, variant=variant, source_sha256=digest,
                         bitstream_sha256=hashlib.sha256((local / (project + '.bit')).read_bytes()).hexdigest(),
                         built_at=time.time(), remote_dir=remote_dir, host=config['host'])
         # Keep completed builds as immutable sets. A single pointer selects the whole set.
@@ -205,7 +218,7 @@ def build(root, config, log=print):
         pointer = output_root / ('latest-' + identifier + '.tmp')
         pointer.write_text(identifier + '\n')
         pointer.replace(output_root / 'latest')
-        log('Build complete: {}'.format(bundle / (project + '.bit')))
+        log('Build complete ({} variant): {}'.format(variant, bundle / (project + '.bit')))
         if source_digest(root, project) != digest:
             log('Sources changed during this build. Rebuild before programming the current source.')
         log('Reports saved alongside the bitstream. Remote logs retained in ' + remote_dir)
@@ -234,6 +247,9 @@ def program(root, config, persist=False, path=None, log=print):
             raise ToolError('Sources have changed since this build. Run sdr build, or deliberately select --bit PATH.')
         if manifest['bitstream_sha256'] != hashlib.sha256(bit.read_bytes()).hexdigest():
             raise ToolError('Bitstream checksum does not match the build manifest.')
+        if manifest.get('variant', 'default') != 'default':
+            log('Selected build is the {} variant (APEX flight replay). Run sdr build for the default.'.format(
+                manifest['variant']))
     elif path is None:
         log('Using existing bitstream without a source manifest: ' + str(bit))
     log(('Writing persistent flash: ' if persist else 'Programming volatile FPGA memory: ') + str(bit))

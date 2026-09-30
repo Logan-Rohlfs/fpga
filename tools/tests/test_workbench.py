@@ -34,6 +34,45 @@ class RepositoryTest(unittest.TestCase):
         (self.root / 'projects/sdr/rtl/top.sv').write_text('changed')
         self.assertNotEqual(digest, core.source_digest(self.root, 'sdr'))
 
+    def test_snapshot_includes_rom_images_like_build_tcl(self):
+        rom = self.root / 'projects/sdr/rom'
+        rom.mkdir()
+        (rom / 'flight.mem').write_text('02\n')
+        (rom / 'notes.txt').write_text('not a build input')
+        names = [p.relative_to(self.root).as_posix() for p in core.source_files(self.root, 'sdr')]
+        self.assertIn('projects/sdr/rom/flight.mem', names)
+        self.assertNotIn('projects/sdr/rom/notes.txt', names)
+        repo = Path(__file__).resolve().parents[2]
+        tcl = (repo / 'scripts/build.tcl').read_text()
+        self.assertIn('rom] *.mem', tcl)
+        self.assertIn('read_mem', tcl)
+
+    def test_demo_build_passes_variant_and_records_it(self):
+        scripts, lines = [], []
+        with patch.object(core, 'remote', side_effect=lambda config, script, log: scripts.append(script)), \
+                patch.object(core, 'run', side_effect=self.fake_copy):
+            bit = core.build(self.root, self.config, log=lambda _: None, demo=True)
+        self.assertIn('-tclargs sdr demo;', scripts[-1])
+        self.assertEqual(json.loads(bit.with_name('manifest.json').read_text())['variant'], 'demo')
+        with patch.object(core, 'run'):
+            core.program(self.root, self.config, log=lines.append)
+        self.assertTrue(any('demo variant' in line for line in lines))
+        with patch.object(core, 'remote', side_effect=lambda config, script, log: scripts.append(script)), \
+                patch.object(core, 'run', side_effect=self.fake_copy):
+            bit = core.build(self.root, self.config, log=lambda _: None)
+        self.assertIn('-tclargs sdr;', scripts[-1])
+        self.assertEqual(json.loads(bit.with_name('manifest.json').read_text())['variant'], 'default')
+
+    def test_demo_build_is_sdr_only(self):
+        with patch.object(core, 'remote') as remote, self.assertRaisesRegex(core.ToolError, 'sdr project'):
+            core.build(self.root, dict(self.config, project='blink'), log=lambda _: None, demo=True)
+        remote.assert_not_called()
+
+    def test_cli_build_demo_flag(self):
+        from sdr_cli import cli
+        self.assertTrue(cli.parser().parse_args(['build', '--demo']).demo)
+        self.assertFalse(cli.parser().parse_args(['build']).demo)
+
     def test_config_roundtrip_and_validation(self):
         core.save_config(self.root, self.config)
         self.assertEqual(core.load_config(self.root), self.config)
@@ -214,6 +253,15 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(self.ui.frozen, ['first'])
         self.ui.key(' ')
         self.assertIsNone(self.ui.frozen)
+
+    def test_build_demo_command_uses_shared_build(self):
+        with patch.object(self.ui, 'start') as start:
+            self.ui.execute('build demo')
+            start.assert_called_once_with('build-demo')
+        with patch('sdr_cli.tui.build') as build:
+            self.ui.start('build-demo')
+            self.ui.worker.join(5)
+        self.assertTrue(build.call_args.kwargs['demo'])
 
     def test_port_edit_is_saved_and_does_not_run_shell(self):
         self.ui.execute('port /dev/example')

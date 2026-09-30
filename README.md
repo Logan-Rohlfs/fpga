@@ -75,7 +75,8 @@ See [SDR hardware details](projects/sdr/README.md).
 
 `make sim PROJECT=blink|sdr` underlies the CLI simulation command. Direct Vivado
 builds use `vivado -mode batch -source scripts/build.tcl -tclargs blink|sdr` on
-Windows (use the full `vivado.bat` path if needed).
+Windows (use the full `vivado.bat` path if needed). `-tclargs sdr demo` (or
+`./sdr build --demo`) builds the opt-in APEX flight replay variant.
 
 Direct builds and `make program` use `build/PROJECT/PROJECT.bit`. The workbench
 uses `build/PROJECT/latest` to select an artifact bundle. **Use `./sdr program`

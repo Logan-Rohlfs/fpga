@@ -43,6 +43,9 @@ def parser():
         command.add_argument('--project', choices=['sdr', 'blink'])
         if name in ('program', 'flash'):
             command.add_argument('--bit', type=Path, help='Explicit bitstream (bypasses source freshness check)')
+        if name == 'build':
+            command.add_argument('--demo', action='store_true',
+                                 help='Opt-in APEX flight replay variant (sdr only; synthetic ADC input)')
     receive = sub.add_parser('receive', aliases=['rx', 'connect'], help='Read UART until Ctrl-C or a duration expires')
     receive.add_argument('--port')
     receive.add_argument('--baud', type=int)
@@ -222,7 +225,7 @@ def main(root=None):
         elif args.command == 'sim':
             simulate(root, config['project'])
         elif args.command == 'build':
-            build(root, config)
+            build(root, config, demo=args.demo)
         elif args.command in ('program', 'flash'):
             program(root, config, persist=args.command == 'flash', path=args.bit)
         elif args.command in ('receive', 'rx', 'connect'):

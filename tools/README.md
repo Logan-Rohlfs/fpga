@@ -51,6 +51,7 @@ stored. If automatic UART selection is ambiguous, set `--port DEVICE` using
 ./sdr                              # full-screen dashboard; attempts UART connect
 ./sdr sim                          # run the SDR HDL testbenches locally
 ./sdr build                        # build current files on Windows and fetch results
+./sdr build --demo                 # opt-in APEX flight replay bitstream (sdr only)
 ./sdr program                      # temporary FPGA configuration; lost on power-off
 ./sdr receive --seconds 5           # decoded link messages, then a per-type summary
 ./sdr receive --format records      # decoded messages as JSON lines
@@ -131,7 +132,7 @@ Simulated data is marked in the pane title.
 | `:` | Enter a command |
 | `?` / `q` | Help / quit |
 
-The command bar accepts `connect`, `disconnect`, `sim`, `build`, `program`,
+The command bar accepts `connect`, `disconnect`, `sim`, `build`, `build demo`, `program`,
 `flash`, `record`, `stop`, `port DEVICE`, `baud RATE`, `send TEXT`,
 `send-hex aa 01 ff`, `clear`, and `quit`. Press Escape to cancel entry.
 Configure the remote host with `setup` outside the dashboard.
@@ -204,10 +205,16 @@ PYTHONPATH=tools .venv/bin/python -m unittest discover -s tools/tests -v
 ## Remote builds and artifacts
 
 Builds upload a ZIP containing **only** `scripts/build.tcl`, the selected
-project's direct `.v`/`.sv` RTL files, and its `constraints/basys3.xdc`. They do
-not upload `.git`, keys, host settings, or the rest of the checkout. This matches
-the current Tcl source list; add include files/IP assets to both workflows when
-the RTL starts using them. Uncommitted changes are included; no push/pull needed.
+project's direct `.v`/`.sv` RTL files, its `rom/*.mem` memory images, and its
+`constraints/basys3.xdc`. They do not upload `.git`, keys, host settings, or the
+rest of the checkout. This matches the Tcl source list; add include files/IP
+assets to both workflows when the RTL starts using them. Uncommitted changes are
+included; no push/pull needed.
+
+`--demo` (dashboard `build demo`) passes `demo` to `build.tcl`, which sets the
+`sdr_top` generic `DEMO_FLIGHT=1`. The manifest records `variant` (`default` or
+`demo`), and `program` reports a demo selection. Both variants share the
+`latest` pointer; run `sdr build` again to return to the default bitstream.
 
 Every build gets a unique directory beneath `remote_root`. Windows retains these
 directories and Vivado logs for diagnosis; remove old directories manually when
