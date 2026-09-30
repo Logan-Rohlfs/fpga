@@ -18,13 +18,15 @@ def rom_frames():
     return [bytes(data[i:i + 42]) for i in range(0, len(data), 42)]
 
 
+def with_crc(frame):
+    """Append the big-endian CRC-16-CCITT, as on the air."""
+    crc = p.crc16_ccitt(frame)
+    return frame + bytes([crc >> 8, crc & 0xFF])
+
+
 def rom_flight_frames():
-    """ROM frames with the big-endian CRC-16-CCITT appended (44 bytes, as on the air)."""
-    out = []
-    for frame in rom_frames():
-        crc = p.crc16_ccitt(frame)
-        out.append(frame + bytes([crc >> 8, crc & 0xFF]))
-    return out
+    """ROM frames with CRC appended (44 bytes each)."""
+    return [with_crc(frame) for frame in rom_frames()]
 
 
 def sample_messages(slots=3):

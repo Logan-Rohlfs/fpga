@@ -13,19 +13,16 @@ import struct
 import unittest
 
 from sdr_cli import apex
-from sdr_cli.protocol import crc16_ccitt
-from link_samples import ROM_MEM, rom_frames
+from link_samples import ROM_MEM, rom_frames, with_crc
 
 REPO = Path(__file__).resolve().parents[2]
-MEM = ROM_MEM
 RTL = REPO / 'projects/sdr/rtl/receiver_link_sources.sv'
 CSV = (REPO.parent / 'apex/sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800'
        / 'IREC-2026-SRAD-TELEMETRY.csv')
 
 
 def decode(frame):
-    crc = crc16_ccitt(frame)
-    return apex.parse_frame(frame + bytes([crc >> 8, crc & 0xFF]))
+    return apex.parse_frame(with_crc(frame))
 
 
 def rtl_constant(name):
@@ -118,7 +115,7 @@ class RomMatchesCsvTest(unittest.TestCase):
                                                       REPO / 'projects/sdr/host/apex_flight_rom.py')
         generator = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(generator)
-        self.assertEqual(generator.render_mem(generator.load_rows(CSV), CSV), MEM.read_text())
+        self.assertEqual(generator.render_mem(generator.load_rows(CSV), CSV), ROM_MEM.read_text())
 
 
 if __name__ == '__main__':

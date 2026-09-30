@@ -25,6 +25,16 @@ class ApexSchemaTest(unittest.TestCase):
         self.assertFalse(f['interlocks']['servo_powered'])
         self.assertEqual([k for k, v in f['health_bits'].items() if v], ['imu', 'gps', 'sd'])
 
+    def test_unknown_phase_and_gps_fix_labels(self):
+        for raw in (6, 7):
+            body = bytearray(apex.FLIGHT_STRUCT.size)
+            body[8] = raw
+            self.assertEqual(apex._flight(bytes(body))['phase'], 'UNKNOWN')
+        self.assertEqual(apex.PHASE_ENUM[6], 'UNKNOWN')
+        self.assertEqual(apex.GPS_FIX_LABELS, {-1: 'OFFLINE', 0: 'SEARCHING', 1: 'DR', 2: '2D', 3: '3D', 4: '3D+DR'})
+        fix = next(f for f in apex.FLIGHT_SCHEMA if f['key'] == 'gps_fix')
+        self.assertEqual(fix['enum_map'], {str(k): v for k, v in apex.GPS_FIX_LABELS.items()})
+
     def test_demo_rom_first_frame(self):
         frame = apex.parse_frame(rom_flight_frames()[0])
         self.assertTrue(frame['crc_ok'])
