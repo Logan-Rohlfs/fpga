@@ -2,12 +2,13 @@
 """Byte sources for the GUI hub: live UART, a recorded capture, or a host-side simulator.
 
 Every source yields raw link bytes, so all of them go through the one StreamDecoder
-in hub.py. Only SimSource reacts to tuning; the FPGA has no command receiver yet.
+in hub.py. Serial tuning is enabled only after a receiver CONFIG capability report.
 """
 import asyncio
 import math
 from pathlib import Path
 import random
+import time
 
 from . import apex, freqplan, protocol as p
 from .core import ToolError
@@ -19,10 +20,20 @@ class SerialSource:
     kind = 'serial'
     responds_to_tuning = False
 
-    def __init__(self, config, session_factory=None):
+    def __init__(self, config, session_factory=None, get_tuning=None):
         if session_factory is None:
             from .serial_io import Session as session_factory
         self.session = session_factory(config)
+        from .receiver_control import TuningController
+        self.control = TuningController(get_tuning, self.session.send, time.monotonic) if get_tuning else None
+
+    def observe(self, record):
+        if self.control:
+            self.control.observe(record)
+            self.responds_to_tuning = self.control.capable
+
+    def source_state(self):
+        return self.control.snapshot() if self.control else {}
 
     @property
     def detail(self):
@@ -32,6 +43,8 @@ class SerialSource:
         self.session.connect()
         try:
             while True:
+                if self.control:
+                    self.control.tick()
                 data = self.session.read()   # non-blocking: the port opens with timeout=0
                 if data:
                     yield data
@@ -224,5 +237,5 @@ def from_args(config, kind, file=None, speed=1.0, loop=False):
         ReplaySource(file, speed=speed, loop=loop)   # raises ToolError early for a bad path/speed
         return lambda get_tuning: ReplaySource(file, speed=speed, loop=loop)
     if kind == 'serial':
-        return lambda get_tuning: SerialSource(config)
+        return lambda get_tuning: SerialSource(config, get_tuning=get_tuning)
     raise ToolError('Unknown source {!r}: use serial, replay or sim.'.format(kind))

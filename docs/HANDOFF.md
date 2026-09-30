@@ -10,6 +10,29 @@ in [`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio).
 **The Space Raiders SDR web GUI v1 is implemented.** See [GUI implementation status](#gui-implementation-status).
 The DSP stages come later; realistic displayed data waits for them.
 
+## Sample-driven receiver continuation (in progress)
+
+The user authorized guessed, configurable radio characteristics and completion
+with only the ADC input simulated. This supersedes the earlier wait for confirmed
+transmitter settings. See the [receiver contract](superpowers/specs/2026-09-29-sample-driven-receiver.md),
+[plan](superpowers/plans/2026-09-29-sample-driven-receiver.md), and
+[updated receiver guide](../projects/sdr/README.md).
+
+Implemented: synthetic signed ADC source, real DDC/decimator/discriminator/symbol
+recovery, configurable framing/CRC, existing combiner, actual I/Q and 64-bin DFT,
+relative dBFS measurements, and acknowledged UART test-carrier/NCO tuning.
+Legacy transport and host UI simulators remain explicitly named fixtures.
+
+New simulation evidence includes exact packets recovered from independent Gaussian
+ADC vectors (clean, noisy/offset, corrupted CRC), RTL-generated ADC samples,
+no-signal/recovery, and complete UART/CONFIG tests. Host/GUI checks pass following
+independent review fixes. This is **not yet a newly verified board checkpoint**:
+the initial Vivado run synthesized but failed timing at -16.941 ns and used 97%
+of LUTs. Measurement arithmetic/buffering optimization and fresh timing/board
+verification are still in progress. Do not select the previous bitstream as proof
+of the new receiver. Reports are preserved under
+`build/sdr/failed-20260929-190956-6f3870be/`.
+
 ## Source combiner implementation status
 
 The GUI continuation was followed by subagent-driven implementation of the next

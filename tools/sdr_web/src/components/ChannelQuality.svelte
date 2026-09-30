@@ -25,7 +25,7 @@
   function drawHistory() {
     if (!rssiCv || !snrCv) return;
     const r = fitCanvas(rssiCv);
-    drawSparkline(r.ctx, r.w, r.h, history[channel].rssi.values(), colorVar, [-115, -70], HISTORY);
+    drawSparkline(r.ctx, r.w, r.h, history[channel].rssi.values(), colorVar, m?.power_unit === 'dBFS' ? [-90, 0] : [-115, -70], HISTORY);
     const s = fitCanvas(snrCv);
     drawSparkline(s.ctx, s.w, s.h, history[channel].snr.values(), colorVar, [0, 40], HISTORY);
   }
@@ -64,16 +64,16 @@
     </figure>
     <div class="side">
       <div class="kv">
-        <div><div class="k">RSSI</div><div class="v">{m ? m.rssi_dbm.toFixed(1) : '—'} <small>dBm</small></div></div>
+        <div><div class="k">RSSI</div><div class="v">{m ? m.rssi_dbm.toFixed(1) : '—'} <small>{m?.power_unit ?? 'dBm'}</small></div></div>
         <div><div class="k">SNR</div><div class="v">{m ? m.snr_db.toFixed(1) : '—'} <small>dB</small></div></div>
         <div><div class="k">Δf from NCO</div><div class="v">{m ? signedKhz(m.freq_offset_hz) : '—'}</div></div>
-        <div><div class="k">Noise</div><div class="v">{m ? m.noise_dbm.toFixed(1) : '—'} <small>dBm</small></div></div>
+        <div><div class="k">Noise</div><div class="v">{m ? m.noise_dbm.toFixed(1) : '—'} <small>{m?.power_unit ?? 'dBm'}</small></div></div>
         <div><div class="k">CRC good</div><div class="v">{m?.crc_good ?? '—'}</div></div>
         <div><div class="k">CRC bad</div><div class="v">{m?.crc_bad ?? '—'}</div></div>
       </div>
       <div>
         <canvas class="spark" bind:this={rssiCv} aria-label="Channel {channel} RSSI history"></canvas>
-        <div class="cap"><span>RSSI, last 30 s</span><span>{m ? `${m.rssi_dbm.toFixed(1)} dBm` : ''}</span></div>
+        <div class="cap"><span>RSSI, last 30 s</span><span>{m ? `${m.rssi_dbm.toFixed(1)} ${m.power_unit ?? 'dBm'}` : ''}</span></div>
       </div>
       <div>
         <canvas class="spark" bind:this={snrCv} aria-label="Channel {channel} SNR history"></canvas>

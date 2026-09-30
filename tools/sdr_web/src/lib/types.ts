@@ -13,7 +13,9 @@ export interface Derived {
   image_hz: number; nco_ftw: number; nco_resolution_hz: number; warnings: string[];
 }
 export interface AdminInfo { label: string; since: number }
+export interface RfReference { lo_hz: number; injection: Injection; inferred?: boolean }
 export interface SourceState {
+  control_state?: string; control_error?: string; applied?: RfReference | null;
   kind: 'serial' | 'replay' | 'sim' | 'none'; state: string; detail: string; responds_to_tuning: boolean;
 }
 export interface RecordJson {
@@ -32,6 +34,7 @@ export interface HelloMsg {
 }
 export interface RecordMsg { type: 'record'; record: RecordJson; text: string }
 export interface SpectrumMsg {
+  rf_reference?: RfReference | null;
   type: 'spectrum'; channel: Channel; row: number; t_us: number; f0_hz: number; bin_hz: number; bins: number;
   db10: number[]; low: number; high: number; synthetic: boolean;
 }
@@ -51,4 +54,5 @@ export type ClientMsg =
   | { type: 'logout' }
   | { type: 'tune'; changes: TuningChanges }
   | { type: 'reconnect_source' }
+  | { type: 'use_compiled_profile' }
   | { type: 'ping' };

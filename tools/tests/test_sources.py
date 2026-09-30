@@ -37,7 +37,7 @@ class SimSourceTest(unittest.TestCase):
         decoder, records = decode(self.run_ticks(40))
         s = decoder.stats
         self.assertEqual((s['crc_errors'], s['cobs_errors'], s['length_errors'], s['seq_gaps']), (0, 0, 0, 0))
-        self.assertEqual({r.name for r in records}, set(p.TYPE_NAMES.values()))
+        self.assertEqual({r.name for r in records}, set(p.TYPE_NAMES.values()) - {'CONFIG'})
         self.assertTrue(all(r.synthetic for r in records))
         frames = [r for r in records if r.type == p.CHAN_FRAME]
         self.assertTrue(frames and all(r.fields['apex']['kind'] == 'TEST' for r in frames))

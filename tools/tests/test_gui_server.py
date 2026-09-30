@@ -64,6 +64,24 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         hello = await self.recv(ws, self.of('hello'))
         return ws, hello
 
+    async def test_admin_can_explicitly_repair_saved_unsupported_profile(self):
+        from dataclasses import replace
+        self.server.tuning = replace(self.server.tuning, fs_hz=2_000_000, filter_hz=20_000,
+            target_if_hz=120_000, window_hz=20_000, injection='high', nco_hz=700_000)
+        self.server.hub.source.update(kind='serial', responds_to_tuning=True)
+        viewer, _ = await self.connect()
+        await viewer.send_json(dict(type='use_compiled_profile'))
+        self.assertEqual((await self.recv(viewer, self.of('error')))['code'], 'not_admin')
+        self.assertEqual(self.server.tuning.fs_hz, 2_000_000)
+        await viewer.send_json(dict(type='login', password='pw', label='gs'))
+        await self.recv(viewer, self.of('role', role='admin'))
+        await viewer.send_json(dict(type='use_compiled_profile'))
+        fixed = (await self.recv(viewer, self.of('tuning')))['state']
+        self.assertEqual([fixed[k] for k in ('fs_hz', 'filter_hz', 'target_if_hz', 'window_hz', 'injection', 'nco_hz')],
+                         [1_000_000, 35_000, 100_000, 35_000, 'low', 100_000])
+        self.assertEqual(fixed['carrier_hz'], 441_480_000)
+        await viewer.close()
+
     async def test_index_and_hello(self):
         resp = await self.client.get('/')
         self.assertEqual(resp.status, 200)

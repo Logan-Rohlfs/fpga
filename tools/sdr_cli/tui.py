@@ -363,9 +363,12 @@ class Dashboard:
             latest.setdefault(frame.fields['channel'], frame)
         def cell(ch, fmt, key, source=None):
             record = (source or link.metrics).get(ch)
-            return fmt.format(record.fields[key]) if record else '—'
+            if not record:
+                return '—'
+            value = fmt.format(record.fields[key])
+            return value + record.fields.get('power_unit', 'dBm') if key in ('rssi_dbm', 'noise_dbm') else value
         rows = [('{:<14}{:>{c}}{:>{c}}'.format('', 'CHANNEL A', 'CHANNEL B', c=col), 1)]
-        for label, fmt, key, source in [('RSSI dBm', '{:.1f}', 'rssi_dbm', None), ('Noise dBm', '{:.1f}', 'noise_dbm', None),
+        for label, fmt, key, source in [('Signal', '{:.1f}', 'rssi_dbm', None), ('Noise', '{:.1f}', 'noise_dbm', None),
                                         ('SNR dB', '{:.1f}', 'snr_db', None), ('Freq off Hz', '{:+d}', 'freq_offset_hz', None),
                                         ('Sync quality', '{:.2f}', 'quality', latest), ('CRC good', '{:,}', 'crc_good', None),
                                         ('CRC bad', '{:,}', 'crc_bad', None), ('Sync hits', '{:,}', 'sync_hits', None)]:

@@ -8,11 +8,12 @@ from dataclasses import dataclass, field
 import struct
 import time
 
-FLAG_SYNTHETIC, FLAG_EMPTY = 0x01, 0x02
+FLAG_SYNTHETIC, FLAG_EMPTY, FLAG_DBFS = 0x01, 0x02, 0x04
+CONFIG = 0x02
 STATUS, BEST_TELEM, CHAN_FRAME = 0x01, 0x10, 0x11
 CHAN_METRICS, LINK_STATS = 0x20, 0x21
 SPECTRUM, IQ_SNAPSHOT = 0x30, 0x31
-TYPE_NAMES = {STATUS: 'STATUS', BEST_TELEM: 'BEST_TELEM', CHAN_FRAME: 'CHAN_FRAME',
+TYPE_NAMES = {CONFIG: 'CONFIG', STATUS: 'STATUS', BEST_TELEM: 'BEST_TELEM', CHAN_FRAME: 'CHAN_FRAME',
               CHAN_METRICS: 'CHAN_METRICS', LINK_STATS: 'LINK_STATS', SPECTRUM: 'SPECTRUM',
               IQ_SNAPSHOT: 'IQ_SNAPSHOT'}
 PROTOCOL_VERSION = 2   # STATUS.version; v2 added spectrum/IQ axis metadata
@@ -23,6 +24,7 @@ SOURCES = ('A', 'B', 'combined')
 
 # type: (fixed struct, field names, variable tail kind, tail count field)
 SCHEMAS = {
+    CONFIG: ('<BBIIB', ('command_seq', 'status', 'carrier_ftw', 'nco_ftw', 'enable'), None, None),
     STATUS: ('<BBIIH', ('version', 'channels', 'uptime_ms', 'build_id', 'dropped'), None, None),
     BEST_TELEM: ('<IBB', ('t_us', 'source', 'frame_len'), 'raw', 'frame_len'),
     CHAN_FRAME: ('<BBIhBiB', ('channel', 'crc_ok', 't_us', 'rssi_dbm_x10', 'quality', 'freq_offset_hz',
@@ -199,8 +201,10 @@ def parse_message(raw, t=None):
     if crc16_ccitt(raw[:-2]) != crc:
         raise CrcError('crc mismatch')
     name = TYPE_NAMES.get(mtype, 'UNKNOWN(0x{:02X})'.format(mtype))
-    return Record(mtype, name, flags, seq, _parse_payload(mtype, raw[HEADER.size:-2]),
-                  time.time() if t is None else t)
+    fields = _parse_payload(mtype, raw[HEADER.size:-2])
+    if mtype in (CHAN_FRAME, CHAN_METRICS):
+        fields['power_unit'] = 'dBFS' if flags & FLAG_DBFS else 'dBm'
+    return Record(mtype, name, flags, seq, fields, time.time() if t is None else t)
 
 
 class StreamDecoder:
@@ -313,17 +317,20 @@ def describe(r):
             ''.join(c for n, c in enumerate(CHANNELS) if f['channels'] >> n & 1) or '-')
         if f['version'] != PROTOCOL_VERSION:
             text += ' [HOST EXPECTS v{}: rebuild/program the FPGA]'.format(PROTOCOL_VERSION)
+    elif r.type == CONFIG:
+        text = 'command={} status={} carrier_ftw={} nco_ftw={} enabled={}'.format(
+            f['command_seq'], f['status'], f['carrier_ftw'], f['nco_ftw'], f['enable'])
     elif r.type in (BEST_TELEM, CHAN_FRAME):
         from . import apex
         if r.type == BEST_TELEM:
             text = 'src={} t={}us'.format(f['source'], f['t_us'])
         else:
-            text = '{} crc={} rssi={:.1f}dBm q={:.2f} df={}'.format(
-                f['channel'], 'ok' if f['crc_ok'] else 'BAD', f['rssi_dbm'], f['quality'], _khz(f['freq_offset_hz']))
+            text = '{} crc={} rssi={:.1f}{} q={:.2f} df={}'.format(
+                f['channel'], 'ok' if f['crc_ok'] else 'BAD', f['rssi_dbm'], f.get('power_unit', 'dBm'), f['quality'], _khz(f['freq_offset_hz']))
         text += '  APEX ' + apex.summary(f['apex'])
     elif r.type == CHAN_METRICS:
-        text = '{} rssi={:.1f}dBm noise={:.1f}dBm snr={:.1f}dB df={} sync={} good={} bad={}'.format(
-            f['channel'], f['rssi_dbm'], f['noise_dbm'], f['snr_db'], _khz(f['freq_offset_hz']),
+        text = '{} rssi={:.1f}{} noise={:.1f}{} snr={:.1f}dB df={} sync={} good={} bad={}'.format(
+            f['channel'], f['rssi_dbm'], f.get('power_unit', 'dBm'), f['noise_dbm'], f.get('power_unit', 'dBm'), f['snr_db'], _khz(f['freq_offset_hz']),
             f['sync_hits'], f['crc_good'], f['crc_bad'])
     elif r.type == LINK_STATS:
         text = 'from_A={from_a} from_B={from_b} both_ok={both_ok} neither={neither_ok} best={best_sent}'.format(**f)
@@ -405,7 +412,7 @@ if __name__ == '__main__':
         with open(args.check, 'rb') as capture:
             decoder.feed(capture.read())
         s = decoder.stats
-        missing = sorted(set(TYPE_NAMES.values()) - set(s['by_type']))
+        missing = sorted((set(TYPE_NAMES.values()) - {'CONFIG'}) - set(s['by_type']))
         errors = s['crc_errors'] + s['cobs_errors'] + s['length_errors'] + s['seq_gaps']
         print('Host decode of {}: {} messages {}, errors={}, resync={}B, missing={}'.format(
             args.check, s['messages'], dict(s['by_type']), errors, s['resync_bytes'], missing or 'none'))

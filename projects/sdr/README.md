@@ -1,149 +1,122 @@
 # SDR receiver
 
-**Current state: host link and source combiner working with SIMULATED inputs.**
-The FPGA sends every host-link message type at 1 Mbaud, and the host decodes them.
-No RF, XADC, or DSP stages exist yet: stand-in producers generate all of the
-content, and every message is flagged `SYNTHETIC`.
-
-Related documents:
-
-- [Module map](../../docs/sdr_pipeline.drawio): the full planned pipeline.
-- [Link design spec](../../docs/superpowers/specs/2026-09-29-host-link-layer-design.md):
-  exact message layouts.
-- [Handoff](../../docs/HANDOFF.md): verification history and open decisions.
-- [Host workbench](../../tools/README.md): the normal build, program, and monitor
-  interface.
+The default design runs a sample-driven receiver. **Only the ADC input is
+synthetic**: downstream I/Q, spectrum, signal estimates, bits, packets, CRC
+results and source selection come from those samples. This is a configurable
+engineering test profile, not a verified RF4463 configuration or real RF reception.
+See [HANDOFF](../../docs/HANDOFF.md) for the latest simulation and hardware evidence.
 
 ## Data path
 
 ```text
-link_test_sources ─▶ link_tx ─▶ cobs_encoder ─▶ uart_tx ─▶ USB-UART (A18) ─▶ sdr CLI / dashboard
-(11 producer ports)  priority    1024 B message   8N1
-                     framer,     buffer, 0x00     1 Mbaud
-                     CRC-16      delimiter
+ADC waveform model (A/B signed 12-bit samples)
+  -> NCO + quadrature mixer -> integrate-and-dump filter / decimator
+  -> phase discriminator -> transition-based symbol timing
+  -> sync / byte assembly / optional dewhitening / CRC
+  -> A/B source combiner -> host link -> USB UART -> CLI / web GUI
+
+Decimated I/Q -> 64-point complex DFT, power/noise estimates, I/Q snapshots
+             -> host link
 ```
 
-## Wire format
+`rx_pipeline.sv` is the sample-to-frame boundary for eventual real ADC input.
+`receiver_link_sources.sv` connects two pipelines, observers and the combiner to
+the existing producer ports. `sdr_top.sv` defaults to this chain.
+`LEGACY_LINK_TEST=1` selects the old transport-only fixture; it is retained for
+independent link regression and is not the receiver's default source.
 
-A message is `COBS(type, flags, seq, len u16, payload, crc16) ‖ 0x00`. This is
-protocol **v2**; STATUS carries the version.
+## Provisional configurable profile
 
-The frame fields:
+| Setting | Default | Where to change |
+| --- | --- | --- |
+| Clock / ADC rate | 100 MHz / 1 MS/s | Top/source parameters |
+| ADC representation | signed 12-bit, zero centered | Sample interface; real XADC needs offset/scale adapter |
+| IF / digital NCO | 100 kHz / 100 kHz | Acknowledged UART tuning or initial FTW parameters |
+| Modulation | binary GFSK, 10 kbit/s, ±20 kHz deviation | ADC source parameters |
+| Gaussian shaping | five binomial taps at quarter-symbol spacing | ADC test source; Python reference uses a Gaussian kernel |
+| Channel filtering | first-order CIC, decimation 10 | `rx_channel` / `rx_pipeline` parameters |
+| Symbol timing | 10 decimated samples/symbol, transition recentering | Pipeline parameter |
+| Framing | 64 alternating preamble bits, sync D391D391 | ADC source and decoder parameters |
+| Frame | 19-byte APEX TEST including two CRC bytes | Decoder/source profile |
+| CRC | CCITT 1021, init FFFF, big-endian trailer | Decoder parameters |
+| Whitening | disabled | Decoder enable/seed/polynomial parameters |
 
-- all fields little-endian;
-- CRC-16-CCITT, poly 0x1021, init 0xFFFF, over the header and payload;
-- `flags` bit 0 is `SYNTHETIC`, bit 1 is `EMPTY`;
-- `seq` counts every message and wraps at 256.
+The decoder also supports configurable payload bit order, inversion, sync width,
+CRC initial/final values and byte order, frame length, and type/sequence offsets.
+Both ends of a test profile must agree. The bundled host controller recognizes
+the default 1 MS/s profile; a different compiled profile must also update its
+validation and frequency-word conversion.
 
-| Type | Message | Fake rate | Contents |
-| --- | --- | --- | --- |
-| 0x01 | STATUS | 1 Hz | version, channel mask, uptime ms, build ID, dropped count |
-| 0x10 | BEST_TELEM | 20 Hz | selected source + raw APEX frame |
-| 0x11 | CHAN_FRAME | 20 Hz × A/B | CRC ok, RSSI, sync quality, Δf, raw APEX frame |
-| 0x20 | CHAN_METRICS | 10 Hz × A/B | RSSI, noise, SNR, Δf, sync hits, CRC good/bad |
-| 0x21 | LINK_STATS | 1 Hz | frames from A / B / both OK / neither |
-| 0x30 | SPECTRUM | 10 Hz × A/B | axis (center Hz, bin Hz, dBFS ref/step, t_us) + 256 u8 power bins |
-| 0x31 | IQ_SNAPSHOT | 5 Hz × A/B | sample rate, t_us, 64 int16 I/Q pairs |
+This receiver is a functional starting point, not a characterized production
+radio. The simple channel filter has limited adjacent-channel rejection. Symbol
+recovery and frequency-offset tolerance are bounded by the configured profile;
+there is no automatic modulation identification, general clock recovery for
+arbitrary rates, or automatic carrier-frequency acquisition loop.
 
-Fake traffic is about 11 kB/s, roughly 11% of the link's capacity.
+## Measurements and provenance
 
-## Stand-in content
+- Spectrum is an actual rectangular-window 64-point complex DFT at 100 kS/s:
+  1562.5 Hz bins, centered on the applied NCO. There is no walking test tone.
+- I/Q snapshots contain 64 actual decimated sample pairs.
+- Signal power and noise are **relative dBFS**, not calibrated antenna dBm.
+  Flag bit 2 (`0x04`) identifies this unit in channel/frame metric records;
+  legacy records retain their previous labels. A coarse logarithm approximation
+  is used, and full scale accounts for the DDC gain.
+- Noise is estimated from outer spectrum bins and SNR from the corresponding
+  power difference. Filtering, leakage, bursts and out-of-band signals bias this
+  estimate; it is not a calibrated noise figure or sensitivity measurement.
+- Frequency offset averages unwrapped I/Q quadrant changes. Modulation content
+  affects this estimate; it is not an independent crystal-frequency measurement.
+- Every record remains `SYNTHETIC` because the ADC waveform is generated. Real
+  logic does not make synthetic input become measured RF data.
 
-The fake telemetry is a real APEX TEST frame: type 0x01, seq, `APEX RADIO TEST`,
-and a CRC-16 sent big-endian. The CRC is computed in RTL, so the host's APEX parser
-checks it end to end.
+## Runtime tuning
 
-- Channel A fails CRC every 11th frame and channel B every 7th. Failed frames
-  flip the last CRC byte.
-- `source_combiner.sv` matches explicit type/sequence keys and selects a CRC-good
-  candidate, then higher quality, then higher signed RSSI, with A breaking ties.
-  Synthetic quality alternates so both A and B win. Nothing is sent when both fail.
-- BEST payloads are immutable snapshots. LINK_STATS comes from the real combiner;
-  every output remains SYNTHETIC because its inputs are synthetic. The configurable
-  pairing and duplicate windows use synthetic tick timing only. See the
-  [combiner contract](../../docs/superpowers/specs/2026-09-29-source-combiner-design.md).
-- Spectrum rows describe a 256-point FFT of 100 kS/s baseband at the 100 kHz IF:
-  390.625 Hz bins, dBFS = −120 + 0.5·power. They show a noise floor near
-  −105 dBFS, two FSK lobes at +10.4 kHz ± 25 kHz (−50 dBFS), and a walking tone.
-  None of this comes from a real signal.
-- I/Q snapshots are points on a noisy circle; channel B's is half the radius.
+`./sdr gui` uses the serial receiver by default. On this development bitstream,
+LO changes alter the simulated ADC carrier IF; NCO changes alter the real digital
+mixer. The GUI detects capability from CONFIG reports, sends bounded commands,
+and distinguishes requested settings from acknowledged applied settings. It does
+**not** program a physical PLL. Compiled sample-rate/filter/profile fields are
+locked; an explicit Admin action restores the compiled profile if saved settings
+are incompatible.
 
-## Hardware interfaces
+A command is ASCII `SR`, version 1, sequence, carrier FTW u32, NCO FTW u32,
+transmitter enable u8, and CRC16 CCITT (little-endian fields and trailer).
+CONFIG type `0x02` reports sequence, status, and applied words/enable. Sequence
+255 is an unsolicited report. A raw host write is never an acknowledgement.
+The transport drains before applying a new profile and resetting receiver state.
+Disabling the test transmitter keeps the ADC sample clock running, so silence
+continues to flow through measurements.
 
-**Producer ports** (`link_msg_port.sv` → `link_tx.sv`):
+`./sdr gui --source sim` remains the explicitly labelled **legacy UI demo**;
+it generates host-side fake records and is not the sample-driven acceptance path.
+Replay cannot react to tuning.
 
-1. A producer holds `req` and a stable `type/flags/len` header.
-2. `link_tx` grants whole messages, lowest port index first.
-3. The producer then supplies `len` payload bytes.
-4. Each port registers its payload byte and waits `LATENCY` cycles after every
-   index change. Producer logic can therefore pipeline freely without joining the
-   `link_tx`/encoder timing path.
-5. If a message is due while the previous one is still pending, it is dropped,
-   and STATUS reports the drop.
+## Wire transport and hardware
 
-**Encoder** (`cobs_encoder.sv`):
+The existing protocol v2 envelope remains:
+`COBS(type, flags, sequence, length u16, payload, CRC16) + 0x00`.
+The new optional CONFIG record and dBFS flag extend it without changing the
+existing seven message payload layouts. See the [link spec](../../docs/superpowers/specs/2026-09-29-host-link-layer-design.md)
+and [receiver contract](../../docs/superpowers/specs/2026-09-29-sample-driven-receiver.md).
 
-- encodes one message at a time into a LUTRAM buffer;
-- backpatches code bytes as blocks close;
-- streams the result plus `0x00` to `uart_tx`.
-
-**Board top** (`sdr_top.sv`):
-
-- **LED0** toggles on every STATUS message.
-- **btnC** (synchronized) resets the design, and a 15-cycle power-on reset
-  follows configuration.
-- **Parameters:** `BAUD_RATE` (1 000 000 by default), `TICK_CYCLES`,
-  `STATUS_TICKS`, and `BUILD_ID` (0 by default).
-
-**`uart_tx.sv`** is unchanged. It is 8N1 and LSB-first; at 100 MHz, 1 Mbaud is
-exactly 100 clocks per bit. `ready` is low during a frame and during reset.
+The Basys 3 runs UART at 1 Mbaud (8N1), TX A18 and RX B18. LED0 toggles on STATUS;
+btnC resets the design. The FPGA still uses volatile programming for normal work.
+No XADC electrical interface or physical PLL driver is asserted to exist.
 
 ## Test and use
 
-From the repository root:
-
 ```sh
-./sdr sim                          # all RTL testbenches + host decode of the simulated line
-./sdr build && ./sdr program
-./sdr receive --seconds 5          # decoded messages + per-type summary
-.venv/bin/python projects/sdr/host/check_link.py --port YOUR_UART_DEVICE --seconds 10
+./sdr sim                 # focused tests, independent ADC vectors, receiver and link UART tests
+./sdr build               # remote Vivado; checks timing before producing a selected bundle
+./sdr program             # volatile SRAM configuration, not flash
+./sdr gui                 # actual serial receiver data and acknowledged test tuning
+.venv/bin/python projects/sdr/host/check_receiver.py --help
 ```
 
-The simulations:
-
-| Testbench | Checks |
-| --- | --- |
-| `sim/uart_tx_tb.sv` | UART frames and reset |
-| `sim/crc16_ccitt_tb.sv` | CRC check value and an APEX frame |
-| `sim/cobs_encoder_tb.sv` | byte-exact output against `sim/vectors/cobs_golden.hex`, with random stalls |
-| `sim/link_tx_tb.sv` | priority, atomic messages, empty payloads, seq wrap, CRC |
-| `sim/source_combiner_tb.sv` | ranking, matching/timeout, dedupe, signed RSSI, backpressure, reset and counters |
-| `sim/sdr_top_tb.sv` | the whole top level; see below |
-
-`sim/sdr_top_tb.sv`:
-
-- decodes the UART line;
-- checks COBS, CRC, per-type lengths, contiguous seq, APEX CRCs, zero drops,
-  and the LED;
-- compares every BEST source, timestamp and raw byte against independently ranked
-  A/B channel records, including both-good B selections;
-- saves the line as `build/sdr/link_capture.bin`. `make sim` then decodes that
-  file with the host decoder, so the RTL and Python implementations are
-  cross-checked on every run.
-
-Regenerate the golden vectors after changing the COBS algorithm:
-
-```sh
-PYTHONPATH=tools python3 -m sdr_cli.protocol --golden projects/sdr/sim/vectors/cobs_golden.hex
-```
-
-`host/check_link.py` is the standalone hardware assertion. It needs only pyserial
-(`host/requirements.txt`) plus the repository's `tools/`. It passes when every type
-decodes with no CRC/COBS/length errors and no seq gaps, and `--output FILE` saves
-the raw bytes. Close the dashboard and other serial readers first: two readers
-split the byte stream, and both then see corrupt messages.
-
-Direct Windows builds are still possible with
-`vivado.bat -mode batch -source scripts/build.tcl -tclargs sdr`. Those write the
-legacy `build/sdr/sdr.bit`; the workbench instead selects bundles through
-`build/sdr/latest`.
+Tests include clean/noisy/offset Gaussian ADC vectors, deliberate CRC corruption,
+synthesizable ADC output, framing recovery, stalls, signal disable/recovery,
+DFT placement/scaling, command validation, whole-UART payload checks, and the
+independent legacy transport tests. Generated captures and reports remain in
+ignored `build/` and `.sdr/captures/` directories. Close other UART readers before
+hardware checks; two readers split the byte stream.

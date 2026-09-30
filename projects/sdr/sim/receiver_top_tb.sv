@@ -1,9 +1,9 @@
 `timescale 1ns/1ps
 // End-to-end link test: decodes the UART line, un-COBSes each message, checks
 // CRC, length per type, seq continuity, APEX frame CRCs, and that every message
-// type (and both CHAN_FRAME CRC outcomes) appears. Raw line bytes are written to
-// build/sdr/link_capture.bin so the host decoder can cross-check them.
-module sdr_top_tb;
+// type (and sample-derived DSP observations) appears. Raw line bytes are written to
+// build/sdr/receiver_capture.bin so the host decoder can cross-check them.
+module receiver_top_tb;
     localparam integer CLK_HZ = 4_000_000;       // 4 clocks per bit at 1 Mbaud
     localparam integer BIT_NS = 40;              // 10 ns clock period in simulation
     reg clk = 0;
@@ -13,8 +13,8 @@ module sdr_top_tb;
 
     always #5 clk = ~clk;
 
-    sdr_top #(.LEGACY_LINK_TEST(1),.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(20_000), .STATUS_TICKS(60)) dut (
-        .clk(clk), .btnC(btnC), .uart_tx(uart_tx), .led(led)
+    sdr_top #(.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(20_000), .STATUS_TICKS(20)) dut (
+        .clk(clk), .btnC(btnC), .uart_rx(1'b1), .uart_tx(uart_tx), .led(led)
     );
 
     reg [7:0] enc [0:1023];
@@ -33,6 +33,8 @@ module sdr_top_tb;
     integer compared_count=0, both_good_b=0;
     reg last_led = 0;
     reg all_seen = 0;
+    integer spectrum_nonflat=0,iq_nonzero=0;
+
 
     function automatic [15:0] crc_step(input [15:0] c, input [7:0] d);
         integer b;
@@ -45,12 +47,13 @@ module sdr_top_tb;
 
     function automatic integer expected_len(input [7:0] t);
         case (t)
+            8'h02: expected_len = 11;
             8'h01: expected_len = 12;
             8'h10: expected_len = 6 + 19;
             8'h11: expected_len = 14 + 19;
             8'h20: expected_len = 24;
             8'h21: expected_len = 20;
-            8'h30: expected_len = 22 + 256;
+            8'h30: expected_len = 22 + 64;
             8'h31: expected_len = 12 + 256;
             default: expected_len = -1;
         endcase
@@ -109,7 +112,7 @@ module sdr_top_tb;
             len = {msg[4], msg[3]};
             if (n_msg != len + 7) $fatal(1, "type %02x: len %0d but %0d bytes", msg[0], len, n_msg);
             if (len != expected_len(msg[0])) $fatal(1, "type %02x: unexpected len %0d", msg[0], len);
-            if (msg[1] !== 8'h01) $fatal(1, "type %02x: SYNTHETIC flag missing", msg[0]);
+            if (msg[1] !== ((msg[0]==8'h11 || msg[0]==8'h20) ? 8'h05 : 8'h01)) $fatal(1, "type %02x: SYNTHETIC flag missing", msg[0]);
             c = 16'hffff;
             for (i = 0; i < n_msg - 2; i = i + 1) c = crc_step(c, msg[i]);
             if (c !== {msg[n_msg - 1], msg[n_msg - 2]}) $fatal(1, "type %02x: CRC mismatch", msg[0]);
@@ -139,20 +142,25 @@ module sdr_top_tb;
             end
             if (msg[0] == 8'h01 && {msg[16], msg[15]} != 0) $fatal(1, "STATUS reports %0d dropped", {msg[16], msg[15]});
             if (msg[0] == 8'h01 && msg[5] != 2) $fatal(1, "STATUS protocol version %0d, expected 2", msg[5]);
-            // SPECTRUM axis: center 100 kHz, 390.625 Hz bins (390625 mHz), -120.0 dBFS ref, 0.5 dB step.
+            // SPECTRUM axis: center 100 kHz, 1562.5 Hz bins (1562500 mHz), -120.0 dBFS ref, 0.5 dB step.
             // Payload starts at msg[5]: channel, averages, row u16, bins u16, t_us u32, center_hz, bin_mhz...
             if (msg[0] == 8'h30 && ({msg[18], msg[17], msg[16], msg[15]} != 100000 ||
-                                    {msg[22], msg[21], msg[20], msg[19]} != 390625 ||
+                                    {msg[22], msg[21], msg[20], msg[19]} != 1562500 ||
                                     {msg[24], msg[23]} != 16'hfb50 || msg[25] != 50))
                 $fatal(1, "SPECTRUM axis metadata wrong");
             // channel, rsvd, pairs u16, t_us u32, sample_rate_hz u32
             if (msg[0] == 8'h31 && {msg[16], msg[15], msg[14], msg[13]} != 100000)
                 $fatal(1, "IQ_SNAPSHOT sample rate wrong");
+            if(msg[0]==8'h30) begin
+                for(integer k=1;k<64;k=k+1) if(msg[27+k]!=msg[27]) spectrum_nonflat=spectrum_nonflat+1;
+            end
+            if(msg[0]==8'h31) begin
+                for(integer k=0;k<256;k=k+1) if(msg[17+k]!=0) iq_nonzero=iq_nonzero+1;
+            end
             count[msg[0]] = count[msg[0]] + 1;
             messages = messages + 1;
             all_seen = count[8'h01] >= 2 && count[8'h10] > 0 && count[8'h20] >= 2 && count[8'h21] >= 2 &&
-                       count[8'h30] >= 2 && count[8'h31] >= 2 && frame_ok > 0 && frame_bad >= 2 &&
-                       both_good_b>0 && compared_count==best_ok;
+                       count[8'h30] >= 2 && count[8'h31] >= 2 && frame_ok >= 4 && best_ok >=2 && compared_count==best_ok;
         end
     endtask
 
@@ -181,10 +189,11 @@ module sdr_top_tb;
         for (int t = 0; t < 256; t = t + 1) begin
             count[t] = 0; channels_seen[t]=0; best_seen[t]=0; compared[t]=0;
         end
-        capture = $fopen("build/sdr/link_capture.bin", "wb");
+        capture = $fopen("build/sdr/receiver_capture.bin", "wb");
         forever begin
             read_byte(value);
             $fwrite(capture, "%c", value);
+            if (^value === 1'bx) $fatal(1,"Unknown UART byte (STATUS drops=%h transport=%h fd=%h/%h od=%h/%h)",dut.receiver.sources.dropped,dut.receiver.sources.transport_dropped,dut.receiver.sources.frame_dropped[0],dut.receiver.sources.frame_dropped[1],dut.receiver.sources.observer_dropped[0],dut.receiver.sources.observer_dropped[1]);
             if (value == 8'h00) begin
                 handle_message;
                 n_enc = 0;
@@ -199,6 +208,7 @@ module sdr_top_tb;
     initial begin
         wait (all_seen);
         $fclose(capture);
+        if(spectrum_nonflat==0 || iq_nonzero==0) $fatal(1,"Observer output flat/empty");
         if (led_toggles < 2) $fatal(1, "LED toggled %0d times", led_toggles);
         $display("PASS: %0d link messages: STATUS %0d, BEST %0d, CHAN_FRAME %0d ok/%0d bad, METRICS %0d, LINK %0d, SPECTRUM %0d, IQ %0d",
                  messages, count[8'h01], count[8'h10], frame_ok, frame_bad, count[8'h20], count[8'h21],

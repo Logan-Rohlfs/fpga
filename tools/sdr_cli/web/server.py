@@ -202,12 +202,31 @@ class GuiServer:
         elif kind == 'logout':
             if self.roles.logout(client.id):
                 self.broadcast_roles('logout')
+        elif kind == 'use_compiled_profile':
+            if not is_admin:
+                client.put(error('not_admin', 'Only the Admin can change tuning.'))
+                return
+            if self.hub.source.get('kind') != 'serial' or not self.hub.source.get('responds_to_tuning'):
+                client.put(error('unsupported', 'No compatible receiver profile has been detected.'))
+                return
+            # Explicit repair of a saved incompatible profile, never silent normalization.
+            changes = dict(fs_hz=1_000_000, filter_hz=35_000, target_if_hz=100_000,
+                           window_hz=35_000, injection='low')
+            # A saved NCO valid at a higher sample rate also needs an explicit reset.
+            if not 0 <= self.tuning.nco_hz < 500_000:
+                changes['nco_hz'] = 100_000
+            self.tuning = freqplan.update(self.tuning, changes)
+            self.dirty = True
+            self.broadcast(self.tuning_message())
         elif kind == 'tune':
             if not is_admin:
                 client.put(error('not_admin', 'Only the Admin can change tuning.'))
                 return
             try:
                 new = freqplan.update(self.tuning, data.get('changes'))
+                if self.hub.source.get('kind') == 'serial' and self.hub.source.get('responds_to_tuning'):
+                    from ..receiver_control import tuning_words
+                    tuning_words(new)
             except ValueError as exc:
                 client.put(error('out_of_range', str(exc)))
                 client.put(self.tuning_message())

@@ -54,7 +54,7 @@
 {#if !t}
   <p class="note">Waiting for the server…</p>
 {:else}
-  <p class="note assumptions">Host-side model: synthesizer, XADC rate, IF window and filter values are placeholders pending hardware decisions.</p>
+  <p class="note assumptions">{source?.kind === 'serial' && source.responds_to_tuning ? 'ADC input is simulated; filtering, demodulation, decoding and measurements run in RTL. Rate and filter profile are fixed by this bitstream.' : 'Requested frequency plan. Hardware data is projected into RF only with a known acquisition reference.'}</p>
   <div class="tune">
     <div class="main">
       <Panel title="Frequency plan" sub={disabled ? 'RF domain' : 'RF domain · drag or scroll to move the LO'}>
@@ -63,7 +63,7 @@
         {/snippet}
         <FreqPlan {t} {row} colorVar={COLOR[$tuneChannel]} {disabled} ontune={(lo) => tune({ lo_hz: lo })} />
         <div class="readouts">
-          <div class="ro"><span class="k">LO (synthesizer)</span>
+          <div class="ro"><span class="k">LO (requested model)</span>
             <TuningDigits revision={t} hz={t.derived.lo_hz} stepHz={t.derived.lo_step_hz} {disabled} onchange={(hz) => tune({ lo_hz: hz })} /></div>
           <div class="ro"><span class="k">Carrier (nominal)</span><span class="v">{mhz(t.state.carrier_hz)}</span></div>
           <div class="ro"><span class="k">Expected IF</span><span class="v">{khz(t.derived.expected_if_hz)}</span></div>
@@ -73,7 +73,7 @@
           <div class="warnings">
             {#each t.derived.warnings as w (w)}<span class="chip warn">{w}</span>{/each}
             {#if source && !source.responds_to_tuning}
-              <p class="note">The FPGA does not receive tuning yet. The plan follows these settings; the received IF spectrum does not.</p>
+              <p class="note">This source has not confirmed tuning support. The plan follows requested settings; received data keeps its acquisition reference.</p>
             {/if}
           </div>
         {/if}
@@ -87,7 +87,7 @@
           ondrag={dragNco} ondragend={() => (ncoDrag = null)} onrow={(r) => (row = r)} />
         <div class="chanbar mono">
           <span>Ch {$tuneChannel}</span>
-          <span>RSSI <b>{m ? `${m.rssi_dbm.toFixed(1)} dBm` : '—'}</b></span>
+          <span>RSSI <b>{m ? `${m.rssi_dbm.toFixed(1)} ${m.power_unit ?? 'dBm'}` : '—'}</b></span>
           <span>SNR <b>{m ? `${m.snr_db.toFixed(1)} dB` : '—'}</b></span>
           <span>Δf from NCO <b>{m ? signedKhz(m.freq_offset_hz) : '—'}</b></span>
           {#if row}<span>scale <b>{($scaleOverride.mode === 'manual' ? $scaleOverride.low : row.low).toFixed(0)}…{($scaleOverride.mode === 'manual' ? $scaleOverride.high : row.high).toFixed(0)} dBFS</b></span>{/if}
@@ -105,11 +105,11 @@
       {#if disabled}
         <p class="note viewer">Viewing only. Log in as Admin (top right) to change tuning.</p>
       {/if}
-      <ReceiverPanel {t} {disabled} ontune={tune} />
+      <ReceiverPanel {t} {disabled} fixedProfile={source?.kind === 'serial' && !!source.responds_to_tuning} ontune={tune} />
       <SynthPanel {t} {disabled} ontune={tune} />
-      <NcoPanel {t} {disabled} ontune={tune} />
+      <NcoPanel {t} {disabled} fixedProfile={source?.kind === 'serial' && !!source.responds_to_tuning} ontune={tune} />
       <ScalePanel current={row ? [row.low, row.high] : null} />
-      <SendPanel respondsToTuning={!!source?.responds_to_tuning} />
+      <SendPanel {source} {disabled} />
     </aside>
   </div>
 {/if}

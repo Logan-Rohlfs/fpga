@@ -35,6 +35,8 @@
       const q = rf(f1);
       return [Math.min(p, q), Math.max(p, q)];
     };
+    const reference = row?.rf_reference;
+    const measuredRf = (f: number) => reference ? ifToRf(reference.lo_hz, reference.injection, f) : NaN;
     const top = 22;
     const bot = h - 20;
     const panel = cssVar('--panel');
@@ -49,8 +51,8 @@
     ctx.fillStyle = panel;
     ctx.fillRect(X(img[0]), top, X(img[1]) - X(img[0]), bot - top);
     hatch(ctx, X(img[0]), X(img[1]), top, bot, withAlpha(cssVar('--bad'), 0.45));
-    if (row) {
-      const seen = span(row.f0_hz - row.bin_hz / 2, row.f0_hz + (row.bins - 0.5) * row.bin_hz);
+    if (row && reference) {
+      const seen = [measuredRf(row.f0_hz - row.bin_hz / 2), measuredRf(row.f0_hz + (row.bins - 0.5) * row.bin_hz)].sort((a, b) => a - b);
       ctx.fillStyle = panel;
       ctx.fillRect(X(seen[0]), top, X(seen[1]) - X(seen[0]), bot - top);
     }
@@ -61,10 +63,10 @@
     ctx.strokeStyle = withAlpha(ifColor, 0.55);
     ctx.lineWidth = 1;
     ctx.strokeRect(X(win[0]) + 0.5, top + 0.5, X(win[1]) - X(win[0]) - 1, bot - top - 1);
-    if (row) {
+    if (row && reference) {
       const sc = $scaleOverride;
       const [low, high] = sc.mode === 'manual' ? [sc.low, sc.high] : [row.low, row.high];
-      drawTrace(ctx, top, bot, row, low, high, colorVar, (f) => X(rf(f)));
+      drawTrace(ctx, top, bot, row, low, high, colorVar, (f) => X(measuredRf(f)));
     }
     const fg = cssVar('--fg');
     const c = s.carrier_hz;

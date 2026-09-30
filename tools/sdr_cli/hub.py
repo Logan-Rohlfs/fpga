@@ -21,6 +21,7 @@ class Hub:
         self.scales = {ch: WaterfallScale() for ch in CHANNELS}
         self.subscribers = []
         self.arrivals = deque()
+        self.active_source = None
         self.source = dict(kind='none', state='starting', detail='', responds_to_tuning=False)
 
     def subscribe(self, fn):
@@ -34,11 +35,24 @@ class Hub:
             except Exception:
                 logger.exception('GUI subscriber failed')
 
-    def feed(self, data):
+    def feed(self, data, source=None):
         self.arrivals.append((self.clock(), len(data)))
         records = self.decoder.feed(data)
         self.link.update(records)
-        messages = [self.message(r) for r in records]
+        messages = []
+        for record in records:
+            if source is not None and hasattr(source, 'observe'):
+                source.observe(record)
+                self.source.update(source.source_state())
+            msg = self.message(record)
+            if msg['type'] == 'spectrum':
+                if source is not None and source.kind == 'sim':
+                    from .freqplan import lo_hz
+                    state = source.get_tuning()
+                    msg['rf_reference'] = dict(lo_hz=lo_hz(state), injection=state.injection)
+                else:
+                    msg['rf_reference'] = self.source.get('applied')
+            messages.append(msg)
         for msg in messages:
             self.publish(msg)
         return messages
@@ -69,14 +83,19 @@ class Hub:
         return sum(n for _, n in self.arrivals) / self.RATE_WINDOW_S
 
     def stats_message(self):
+        if self.active_source is not None and hasattr(self.active_source, 'source_state'):
+            self.source.update(self.active_source.source_state())
         decoder = dict(self.decoder.stats)
         decoder['by_type'] = dict(decoder['by_type'])
         return dict(type='stats', decoder=decoder, rates=self.link.rates(), byte_rate=self.byte_rate(),
                     source=dict(self.source))
 
     def set_source(self, source, state, detail=''):
+        self.active_source = source
         self.source = dict(kind=source.kind, state=state, detail=detail or source.detail,
                            responds_to_tuning=source.responds_to_tuning)
+        if hasattr(source, 'source_state'):
+            self.source.update(source.source_state())
         self.publish(self.stats_message())
 
     async def run(self, source):
@@ -85,7 +104,7 @@ class Hub:
         self.set_source(source, 'running')
         try:
             async for data in source.chunks():
-                self.feed(data)
+                self.feed(data, source)
         except asyncio.CancelledError:
             self.set_source(source, 'stopped')
             raise
