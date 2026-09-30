@@ -140,3 +140,9 @@ Copied from the local SDD ledger so the rulings survive on another machine. The 
 - Task 14: the event-log card has config `category` flight|link (default flight); title "Flight events"/"Link events"; kind chips list only that category. Plot markers use flight events only.
 - Task 22: the default Flight preset has a Flight events card; include a smaller Link events card only if the layout has room.
 - Task 24: triggers use flight kinds only.
+
+## Rulings made after the Task 7 pause
+
+- Ruling: user asked for parallel execution of non-overlapping tasks (2026-09-30) — parallel implementers run in isolated git worktrees, controller merges after review and updates the HANDOFF checkpoint; Task 26 moved earlier (runs in main tree after Task 25; frontend already follows bins) — cost if wrong: merge conflicts resolved by controller; 26 GUI-side follow-up may be needed after Task 15.
+- Task 25: Ruling: preflight_bind sets SO_REUSEADDR=1 on POSIX (still refuses an active LISTEN, avoids false 'in use' from TIME_WAIT after a normal restart) and SO_EXCLUSIVEADDRUSE on Windows — overrides the brief's 'SO_REUSEADDR off'; spec §18 intent is detecting another live instance — cost if wrong: a race where another process binds between preflight and run_app (already accepted).
+- User (2026-09-30): out of tokens — finish up; deliver a card or two. Task 26 stopped mid-implementation (worktree agent-a66435c22f08fe8f3 left in place, not merged). Ruling: minimal path = merge Tasks 9/18 after review, then one combined dispatch of Task 10 (grid shell) + Task 12 (value cards) creating card-types.json itself, with a local default layout instead of Task 8 server presets — cost if wrong: Task 8/11 integration later.
