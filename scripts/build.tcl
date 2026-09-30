@@ -37,7 +37,11 @@ place_design
 route_design
 
 report_utilization -file [file join $out_dir utilization.rpt]
-report_timing_summary -file [file join $out_dir timing.rpt]
+# Per-module breakdown appended to the same fetched report.
+report_utilization -hierarchical -append -file [file join $out_dir utilization.rpt]
+report_timing_summary -max_paths 20 -file [file join $out_dir timing.rpt]
+# One summary line per worst endpoint, so failures in every module are visible.
+report_timing -max_paths 100 -nworst 1 -path_type summary -append -file [file join $out_dir timing.rpt]
 report_drc -file [file join $out_dir drc.rpt]
 
 set worst_path [get_timing_paths -max_paths 1]
