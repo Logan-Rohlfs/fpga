@@ -94,7 +94,8 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: Tasks 1-2 complete, next Task 3.** Task 2 added `tools/sdr_cli/gui_wire.py`
+**Current task: Tasks 1-3 complete, next Task 4.** Task 3 added `tools/sdr_cli/events.py` (server-side
+derived flight and link events; not yet wired into the hub). Task 2 added `tools/sdr_cli/gui_wire.py`
 (binary spectrum/flight encoders) and `tools/sdr_web/src/lib/wire.golden.json` for the TS decoder.
 
 **Before Task 1:** the pre-flight conflict scan is done. See
