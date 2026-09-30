@@ -100,7 +100,7 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: Tasks 1-7 and 25 complete; next is Task 8.** Task 25 added serial auto-reconnect with back-off (`waiting`/`busy`/`reconnecting` states, `lib/status.ts` banner and pill) and the HTTP port-in-use check.
+**Current task: paused (usage limit), 2026-09-30.** Tasks 1-7 and 9 are complete and reviewed. Task 25 (serial auto-reconnect) is committed with its fix round (`ef513ee`), but the scoped re-review of that fix did not finish. Re-review `a43f0d8..ef513ee` first. Task 18 (map sites and the tile CLI) sits unmerged on branch `worktree-agent-add081bbb00fdf346` (`8bc39d6`). Its fix re-review also did not finish: re-review `41c4eea..8bc39d6`, then merge it. Task 26 was stopped with no commits; start it fresh. **Next for cards:** Task 8 (presets), then 10 (card grid), 11 and 12 (first value cards). Task 9's helpers (`units.ts`, `virtual.ts`, `frame.ts`, `events.ts`) are already merged. Remaining order: 8, 10-15, 26, 16-23, 24. Worktrees under `.claude/worktrees/` are local. The Agent tool bases them on `origin/main`, so reset each one to `gui-prep` first. Parallel implementers must not edit this file. Deferred minors (see the local ledger) include: `metrics_history` has no SYNTHETIC flag; `maps.coverage()` gives one site-wide `outer_max_z`; the StatusBar "Disconnected" chip duplicates the Task 25 banner (fix in Task 21). There has been no browser check since Task 7.
 
 **Preflight rulings: made.** Every finding in the
 [preflight scan](superpowers/plans/2026-09-30-gui-cards-preflight.md) is ruled, and
