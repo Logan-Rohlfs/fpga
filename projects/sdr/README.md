@@ -61,6 +61,68 @@ recovery and frequency-offset tolerance are bounded by the configured profile;
 there is no automatic modulation identification, general clock recovery for
 arbitrary rates, or automatic carrier-frequency acquisition loop.
 
+## APEX flight replay demo (opt-in build)
+
+A separate bitstream replays the IREC 2026 flight as if the APEX RF4463 sent it
+at 441.480 MHz. The frames pass through the full digital receiver with noise and
+signal loss. It is an add-on. The default bitstream, its profile, resources and
+BUILD_ID do not change. Select it at build time; no board or wiring changes:
+
+```sh
+./sdr build --demo        # dashboard: ":build demo"; Vivado: -tclargs sdr demo
+./sdr program             # programs the selected bundle; it reports the demo variant
+./sdr build               # back to the default bitstream
+```
+
+`sdr_top` parameter `DEMO_FLIGHT=1` selects it. STATUS then reports BUILD_ID
+`SDRF` (0x53445246) instead of `SDR1`. The ADC input is still generated, so
+every record stays `SYNTHETIC`.
+
+| Setting | Demo value | Basis |
+| --- | --- | --- |
+| Bit rate / deviation | 10 kbit/s, ±25 kHz 2GFSK, bit 1 = +dev | apex `config.h`, `radio.cpp` |
+| Preamble / sync | 8 × 0xAA (first bit 1), 16-bit 0x2DD4, MSB first | `radio_build_frame()` |
+| Frame | type 0x02 + 41-byte FLIGHT body + CRC16 (44 bytes after sync) | `TelemFlight`, static_assert 41 |
+| CRC | CCITT 1021, init FFFF, over type+body, big-endian trailer | `radio.cpp` |
+| Length | none on air; the decoder accepts type 0x02 only (`TYPE_FILTER`) | type implies length |
+| Cadence | one frame per 50 ms slot (20 Hz) | `RADIO_TELEM_FLIGHT_HZ` |
+| Gaussian shaping | binomial taps, approx. BT 0.5 | **assumed**: firmware leaves the chip default |
+| ADC / IF | 1 MS/s, 100 kHz, as the default | **assumed** analog front end |
+| Noise | uniform ±256 LSB on both channels (A tone 1400, B tone 1000) | demo choice |
+| Loss windows | A: slots 60–69, B: slots 228–237 (0.5 s each, every loop) | demo choice |
+| Loop | 293 frames, then 20 silent slots (1 s); 15.65 s per loop | demo choice |
+
+Antenna A loses the signal about 1 s after launch detect, during the fast coast.
+B loses it across the COAST→DESCENT change at slot 233. During each window the
+combiner's BEST output comes from the other antenna.
+
+The ROM is `rom/apex_flight.mem`: 293 frames × 42 bytes (type + body) =
+12,306 bytes in block RAM. The transmitter appends the CRC. The file is checked
+in, so builds do not need the flight CSV. Regenerate it with the apex checkout
+next to this repository:
+
+```sh
+python3 projects/sdr/host/apex_flight_rom.py            # rewrite rom/apex_flight.mem
+python3 projects/sdr/host/apex_flight_rom.py --check    # confirm it is current
+```
+
+`host/apex_flight_rom.py` documents the replay choices and holds the FLIGHT field
+table (`FLIGHT_FIELDS`, offsets and firmware scaling), matching
+`tools/sdr_cli/apex.py`. The window runs from 2 s before LAUNCH_DETECTED to 3 s
+after the PHASE event leaving COAST. Frames are sampled at 20 Hz with a
+latest-row-at-or-before hold. The radio seq counts from 0, because the CSV seq
+is a log counter. Fields missing from the log are zero: status flag bits,
+sensor/radio health bits, tilt and azimuth. The once-per-second HOUSEKEEPING
+beat is not replayed.
+
+Simulation: `flight_decoder_tb` (bit-level framing), `flight_replay_tb` (ROM ->
+GFSK ADC -> both pipelines -> combiner, bit-exact; each loss-window edge and the
+loop wrap), and `flight_top_tb` (demo `sdr_top` over UART). Then
+`check_receiver.py --demo --rom rom/apex_flight.mem` checks the capture.
+`tools/tests/test_apex_flight_rom.py` checks the ROM against the CSV with the
+host APEX parser. On hardware, the same checker runs with
+`--port DEVICE --demo --rom projects/sdr/rom/apex_flight.mem`.
+
 ## Measurements and provenance
 
 - Spectrum is an actual rectangular-window 64-point complex DFT at 100 kS/s:
