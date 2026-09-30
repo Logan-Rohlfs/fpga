@@ -129,3 +129,23 @@ Show a compact flight card in the Telemetry view: current values plus an altitud
 trace, labelled "Replayed flight data (synthetic ADC)" when SYNTHETIC is set.
 The decode lives in Python (toolkit-free module), and the frontend only draws.
 Unknown payload types show raw bytes as they do today. No new dependencies.
+
+### Task 7: Parallel, thread-sized Vivado builds
+
+User request (2026-09-30). The Windows build host has 12 cores. Vivado on
+Windows defaults to 2 threads, and `general.maxThreads` caps at 8.
+
+- `scripts/build.tcl` sets `general.maxThreads` from a tcl argument, not a
+  hard-coded value.
+- `./sdr build` can build several variants concurrently, e.g. default + demo,
+  each in its own isolated remote directory and local bundle. Each build gets
+  threads = clamp(host_cores // concurrent_builds, 1, 8). Host cores come from
+  the remote (`$env:NUMBER_OF_PROCESSORS`), with a config/CLI override.
+- Concurrent builds must not share local temp, snapshot or output paths. The
+  per-build "sources changed during build" check still works. Logs from
+  concurrent builds are prefixed with their variant so they stay readable.
+- CLI and dashboard expose the same operation (AGENTS.md). Host unit tests cover
+  the thread calculation, argument plumbing and path isolation, without a real
+  remote.
+- Verify with one real parallel default + demo build. Report wall-clock time
+  against the previous serial builds, plus timing for both bitstreams.
