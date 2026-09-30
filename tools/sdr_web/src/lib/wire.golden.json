@@ -1,0 +1,223 @@
+[
+  {
+    "name": "spectrum_no_rf",
+    "hex": "010101010700000005000000000000000000f83f00000000006ae840002474460000b4c2000020c1000000000000f87fff0000007cfc9cff0000ff7f0080",
+    "expect": {
+      "kind": 1,
+      "channel": "B",
+      "row": 7,
+      "t": 1.5,
+      "f0_hz": 50000.0,
+      "bin_hz": 15625.0,
+      "bins": 5,
+      "low": -90.0,
+      "high": -10.0,
+      "synthetic": true,
+      "db10": [
+        -900,
+        -100,
+        0,
+        32767,
+        -32768
+      ],
+      "rf_reference": null
+    }
+  },
+  {
+    "name": "spectrum_rf_reference",
+    "hex": "0101000640e201000300000000001000de39da410000000080842ec10024f4440000bfc2000044c1000000a0ec4eba41000000004afce0fc83ff",
+    "expect": {
+      "kind": 1,
+      "channel": "A",
+      "row": 123456,
+      "t": 1760000000.25,
+      "f0_hz": -1000000.0,
+      "bin_hz": 1953.125,
+      "bins": 3,
+      "low": -95.5,
+      "high": -12.25,
+      "synthetic": false,
+      "db10": [
+        -950,
+        -800,
+        -125
+      ],
+      "rf_reference": {
+        "lo_hz": 441380000.0,
+        "injection": "low",
+        "inferred": true
+      }
+    }
+  },
+  {
+    "name": "spectrum_rf_high",
+    "hex": "010100020100000001000000000000000000004000000000000000000000c8420000a0c20000a0c10000000065cdbd41010000000cfe",
+    "expect": {
+      "kind": 1,
+      "channel": "A",
+      "row": 1,
+      "t": 2.0,
+      "f0_hz": 0.0,
+      "bin_hz": 100.0,
+      "bins": 1,
+      "low": -80.0,
+      "high": -20.0,
+      "synthetic": false,
+      "db10": [
+        -500
+      ],
+      "rf_reference": {
+        "lo_hz": 500000000.0,
+        "injection": "high",
+        "inferred": false
+      }
+    }
+  },
+  {
+    "name": "flight_single_best",
+    "hex": "020102001400010000002000de39da410100000000000000803f0000803f0000104300000000000000000f6483428474f64200fe7f46cdcc4cbe00000000cdcc4cbe0ad7233dcdcc4cbe0ad7233c00000000004db04700006c420000000000000000",
+    "expect": {
+      "kind": 2,
+      "origin": "best",
+      "field_count": 20,
+      "keys": [
+        "seq",
+        "phase",
+        "phase_status",
+        "health",
+        "gps_fix",
+        "gps_sats",
+        "lat_deg",
+        "lon_deg",
+        "gps_alt_m",
+        "alt_agl_m",
+        "velocity_mps",
+        "pred_apogee_m",
+        "vert_accel_mps2",
+        "accel_z_mps2",
+        "roll_rate_rads",
+        "deployment",
+        "baro_pa",
+        "baro_temp_c",
+        "tilt_deg",
+        "azimuth_deg"
+      ],
+      "rows": [
+        {
+          "t": 1760000000.5,
+          "synthetic": true,
+          "best_from": 0,
+          "values": [
+            0.0,
+            1.0,
+            1.0,
+            144.0,
+            0.0,
+            0.0,
+            65.69542694091797,
+            123.22756958007812,
+            16383.5,
+            -0.20000000298023224,
+            0.0,
+            -0.20000000298023224,
+            0.03999999910593033,
+            -0.20000000298023224,
+            0.009999999776482582,
+            0.0,
+            90266.0,
+            59.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "flight_batch_a",
+    "hex": "020100001400020000004000de39da4106000000803f000000400000803f00001043000080bf000000000f6483428474f64200fe7f46cdccf64200000000cdcc4cbe0ad7233dcdcc4cbe0ad7233c00000000004db04700006c42000000000000000033334300de39da410700000000000000c0400000803f000010430000000000000000000006428474f64200fe7f46cdcc4cbe00000000cdcc4cbe0ad7233dcdcc4cbe0ad7233c00000000004db04700006c420000000000000000",
+    "expect": {
+      "kind": 2,
+      "origin": "A",
+      "field_count": 20,
+      "keys": [
+        "seq",
+        "phase",
+        "phase_status",
+        "health",
+        "gps_fix",
+        "gps_sats",
+        "lat_deg",
+        "lon_deg",
+        "gps_alt_m",
+        "alt_agl_m",
+        "velocity_mps",
+        "pred_apogee_m",
+        "vert_accel_mps2",
+        "accel_z_mps2",
+        "roll_rate_rads",
+        "deployment",
+        "baro_pa",
+        "baro_temp_c",
+        "tilt_deg",
+        "azimuth_deg"
+      ],
+      "rows": [
+        {
+          "t": 1760000001.0,
+          "synthetic": false,
+          "best_from": 3,
+          "values": [
+            1.0,
+            2.0,
+            1.0,
+            144.0,
+            -1.0,
+            0.0,
+            65.69542694091797,
+            123.22756958007812,
+            16383.5,
+            123.4000015258789,
+            0.0,
+            -0.20000000298023224,
+            0.03999999910593033,
+            -0.20000000298023224,
+            0.009999999776482582,
+            0.0,
+            90266.0,
+            59.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "t": 1760000001.05,
+          "synthetic": true,
+          "best_from": 3,
+          "values": [
+            0.0,
+            6.0,
+            1.0,
+            144.0,
+            0.0,
+            0.0,
+            33.5,
+            123.22756958007812,
+            16383.5,
+            -0.20000000298023224,
+            0.0,
+            -0.20000000298023224,
+            0.03999999910593033,
+            -0.20000000298023224,
+            0.009999999776482582,
+            0.0,
+            90266.0,
+            59.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    }
+  }
+]
