@@ -1,7 +1,7 @@
 """A small synthetic link stream containing every message type (mirrors rtl/link_test_sources.sv)."""
 from pathlib import Path
 
-from sdr_cli import protocol as p
+from sdr_cli import apex, protocol as p
 from sdr_cli.apex import build_test_frame as apex_test_frame
 
 ROM_MEM = Path(__file__).resolve().parents[2] / 'projects/sdr/rom/apex_flight.mem'
@@ -9,19 +9,10 @@ ROM_MEM = Path(__file__).resolve().parents[2] / 'projects/sdr/rom/apex_flight.me
 
 def rom_frames():
     """The 42-byte APEX FLIGHT frames (type+body, no CRC) of the demo replay ROM."""
-    data = bytearray()
-    for line in ROM_MEM.read_text().splitlines():
-        text = line.split('//', 1)[0].strip()
-        if text:
-            data.append(int(text, 16))
-    assert len(data) % 42 == 0
-    return [bytes(data[i:i + 42]) for i in range(0, len(data), 42)]
+    return apex.read_rom_frames(ROM_MEM)
 
 
-def with_crc(frame):
-    """Append the big-endian CRC-16-CCITT, as on the air."""
-    crc = p.crc16_ccitt(frame)
-    return frame + bytes([crc >> 8, crc & 0xFF])
+with_crc = apex.with_crc
 
 
 def rom_flight_frames():

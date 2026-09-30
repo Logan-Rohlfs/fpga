@@ -5,6 +5,7 @@ type byte, little-endian body, CRC-16-CCITT (init 0xFFFF) over type+body, sent
 big-endian. Replace or extend once the defined flight telemetry format is supplied.
 """
 import struct
+from pathlib import Path
 
 from .protocol import crc16_ccitt
 
@@ -55,6 +56,24 @@ def flight_schema():
 
 
 BODY_LEN = {TEST: 1 + TEST_TEXT_LEN, FLIGHT: FLIGHT_STRUCT.size, HOUSEKEEPING: HK_STRUCT.size}
+
+
+def with_crc(frame):
+    """Append the big-endian CRC-16-CCITT over type+body, as on the air."""
+    crc = crc16_ccitt(frame)
+    return bytes(frame) + bytes([crc >> 8, crc & 0xFF])
+
+
+def read_rom_frames(path):
+    """Frames (type+body, no CRC) of a demo-replay ROM .mem file of hex bytes."""
+    data = bytearray()
+    for line in Path(path).read_text().splitlines():
+        text = line.split('//', 1)[0].strip()
+        if text:
+            data.append(int(text, 16))
+    size = 1 + FLIGHT_STRUCT.size
+    assert len(data) % size == 0
+    return [bytes(data[i:i + size]) for i in range(0, len(data), size)]
 
 
 def _flight(body):
