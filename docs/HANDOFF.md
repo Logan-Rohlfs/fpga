@@ -98,12 +98,20 @@ plan "Task 6 GUI flight readout".
 before any GUI implementation. The working tree is clean, and `./sdr sim`, host
 tests and both bitstreams were passing at the last check.
 
-**Before Task 1:** a pre-flight conflict scan of the plan was running at the pause.
-Its table goes to `.superpowers/sdd/2026-09-30-gui-cards/preflight.md`. If that
-file is missing or incomplete, rerun the scan: produce one row per task pair that
-shares a file or interface, and one row per task for self-consistency. Rule on
-each conflict, with the spec as authority, and record the rulings in the ledger
-before dispatching Task 1.
+**Before Task 1:** the pre-flight conflict scan is done. See
+[gui-cards-preflight](superpowers/plans/2026-09-30-gui-cards-preflight.md):
+105 rows, each finding with a suggested ruling. Most important:
+- the T9 scheduler default throws at import under vitest's node environment
+- T25 cannot observe `busy`, and `Hub.run` swallows the open error
+- T5 has no latest-wins control slot, which T6 assumes
+- T2/T6 disagree on the `best_from` type, and NaN appears in the golden vectors
+- T7's freeze semantics contradict the existing test
+- the Event/GuiEvent type clash
+- T10's missing store/type files and `registry.sanitize`
+- the unowned `source_state` event dedup
+No rulings have been made yet. Rule on each finding with the spec as authority,
+record the rulings in the ledger, and fold them into the affected task dispatches
+before Task 1.
 
 The ledgers under `.superpowers/sdd/` are git-ignored local files. On another
 machine they won't exist. Rebuild progress from `git log` (task commits name
