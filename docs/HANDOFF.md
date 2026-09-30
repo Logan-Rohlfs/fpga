@@ -1,16 +1,24 @@
 # SDR handoff
 
-Checkpoint updated 2026-09-29. **The host link layer is working
-on hardware; GUI v1 and the source combiner are implemented.** The FPGA sends every message type at 1 Mbaud, and the `sdr` CLI and
-dashboard decode and display them.
+Checkpoint updated 2026-09-30 (branch `gui-prep`). **The host link layer works
+on hardware, and a sample-driven receiver chain now closes timing at 100 MHz.**
+GUI v1, the source combiner, the receiver chain and the APEX flight replay demo
+are implemented. The FPGA sends every message type at 1 Mbaud, and the `sdr` CLI
+and dashboard decode and display them.
 
-All message content is **SIMULATED** by stand-in producers. The planned stages are
-in [`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio).
+**Provenance:** only the ADC waveform is synthetic now. Everything downstream
+(DDC, filtering, discriminator, symbol timing, frame sync, CRC, combiner, I/Q,
+64-bin DFT, metrics) is real logic operating on that synthetic input, so
+messages keep the `SYNTHETIC` flag. The earlier "all content SIMULATED by
+stand-in producers" statement is superseded; the legacy stand-in producers
+(`link_test_sources.sv`) remain only as explicitly named test fixtures. The
+planned stages are in [`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio).
 
-**The Space Raiders SDR web GUI v1 is implemented.** See [GUI implementation status](#gui-implementation-status).
-The DSP stages come later; realistic displayed data waits for them.
+**Next work:** (1) the GUI overhaul, see [GUI overhaul progress](#gui-overhaul-progress-in-progress);
+(2) the open receiver-plan tasks, see [Remaining receiver-plan work](#remaining-receiver-plan-work).
+If you are resuming cold, read those two sections first.
 
-## Sample-driven receiver continuation (in progress)
+## Sample-driven receiver continuation (timing closed; review and board acceptance open)
 
 The user authorized guessed, configurable radio characteristics and completion
 with only the ADC input simulated. This supersedes the earlier wait for confirmed
@@ -23,26 +31,107 @@ recovery, configurable framing/CRC, existing combiner, actual I/Q and 64-bin DFT
 relative dBFS measurements, and acknowledged UART test-carrier/NCO tuning.
 Legacy transport and host UI simulators remain explicitly named fixtures.
 
-New simulation evidence includes exact packets recovered from independent Gaussian
+Simulation evidence includes exact packets recovered from independent Gaussian
 ADC vectors (clean, noisy/offset, corrupted CRC), RTL-generated ADC samples,
-no-signal/recovery, and complete UART/CONFIG tests. Host/GUI checks pass following
-independent review fixes. This is **not yet a newly verified board checkpoint**:
-the bitstream has not been programmed or checked on the board.
+no-signal/recovery, and complete UART/CONFIG tests. Host/GUI checks passed
+following independent review fixes.
 
-Timing/area closure: the first Vivado run failed setup at -16.941 ns with 97% LUTs
-(`build/sdr/failed-20260929-190956-6f3870be/`). The committed pre-closure RTL
-still failed by -12.430 ns at 44% LUTs (`failed-20260930-101513-6765bf0b`). The
-worst paths were the decimator's constant divider, the ADC model's bit/tone
-arithmetic, and wide observer/transport snapshot registers. The observer now
-reads from RAMs, the divider is a pipelined reciprocal multiply, and the ADC model
-logic is pipelined. Every payload value is unchanged: full-UART captures differ
-from the old RTL only in timestamps, which are at most 1 µs later. Bundle
+**Timing and area: closed.** The first Vivado run failed setup at -16.941 ns
+with 97% LUTs (`build/sdr/failed-20260929-190956-6f3870be/`), and an intermediate
+run still failed by -12.430 ns (`failed-20260930-101513-6765bf0b`). The observer
+now reads from RAMs, the decimator divider is a pipelined reciprocal multiply,
+and the ADC model logic is pipelined. Payload values are unchanged; captures
+differ from the old RTL only in timestamps (at most 1 us later). Default bundle
 `build/sdr/artifacts/20260930-103603-a1d0abba/`: WNS +0.120 ns, WHS +0.023 ns at
-100 MHz, 0 failing endpoints; 5,241 LUTs (25.2%), 6,911 FFs (16.6%),
-0 BRAM, 41 DSPs. DRC has no errors. It shows the known CFGBVS/CONFIG_VOLTAGE
-warning plus DSP pipelining advisories. The worst remaining path is in
-`source_combiner` (frame_key -> a_older, 12 logic levels). Intermediate failed
-reports are preserved under `build/sdr/failed-20260930-*`.
+100 MHz, 0 failing endpoints; 5,241 LUTs (25%), 6,911 FFs (16.6%), 0 BRAM,
+41 DSPs. DRC has no errors, only the known CFGBVS/CONFIG_VOLTAGE warning plus DSP
+pipelining advisories. The worst remaining path is in `source_combiner`
+(`frame_key` -> `a_older`, 12 logic levels), so margin is thin but positive.
+Intermediate failed reports are preserved under `build/sdr/failed-20260930-*`.
+
+**Parallel builds.** `./sdr build --all` builds the default and demo variants
+concurrently with Vivado threads sized from the host core count (`--cores N`
+overrides). It took 202 s against about 420 s serial. `build/sdr/latest` is the
+default bundle and `build/sdr/latest-demo` is the demo; `./sdr program --demo`
+programs the demo. Ctrl-C cancels concurrent builds cleanly.
+
+**Board evidence (read carefully; none of it is a formal acceptance run):**
+
+- The user flashed the demo bitstream (persistent) themselves and reports the
+  host receives the expected data. This is **user-reported**, not agent-verified.
+- Observed in this session by the controller through `./sdr gui` on the attached
+  board: live serial data, 1,814 then 5,160 messages, 0 CRC/COBS/length errors,
+  and the server survived a volatile `./sdr program` and resumed data. This is an
+  observation, not the Task 3 acceptance run (no decode of APEX TEST frames on
+  both channels, no tuning/CONFIG exercise, no retained capture).
+- The GUI "Disconnected, retrying" the user saw after programming was likely
+  conflicting GUI instances (a stale preview server on another port was found).
+  It could not be reproduced with a single instance. GUI overhaul Task 25 adds
+  reconnect handling and instance-conflict detection.
+
+## GUI overhaul progress (in progress)
+
+The user requested a card-based, multi-viewer GUI overhaul (card dashboard,
+presets, flight readout, multi-user performance). It supersedes the old receiver
+plan "Task 6 GUI flight readout".
+
+- Spec (binding): [`superpowers/specs/2026-09-30-gui-cards-design.md`](superpowers/specs/2026-09-30-gui-cards-design.md)
+- Plan (Tasks 1-26): [`superpowers/plans/2026-09-30-gui-cards.md`](superpowers/plans/2026-09-30-gui-cards.md)
+- Ledger (local, git-ignored): `.superpowers/sdd/2026-09-30-gui-cards/progress.md`.
+  A task with a "Task N: complete" line is done; skip it. Decisions and survey are
+  in `.superpowers/sdd/gui-overhaul-decisions.md` and `gui-overhaul-survey.md`.
+- **Execution order:** Tasks 1-7, then 25, then 8-15, then 26, then 16-23, then
+  24 (optional). Task 25 needs Task 7's connection/stats stores and fixes the
+  user-visible reconnect problem early. Task 26 (FPGA DFT length of 128 or 256,
+  parameterized; needs a rebuild) follows Task 15 because 64-bin data cannot give
+  a higher-resolution spectrum host-side. Tasks 21 and 25 both edit
+  `StatusBar.svelte` and `App.svelte`; the later one rebases.
+- **Tasks 6 and 7 are atomic.** Never stop, checkpoint or hand off between them:
+  Task 6 makes the server send binary spectrum frames that the shipped frontend
+  cannot decode until Task 7.
+- Approved new frontend packages (not installed yet): `leaflet`, `uplot`, `three`
+  (runtime) and `@types/leaflet`, `@types/three` (dev). Nothing else.
+- Checkpoint rule: after each task the controller updates the line below. The
+  system must stay functional at every task boundary except inside the 6-7 pair.
+
+**Current task: none started (next: Task 1)**
+
+**How to resume:** read the ledger and skip every task with a "Task N: complete"
+line. Continue in the execution order above, following
+`superpowers:subagent-driven-development`. Update the "Current task" line after each
+task. Verify with the commands in AGENTS.md (Python unittest, then
+`npm test && npm run check && npm run build` for frontend changes).
+
+## Remaining receiver-plan work
+
+From the [receiver plan](superpowers/plans/2026-09-29-sample-driven-receiver.md),
+Tasks 1 (timing closure), 5 (demo) and 7 (parallel builds) are complete and
+reviewed. Still open:
+
+- **Task 2:** independent whole-branch review of the receiver chain, host
+  decoding, receiver control and GUI changes (covers the demo). RTL fixes must
+  re-close timing.
+- **Task 3:** board and GUI acceptance run on the final bitstream: volatile
+  `./sdr program`, capture at least 15 s to `.sdr/captures/receiver-<date>.bin`,
+  decode with zero errors, APEX TEST frames on both channels, tuning/CONFIG
+  exercise, GUI live check. Only claim what is observed in that run.
+- **Task 4:** final docs and explicit limitations (XADC acquisition, physical
+  PLL, calibrated dBm, guessed radio profile).
+- Old "Task 6 GUI flight readout" is superseded by the GUI overhaul above.
+- Default profile (20 kHz, sync D391) is a guess and differs from the firmware;
+  the demo uses the firmware-derived profile (25 kHz, sync 2DD4). Unchanged.
+
+Deferred minors (details in the local receiver ledger
+`.superpowers/sdd/2026-09-29-sample-driven-receiver/progress.md` and the
+`task-*-review.md` files): ADC source `DIVIDER>=4` guard is sim-only; no stall
+test for link-source ready; no committed regression for the reciprocal multiply;
+thin combiner timing margin; `Makefile` `DEMO=0` still builds the demo; 889 ms
+CSV logging gap repeats one ARMED row in the demo (undocumented);
+`check_receiver.py --demo` fails a capture on one false-lock CRC-bad frame;
+health/phase_status bits unchecked in `test_apex_flight_rom.py`; wrap lane tested
+with `GAP_SLOTS=1` only; `flight_top_tb` uses `defparam`; no SIGTERM handler in
+parallel builds (plain SIGTERM orphans ssh children); legacy `latest` -> demo
+bundle still programs the demo with only a notice.
 
 ## APEX flight replay demo (opt-in build, 2026-09-30)
 
@@ -57,8 +146,8 @@ Gaussian BT 0.5 and the 1 MS/s / 100 kHz IF are labelled assumptions. The ROM
 (`projects/sdr/rom/apex_flight.mem`, 12,306 bytes) is generated by
 `projects/sdr/host/apex_flight_rom.py` and checked in. Details and the full
 assumption list are in the [SDR guide](../projects/sdr/README.md#apex-flight-replay-demo-opt-in-build).
-The GUI flight card (Task 6) is not built yet. The host already decodes FLIGHT
-fields (`sdr_cli.apex`).
+The GUI flight card is not built yet (it is part of the GUI overhaul). The host
+already decodes FLIGHT fields (`sdr_cli.apex`).
 
 - Default bitstream unchanged: HEAD and the new RTL give byte-identical
   default UART captures and ADC samples in simulation. Default build
@@ -76,10 +165,11 @@ fields (`sdr_cli.apex`).
   (the ROM), 41 DSPs. Neither DRC report has errors; only the known CFGBVS and
   DSP pipelining warnings. The worst path in both is the combiner's `a_older`
   update (demo: `output_key` -> `a_older`, 13 levels). Its margin is thin but
-  positive, so the combiner was not changed. `build/sdr/latest` currently
-  selects the demo bundle. Run `./sdr build` before programming the default.
-- Not done: board programming or UART capture of the demo bitstream, the GUI
-  flight card, and HOUSEKEEPING frames (not replayed).
+  positive, so the combiner was not changed. (At that time `latest` selected
+  the demo bundle; it now selects the default, and `latest-demo` the demo.)
+- Not done: an agent-run board programming and UART capture of the demo
+  bitstream (the user reports flashing it and receiving the expected data), the
+  GUI flight card, and HOUSEKEEPING frames (not replayed).
 
 ## Source combiner implementation status
 
@@ -220,11 +310,13 @@ See [the GUI guide](../tools/README.md#web-gui) for build/run commands and contr
 
 Not implemented:
 
-- the XADC, sample conditioning, DDC, filtering, discriminator, symbol timing,
-  frame sync, source combiner, FFT, and constellation capture. Every stage in the
-  map is a stand-in;
-- a UART RX/command path (`sdr send` bytes are not acted on);
-- a real `BUILD_ID` (the parameter defaults to 0; build.tcl does not set it).
+- real XADC acquisition (the ADC input is a synthetic waveform; the later
+  stages are real logic, see the top of this file);
+- a general UART command path: only the receiver's test-carrier/NCO tuning
+  command is acknowledged (simulation-verified); other `sdr send` bytes are not
+  acted on;
+- a `BUILD_ID` set by build.tcl (the default build's parameter is 0; the demo
+  RTL sets `SDRF`).
 
 ## Verified in this session
 

@@ -13,7 +13,9 @@ implementation status in the handoff and plans in `docs/superpowers/plans/`.
 The next upstream stage is frame sync + CRC; DSP stages follow later. Follow the user's chosen
 scope. Do not silently select DSP constants or RF settings, and do not add GUI
 dependencies beyond the spec's list (aiohttp in the `gui` extra; the frontend
-packages in `tools/sdr_web/package.json`).
+packages in `tools/sdr_web/package.json`). The user also approved `leaflet`,
+`uplot` and `three` (runtime) plus `@types/leaflet` and `@types/three` (dev) for
+the GUI overhaul; they are not installed yet. Nothing else.
 
 ## Work within the existing structure
 
@@ -31,8 +33,9 @@ packages in `tools/sdr_web/package.json`).
   - Frequency math stays in Python. The frontend only draws and sends intent.
 - Python supports 3.9+. RTL simulation uses Icarus/SystemVerilog (`-g2012`).
 - `scripts/build.tcl` and `core.py:source_files` must agree on build inputs.
-  They currently include only direct `.v`/`.sv` files and one project XDC.
-  Add include files, nested RTL, ROM assets, or IP to both if a task needs them.
+  They currently include direct `.v`/`.sv` files, `projects/<project>/rom/*.mem`
+  memory images and one project XDC. Add include files, nested RTL, other assets,
+  or IP to both if a task needs them.
 - Keep the link wire format in `tools/sdr_cli/protocol.py` and the RTL in step.
   `./sdr sim` cross-checks them. Stand-in producers must set `SYNTHETIC`, and
   real stages clear it only for measured data.

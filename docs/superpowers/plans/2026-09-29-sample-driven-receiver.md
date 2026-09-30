@@ -9,9 +9,14 @@ Implementation agents own separate files and report concise interface/results.
 - [x] Independent sample-to-frame integration tests
 - [x] Real sample-derived spectrum, I/Q, metrics and transport
 - [x] Default board integration and applied tuning behavior (simulation verified)
-- [ ] Regression and independent review
-- [ ] Vivado and attached-board/GUI verification
-- [ ] Documentation and explicit remaining limitations
+- [x] Timing and area closure (Task 1; build 20260930-103603-a1d0abba, WNS +0.120 ns, WHS +0.023 ns, 5,241 LUTs)
+- [x] APEX flight replay demo build (Task 5; `./sdr build --demo`, demo WNS +0.089 ns)
+- [x] Parallel, thread-sized builds (Task 7; `./sdr build --all`, 202 s vs ~420 s serial)
+- [ ] Independent whole-branch review (Task 2)
+- [ ] Board and GUI acceptance run (Task 3; user reports the demo works, not agent-verified)
+- [ ] Final documentation and explicit remaining limitations (Task 4)
+- Task 6 (GUI flight readout) is superseded by the
+  [GUI overhaul plan](2026-09-30-gui-cards.md).
 
 See [contract](../specs/2026-09-29-sample-driven-receiver.md).
 
@@ -121,7 +126,7 @@ configurable assumption and label it (e.g. Gaussian BT 0.5).
   - `./sdr sim` covers both the default and demo builds.
   - A demo `./sdr build` meets timing (WNS/WHS >= 0) with no DRC errors.
 
-### Task 6: GUI flight readout for APEX FLIGHT frames
+### Task 6: GUI flight readout for APEX FLIGHT frames (SUPERSEDED by the GUI overhaul plan)
 
 Host-side decode of the APEX FLIGHT (0x02) payload layout from the facts file
 into named fields (altitude, velocity, vertical acceleration, phase, and so on).
