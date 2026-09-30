@@ -5,14 +5,39 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from link_samples import sample_stream
-from sdr_cli import freqplan, roles as r
+from link_samples import rom_flight_frames, sample_stream
+from sdr_cli import fanout, gui_wire, protocol as p, roles as r
+from sdr_cli import freqplan
+from sdr_cli.hub import Hub
 
 try:
+    from aiohttp import WSMsgType
     from aiohttp.test_utils import TestClient, TestServer
     from sdr_cli.web.server import GuiServer
 except ImportError:   # the gui extra is optional
     GuiServer = None
+
+
+class Idle:
+    """A source that never produces data; tests drive the hub directly."""
+    kind, responds_to_tuning, detail = 'replay', False, 'idle'
+
+    async def chunks(self):
+        await asyncio.sleep(3600)
+        yield b''
+
+
+def best_telem(raw, n):
+    return p.encode_message(p.BEST_TELEM, p.build_payload(p.BEST_TELEM, {'t_us': n, 'source': 0, 'raw': raw}),
+                            seq=n)
+
+
+def flight_rows(data):
+    """(times) from one FLIGHT_ROWS binary message."""
+    kind, _version, _origin, _rsvd, count, n = gui_wire.FLIGHT_HEADER.unpack_from(data)
+    assert kind == gui_wire.KIND_FLIGHT and count == len(gui_wire.FIELD_KEYS)
+    size = gui_wire.ROW.size
+    return [gui_wire.ROW.unpack_from(data, gui_wire.FLIGHT_HEADER.size + i * size)[0] for i in range(n)]
 
 
 class SampleOnce:
@@ -38,29 +63,53 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         static = Path(self.tmp.name) / 'static'
         static.mkdir()
         (static / 'index.html').write_text('<!doctype html><title>test</title>')
-        roles = r.RoleManager(r.hash_password('pw', iterations=1000))
+        self.static = static
         self.state_path = Path(self.tmp.name) / 'gui_state.json'
-        self.server = GuiServer(lambda get_tuning: SampleOnce(lambda: self.server.clients), roles,
-                                self.state_path, static_dir=static)
-        self.server.BAD_PASSWORD_DELAY_S = 0
-        self.client = TestClient(TestServer(self.server.app()))
-        await self.client.start_server()
-        self.addAsyncCleanup(self.client.close)
+        self.server = None
+        self.server, self.client = await self.start(
+            lambda get_tuning: SampleOnce(lambda: self.server is not None and self.server.clients))
+
+    async def start(self, factory, hub=None):
+        roles = r.RoleManager(r.hash_password('pw', iterations=1000))
+        server = GuiServer(factory, roles, self.state_path, static_dir=self.static, hub=hub)
+        server.BAD_PASSWORD_DELAY_S = 0
+        client = TestClient(TestServer(server.app()))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        return server, client
+
+    async def next_msg(self, ws):
+        """A dict for a text frame, bytes for a binary frame."""
+        msg = await ws.receive()
+        if msg.type == WSMsgType.TEXT:
+            return json.loads(msg.data)
+        if msg.type == WSMsgType.BINARY:
+            return msg.data
+        self.fail('socket closed: {}'.format(msg))
 
     async def recv(self, ws, predicate, limit=300):
         async def receive():
             for _ in range(limit):
-                msg = await ws.receive_json()
-                if predicate(msg):
+                msg = await self.next_msg(ws)
+                if isinstance(msg, dict) and predicate(msg):
                     return msg
             self.fail('expected message not received')
+        return await asyncio.wait_for(receive(), 3)
+
+    async def recv_binary(self, ws, limit=300):
+        async def receive():
+            for _ in range(limit):
+                msg = await self.next_msg(ws)
+                if isinstance(msg, bytes):
+                    return msg
+            self.fail('expected binary message not received')
         return await asyncio.wait_for(receive(), 3)
 
     def of(self, kind, **match):
         return lambda m: m['type'] == kind and all(m.get(k) == v for k, v in match.items())
 
-    async def connect(self):
-        ws = await self.client.ws_connect('/ws')
+    async def connect(self, client=None):
+        ws = await (client or self.client).ws_connect('/ws')
         hello = await self.recv(ws, self.of('hello'))
         return ws, hello
 
@@ -89,23 +138,118 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hello['role']['role'], 'viewer')
         self.assertTrue(hello['role']['can_admin'])
         self.assertAlmostEqual(hello['tuning']['derived']['lo_hz'], 441.38e6, places=0)
+        self.assertEqual(len(hello['flight_schema']['fields']), 20)
+        self.assertEqual(hello['channels'], list(fanout.CHANNELS))
+        self.assertEqual((hello['budget'], hello['role']['budget'], hello['sites']), ('viewer', 'viewer', []))
+        await ws.send_json(dict(type='login', password='pw', label='gs'))
+        role = await self.recv(ws, self.of('role', role='admin'))
+        self.assertEqual(role['budget'], 'operator')
+        await ws.send_json(dict(type='logout'))
+        role = await self.recv(ws, self.of('role', role='viewer'))
+        self.assertEqual(role['budget'], 'viewer')
         await ws.close()
 
     async def test_records_and_spectrum_fan_out(self):
         ws, _ = await self.connect()
-        spectrum = await self.recv(ws, self.of('spectrum'))
-        self.assertEqual(len(spectrum['db10']), 256)
+        await ws.send_json(dict(type='subscribe', channels=['spectrum.A', 'iq.A']))
+        subscribed = await self.recv(ws, self.of('subscribed'))
+        self.assertEqual(subscribed['channels'], ['spectrum.A', 'iq.A'])
+        spectrum = await self.recv_binary(ws)
+        self.assertEqual(spectrum[:3], b'\x01\x01\x00')
+        self.assertEqual(len(spectrum), gui_wire.SPECTRUM_HEADER.size + 2 * 256)
         record = await self.recv(ws, lambda m: m['type'] == 'record' and m['record']['type'] == 'IQ_SNAPSHOT')
         self.assertIn('IQ_SNAPSHOT', record['text'])
         await ws.close()
 
+    async def test_subscribe_gets_subscribed_then_binary_spectrum(self):
+        ws, _ = await self.connect()
+        await ws.send_json(dict(type='subscribe', channels=['spectrum.A', 'link']))
+        seen = []
+        async def until_binary():
+            while not (seen and isinstance(seen[-1], bytes)):
+                seen.append(await self.next_msg(ws))
+        await asyncio.wait_for(until_binary(), 3)
+        kinds = [m['type'] for m in seen if isinstance(m, dict)]
+        self.assertIn('subscribed', kinds)
+        self.assertNotIn('record', kinds[:kinds.index('subscribed')])
+        self.assertEqual(seen[-1][:2], b'\x01\x01')
+        await ws.close()
+
+    async def test_unsubscribed_client_gets_only_control_and_stats(self):
+        ws, _ = await self.connect()
+        seen = []
+        async def collect():
+            while True:
+                seen.append(await self.next_msg(ws))
+        task = asyncio.ensure_future(collect())
+        for _ in range(100):
+            if self.server.hub.decoder.stats['messages']:
+                break
+            await asyncio.sleep(0.02)
+        self.assertTrue(self.server.hub.decoder.stats['messages'])
+        await asyncio.sleep(0.7)   # at least one more stats period
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        self.assertFalse([m for m in seen if isinstance(m, bytes)])
+        self.assertTrue({m['type'] for m in seen} <= {'stats', 'role', 'tuning'}, {m['type'] for m in seen})
+        self.assertIn('stats', {m['type'] for m in seen})
+        await ws.close()
+
+    async def test_unknown_channel_is_rejected(self):
+        ws, _ = await self.connect()
+        await ws.send_json(dict(type='subscribe', channels=['link', 'nope']))
+        self.assertEqual((await self.recv(ws, self.of('error')))['code'], 'bad_channel')
+        await ws.send_json(dict(type='subscribe', channels='link'))
+        self.assertEqual((await self.recv(ws, self.of('error')))['code'], 'bad_channel')
+        client = next(iter(self.server.clients.values()))
+        self.assertEqual(client.outbox.subscribed, frozenset())
+        await ws.close()
+
     async def test_late_viewer_gets_latest_status_at_once(self):
         first, _ = await self.connect()
+        await first.send_json(dict(type='subscribe', channels=['link']))
         await self.recv(first, lambda m: m['type'] == 'record' and m['record']['type'] == 'LINK_STATS')
         late, _ = await self.connect()
+        await late.send_json(dict(type='subscribe', channels=['link']))
         status = await self.recv(late, lambda m: m['type'] == 'record' and m['record']['type'] == 'STATUS', limit=5)
         self.assertEqual(status['record']['fields']['version'], 2)
         await first.close()
+        await late.close()
+
+    async def test_late_join_flight_history_then_live_rows(self):
+        now = [1760000000.0]
+        hub = Hub(wall=lambda: now[0])
+        server, client = await self.start(lambda get_tuning: Idle(), hub=hub)
+        frames = rom_flight_frames()
+        early, _ = await self.connect(client)
+        await early.send_json(dict(type='subscribe', channels=['flight']))
+        await self.recv(early, self.of('history', channel='flight'))
+        for n in range(40):
+            now[0] += 0.05
+            hub.feed(best_telem(frames[n], n))
+        late, _ = await self.connect(client)
+        await late.send_json(dict(type='subscribe', channels=['flight']))
+        await self.recv(late, self.of('subscribed'))
+        marker = await self.recv(late, self.of('history', channel='flight'))
+        self.assertEqual(marker['count'], 40)
+        times = []
+        while len(times) < 40:
+            times += flight_rows(await self.recv_binary(late))
+        self.assertEqual(len(times), 40)
+        self.assertTrue(all(b > a for a, b in zip(times, times[1:])))
+        for n in range(40, 50):
+            now[0] += 0.05
+            hub.feed(best_telem(frames[n], n))
+        live = []
+        while len(live) < 10:
+            live += flight_rows(await self.recv_binary(late))
+        self.assertEqual(len(set(times + live)), 50)
+        self.assertTrue(all(b > a for a, b in zip(times + live, (times + live)[1:])))
+        early_rows = []
+        while len(early_rows) < 50:
+            early_rows += flight_rows(await self.recv_binary(early))
+        self.assertEqual(early_rows, times + live)
+        await early.close()
         await late.close()
 
     async def test_viewer_cannot_tune_and_admin_change_is_broadcast(self):

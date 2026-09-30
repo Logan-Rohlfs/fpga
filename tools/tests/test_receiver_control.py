@@ -133,8 +133,12 @@ class TuningControllerTests(unittest.TestCase):
                 nco_ftw=words[1], enable=words[2], status=0), seq)
         def spectrum(seq):
             return message(p.SPECTRUM, dict(channel=0, power=[12,13], bin_mhz=1000000), seq)
+        def lo(out):   # SPECTRUM_ROW flags bit1 marks an rf_reference; rf_lo_hz is field 12
+            from sdr_cli import gui_wire
+            head = gui_wire.SPECTRUM_HEADER.unpack_from(out.data)
+            return head[12] if head[3] & gui_wire.FLAG_RF_REFERENCE else None
         first = hub.feed(spectrum(0), source)[0]
-        self.assertIsNone(first['rf_reference'])
+        self.assertIsNone(lo(first))
         source.control.tick()
         self.assertEqual(source.session.sent, [])
         hub.feed(config(255, tuning_words(self.state), 1), source)
@@ -142,9 +146,9 @@ class TuningControllerTests(unittest.TestCase):
         self.state = with_lo(self.state, 441_360_000)
         source.control.tick()
         rows = hub.feed(spectrum(2)+config(0, tuning_words(self.state), 3)+spectrum(4), source)
-        self.assertIsNone(rows[0]['rf_reference'])
-        self.assertEqual(rows[2]['rf_reference']['lo_hz'], 441_360_000)
-        self.assertIsNone(rows[0]['rf_reference'])
+        self.assertEqual([r.channel for r in rows], ['spectrum.A', 'link', 'spectrum.A'])
+        self.assertIsNone(lo(rows[0]))
+        self.assertEqual(lo(rows[2]), 441_360_000)
 
 
     def test_lost_ack_report_restores_reference_without_command_success(self):

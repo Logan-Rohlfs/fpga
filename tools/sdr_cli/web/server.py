@@ -8,20 +8,23 @@ import json
 import logging
 from pathlib import Path
 import socket
+import time
 import uuid
 import webbrowser
 
 from aiohttp import WSMsgType, web
 
-from .. import __version__, freqplan
+from .. import __version__, apex, freqplan
 from ..core import ToolError
-from ..hub import Hub
+from ..fanout import CHANNELS, Outbox
+from ..hub import Hub, dumps
 from ..protocol import PROTOCOL_VERSION
 from ..roles import ADMIN, RoleManager
 from ..sources import from_args
 
 STATIC_DIR = Path(__file__).resolve().parent / 'static'
-QUEUE_MAX = 400
+QUEUE_MAX = 400   # control messages; fanout.CONTROL_MAX enforces it
+DROPPED_PERIOD_S = 1.0
 LOCAL_ADDRESSES = ('127.0.0.1', '::1')
 BUILD_HINT = 'GUI is not built. Run: cd tools/sdr_web && npm install && npm run build'
 
@@ -30,29 +33,45 @@ def error(code, text):
     return dict(type='error', code=code, text=text)
 
 
+def budget(role):
+    """Wire role -> rate budget name sent to clients ('admin' uses the operator budget)."""
+    return 'operator' if role == ADMIN else 'viewer'
+
+
 class Client:
     def __init__(self, ws, local):
         self.id = uuid.uuid4().hex
         self.ws = ws
         self.local = local
-        self.queue = asyncio.Queue(maxsize=QUEUE_MAX)
+        self.outbox = Outbox('viewer')
+        self.ready = asyncio.Event()
+        self.outbox.on_ready = self.ready.set
+        self.closing = False
+        self.dropped = 0
+        self.dropped_sent = None
 
     def put(self, msg):
-        if getattr(self, 'overflowed', False):
+        """Queue an ordered control message (a dict, or a str already encoded)."""
+        self.put_encoded(msg if isinstance(msg, str) else dumps(msg))
+
+    def put_encoded(self, text):
+        if self.closing:
             return
-        if self.queue.full():
+        self.outbox.control(text)
+        if self.outbox.overflowed:
             # A lost role/tuning message is unsafe. Reconnect for an authoritative snapshot.
-            self.overflowed = True
+            self.closing = True
             asyncio.ensure_future(self.ws.close(code=1013, message=b'Slow viewer: reconnect for current state'))
-            return
-        self.queue.put_nowait(msg)
+
+    def set_role(self, role):
+        self.outbox.set_role(ADMIN if role == ADMIN else 'viewer')
 
 
 class GuiServer:
     STATS_PERIOD_S = 0.5
     BAD_PASSWORD_DELAY_S = 1.0
 
-    def __init__(self, source_factory, roles, state_path, static_dir=STATIC_DIR, hub=None):
+    def __init__(self, source_factory, roles, state_path, static_dir=STATIC_DIR, hub=None, clock=time.monotonic):
         self.source_factory = source_factory
         self.roles = roles
         self.state_path = Path(state_path)
@@ -60,11 +79,13 @@ class GuiServer:
         self.tuning = freqplan.load_state(self.state_path)
         self.dirty = False
         self.hub = hub or Hub()
+        self.clock = clock
         self.clients = {}
         self.source_task = None
         self.tasks = []
         self.source_lock = asyncio.Lock()
-        self.hub.subscribe(self.broadcast)
+        self.hub.client_counts = self.client_counts
+        self.hub.subscribe(self.offer)
 
     # ---- lifecycle
     def app(self):
@@ -105,8 +126,7 @@ class GuiServer:
             try:
                 source = self.source_factory(lambda: self.tuning)
             except ToolError as exc:
-                self.hub.source = dict(kind='none', state='down', detail=str(exc), responds_to_tuning=False)
-                self.broadcast(self.hub.stats_message())
+                self.hub.set_source(None, 'down', str(exc))
                 return
             self.source_task = asyncio.ensure_future(self.hub.run(source))
 
@@ -116,7 +136,8 @@ class GuiServer:
             if self.roles.expire():
                 self.broadcast_roles('released')
             self.save_if_dirty()
-            self.broadcast(self.hub.stats_message())
+            self.hub.tick(self.hub.wall())
+            self.hub.publish(self.hub.stats_outgoing())
 
     def save_if_dirty(self):
         """Tuning saves are batched so drags don't write the disk (a Pi SD card) 30 times a second."""
@@ -125,43 +146,94 @@ class GuiServer:
             self.dirty = False
 
     # ---- outgoing
-    def broadcast(self, msg):
+    def offer(self, out):
+        """Hub subscriber: the same encoded Outgoing goes to every client's outbox."""
         for client in self.clients.values():
-            client.put(msg)
+            client.outbox.offer(out)
+
+    def broadcast(self, msg):
+        """Ordered control message to every client, encoded once."""
+        text = dumps(msg)
+        for client in list(self.clients.values()):
+            client.put_encoded(text)
+
+    def client_counts(self):
+        operators = sum(1 for c in self.clients.values() if self.roles.role(c.id) == ADMIN)
+        return dict(operators=operators, viewers=len(self.clients) - operators)
 
     def tuning_message(self):
         return dict(type='tuning', state=freqplan.to_dict(self.tuning), derived=freqplan.derive(self.tuning))
 
+    def send_tuning(self, clients):
+        """Tuning is a latest-wins control slot: a drag never floods the control queue."""
+        text = dumps(self.tuning_message())
+        for client in clients:
+            if not client.closing:
+                client.outbox.control_slot('tuning', text)
+
     def role_message(self, client, reason, **extra):
-        return dict(type='role', role=self.roles.role(client.id), admin=self.roles.admin_info(),
+        """Every role message also moves the client's outbox to the matching rate budget."""
+        role = self.roles.role(client.id)
+        client.set_role(role)
+        return dict(type='role', role=role, budget=budget(role), admin=self.roles.admin_info(),
                     can_admin=self.roles.can_login(client.id), reason=reason, **extra)
 
     def broadcast_roles(self, reason, skip=()):
-        for client in self.clients.values():
+        for client in list(self.clients.values()):
             if client.id not in skip:
                 client.put(self.role_message(client, reason))
 
+    def _service(self, client):
+        """Resync snapshots and the 1 Hz dropped notice. Returns seconds until a notice is due."""
+        box = client.outbox
+        resync = box.take_resync()
+        for channel in [c for c in CHANNELS if c in resync]:
+            if channel in box.subscribed:
+                box.put_snapshot(channel, self.hub.snapshot(channel))
+        client.dropped += box.take_dropped().get('frames', 0)
+        if not client.dropped:
+            return None
+        now = self.clock()
+        if client.dropped_sent is not None and now < client.dropped_sent + DROPPED_PERIOD_S:
+            return client.dropped_sent + DROPPED_PERIOD_S - now
+        client.put(dict(type='dropped', channel='frames', count=client.dropped))
+        client.dropped, client.dropped_sent = 0, now
+        return None
+
     async def _send_loop(self, client):
+        ws = client.ws
         try:
             while True:
-                msg = await client.queue.get()
-                await client.ws.send_str(json.dumps(msg, separators=(',', ':')))
+                notice = self._service(client)
+                data, wait = client.outbox.next()
+                if data is None:
+                    if notice is not None:
+                        wait = notice if wait is None else min(wait, notice)
+                    client.ready.clear()
+                    try:
+                        await asyncio.wait_for(client.ready.wait(), wait)
+                    except asyncio.TimeoutError:
+                        pass
+                elif isinstance(data, bytes):
+                    await ws.send_bytes(data)
+                else:
+                    await ws.send_str(data)
         except (ConnectionResetError, RuntimeError):
             return
 
     # ---- incoming
     async def websocket(self, request):
-        ws = web.WebSocketResponse(heartbeat=20)
+        ws = web.WebSocketResponse(heartbeat=20, compress=True)
         await ws.prepare(request)
         client = Client(ws, request.remote in LOCAL_ADDRESSES)
         self.clients[client.id] = client
         self.roles.connect(client.id, client.local)
+        role = self.role_message(client, 'connect')
         client.put(dict(type='hello', server_version=__version__, protocol_version=PROTOCOL_VERSION,
-                        source=dict(self.hub.source), role=self.role_message(client, 'connect'),
-                        tuning=self.tuning_message()))
-        client.put(self.hub.stats_message())
-        for msg in self.hub.snapshot():
-            client.put(msg)
+                        source=dict(self.hub.source), role=role, budget=role['budget'],
+                        tuning=self.tuning_message(), flight_schema=apex.flight_schema(),
+                        channels=list(CHANNELS), sites=[]))
+        client.outbox.offer(self.hub.stats_outgoing())
         sender = asyncio.ensure_future(self._send_loop(client))
         try:
             async for msg in ws:
@@ -191,6 +263,8 @@ class GuiServer:
         is_admin = self.roles.role(client.id) == ADMIN
         if kind == 'ping':
             client.put(dict(type='pong'))
+        elif kind == 'subscribe':
+            self._subscribe(client, data.get('channels'))
         elif kind == 'login':
             await self._login(client, data)
         elif kind == 'resume':
@@ -217,7 +291,7 @@ class GuiServer:
                 changes['nco_hz'] = 100_000
             self.tuning = freqplan.update(self.tuning, changes)
             self.dirty = True
-            self.broadcast(self.tuning_message())
+            self.send_tuning(self.clients.values())
         elif kind == 'tune':
             if not is_admin:
                 client.put(error('not_admin', 'Only the Admin can change tuning.'))
@@ -229,11 +303,11 @@ class GuiServer:
                     tuning_words(new)
             except ValueError as exc:
                 client.put(error('out_of_range', str(exc)))
-                client.put(self.tuning_message())
+                self.send_tuning([client])
                 return
             if new != self.tuning:
                 self.tuning, self.dirty = new, True
-            self.broadcast(self.tuning_message())
+            self.send_tuning(self.clients.values())
         elif kind == 'reconnect_source':
             if not is_admin:
                 client.put(error('not_admin', 'Only the Admin can reconnect the source.'))
@@ -241,6 +315,20 @@ class GuiServer:
             await self.start_source()
         else:
             client.put(error('unknown_type', 'Unknown message type: {}'.format(kind)))
+
+    def _subscribe(self, client, channels):
+        if not isinstance(channels, list) or not all(isinstance(c, str) for c in channels):
+            client.put(error('bad_channel', 'channels must be a list of channel names.'))
+            return
+        try:
+            added = client.outbox.subscribe(channels)
+        except ValueError as exc:
+            client.put(error('bad_channel', str(exc)))
+            return
+        client.put(dict(type='subscribed', channels=[c for c in CHANNELS if c in client.outbox.subscribed]))
+        # Same synchronous step as the subscription: no live row can land before its snapshot.
+        for channel in [c for c in CHANNELS if c in added]:
+            client.outbox.put_snapshot(channel, self.hub.snapshot(channel))
 
     async def _login(self, client, data):
         result = self.roles.login(client.id, str(data.get('password') or ''), data.get('label'),

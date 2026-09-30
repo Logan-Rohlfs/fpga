@@ -94,9 +94,7 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: Tasks 1-5 complete, next Task 6 (Tasks 6 and 7 are an atomic pair).** Task 5 added `tools/sdr_cli/fanout.py` (per-client outbox, channels, role rate budgets; not yet wired into the server). Task 4 added `tools/sdr_cli/history.py` (capped history and per-channel snapshots; not yet wired into the hub). Task 3 added `tools/sdr_cli/events.py` (server-side
-derived flight and link events; not yet wired into the hub). Task 2 added `tools/sdr_cli/gui_wire.py`
-(binary spectrum/flight encoders) and `tools/sdr_web/src/lib/wire.golden.json` for the TS decoder.
+**Current task: Task 6 complete; Task 7 in progress (atomic pair: the frontend cannot decode binary spectrum until Task 7 lands).** Tasks 1-6 wired `apex`, `gui_wire`, `events`, `history` and `fanout` into `hub.py` and `web/server.py` (encode-once outgoing, `subscribe`, history snapshots, binary spectrum/flight frames).
 
 **Before Task 1:** the pre-flight conflict scan is done. See
 [gui-cards-preflight](superpowers/plans/2026-09-30-gui-cards-preflight.md):

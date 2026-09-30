@@ -203,3 +203,59 @@ class OutboxTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+VIEWER_BYTES_10S = 100000   # spec 2.4: <= 10 kB/s per viewer before compression
+
+
+def viewer_load_bytes(seconds=10):
+    """Bytes a viewer on the Flight preset channels receives from a replay at source rates.
+
+    BEST FLIGHT 20 Hz, CHAN_METRICS 2 x 10 Hz, SPECTRUM (64 bins) 2 x 10 Hz, LINK_STATS
+    and STATUS 1 Hz, drained every 10 ms. Snapshots and stats are not counted.
+    """
+    from link_samples import rom_flight_frames
+    from sdr_cli import protocol as p
+    from sdr_cli.hub import Hub
+
+    def enc(kind, fields, seq):
+        return p.encode_message(kind, p.build_payload(kind, fields), seq=seq)
+
+    now = [1760000000.0]
+    hub = Hub(clock=lambda: now[0], wall=lambda: now[0])
+    box = Outbox('viewer', clock=lambda: now[0])
+    box.subscribe(['flight', 'events', 'link', 'spectrum.A', 'spectrum.B'])
+    hub.subscribe(box.offer)
+    frames = rom_flight_frames()
+    total, seq = 0, 0
+    for step in range(seconds * 100):
+        now[0] = 1760000000.0 + step * 0.01
+        data = b''
+        if step % 5 == 0:
+            data += enc(p.BEST_TELEM, dict(t_us=step * 10000, source=0, raw=frames[(step // 5) % len(frames)]), seq)
+        if step % 10 == 0:
+            for ch in (0, 1):
+                data += enc(p.CHAN_METRICS, dict(channel=ch, rssi_dbm_x10=-716, noise_dbm_x10=-1000,
+                                                 snr_db_x10=284, freq_offset_hz=10300, sync_hits=step,
+                                                 crc_good=step, crc_bad=0), seq)
+                data += enc(p.SPECTRUM, dict(channel=ch, averages=1, row=step // 10, t_us=step * 10000,
+                                             center_hz=100000, bin_mhz=1562500, db_ref_x10=-1200,
+                                             db_step_x100=50, power=[(k * 7 + step) % 40 for k in range(64)]), seq)
+        if step % 100 == 0:
+            data += enc(p.LINK_STATS, dict(from_a=step, from_b=step, both_ok=step, neither_ok=0, best_sent=step), seq)
+            data += enc(p.STATUS, dict(version=2, channels=3, uptime_ms=step * 10, build_id=0x1234, dropped=0), seq)
+        seq += 1
+        if data:
+            hub.feed(data)
+        while True:
+            item, _ = box.next()
+            if item is None:
+                break
+            total += len(item) if isinstance(item, bytes) else len(item.encode('utf-8'))
+    return total
+
+
+class ViewerBudgetTest(unittest.TestCase):
+    def test_flight_preset_viewer_load_within_budget(self):
+        total = viewer_load_bytes()
+        self.assertLessEqual(total, VIEWER_BYTES_10S, 'viewer load {} B in 10 s'.format(total))

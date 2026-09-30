@@ -24,8 +24,11 @@ _PRE_LAUNCH = ('IDLE', 'ARMED')
 _IN_FLIGHT = ('BOOST', 'COAST', 'DESCENT', 'LANDED')
 
 
-def _letter(index):
-    return 'AB'[index] if index in (0, 1) else None
+def _letter(channel):
+    """Channel letter from a decoded record ('A'/'B', as protocol.py produces) or an index 0/1."""
+    if channel in ('A', 'B'):
+        return channel
+    return 'AB'[channel] if channel in (0, 1) and not isinstance(channel, bool) else None
 
 
 class EventDeriver:
