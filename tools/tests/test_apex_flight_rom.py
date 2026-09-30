@@ -14,22 +14,13 @@ import unittest
 
 from sdr_cli import apex
 from sdr_cli.protocol import crc16_ccitt
+from link_samples import ROM_MEM, rom_frames
 
 REPO = Path(__file__).resolve().parents[2]
-MEM = REPO / 'projects/sdr/rom/apex_flight.mem'
+MEM = ROM_MEM
 RTL = REPO / 'projects/sdr/rtl/receiver_link_sources.sv'
 CSV = (REPO.parent / 'apex/sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800'
        / 'IREC-2026-SRAD-TELEMETRY.csv')
-
-
-def rom_frames():
-    data = bytearray()
-    for line in MEM.read_text().splitlines():
-        text = line.split('//', 1)[0].strip()
-        if text:
-            data.append(int(text, 16))
-    assert len(data) % 42 == 0
-    return [bytes(data[i:i + 42]) for i in range(0, len(data), 42)]
 
 
 def decode(frame):
