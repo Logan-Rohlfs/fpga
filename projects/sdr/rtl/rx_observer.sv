@@ -4,6 +4,10 @@
 // small amplitudes. Spectrum clips to [-120, 7.5] dBFS in 0.5 dB steps.
 // Noise estimates integrate the mean outer-bin power over all 64 bins. Filtering
 // and signal energy in those bins bias this estimate; this is not calibrated NF.
+// Captured I/Q and spectrum bytes live in small inferred RAMs and are read out
+// through registered byte ports (one-clock latency). A published result stays
+// readable and immutable from valid until ready releases it; the reader asserts
+// ready only after it has finished reading. Reset makes both ports read zero.
 module rx_observer #(
     parameter integer SAMPLE_RATE_HZ = 100000,
     parameter integer FULL_SCALE = 16384,
@@ -15,8 +19,10 @@ module rx_observer #(
     input wire [31:0] t_us,
     output reg [31:0] capture_t_us,
     output reg valid, input wire ready,
-    output reg [511:0] spectrum,
-    output reg [2047:0] iq,
+    input wire [5:0] spectrum_addr, // spectrum byte k is bin k-32 (index 32 = DC)
+    output wire [7:0] spectrum_data,
+    input wire [7:0] iq_addr,       // byte 4n+{0,1,2,3} = sample n {I lo,I hi,Q lo,Q hi}
+    output wire [7:0] iq_data,
     output reg signed [15:0] power_dbfs_x10, noise_dbfs_x10, snr_db_x10,
     output reg [31:0] dropped_count,
     output wire busy
@@ -149,9 +155,16 @@ module rx_observer #(
                LOG_CALC=10,LOG_SAVE=11,BIN_QUANT=12,SAVE_BIN=13,
                FINISH=14,DIVIDE=15,FINISH_PUBLISH=16;
     reg [4:0] state;
-    reg signed [15:0] memory_i[0:63],memory_q[0:63];
-    reg [5:0] capture_index,bin_index,sample_index;
-    reg signed [15:0] sample_i,sample_q,coefficient_cos,coefficient_sin;
+    // Inferred RAMs (no reset): {Q,I} per sample, one byte per spectrum bin.
+    reg [31:0] iq_memory[0:63];
+    reg [7:0] spectrum_memory[0:63];
+    reg [31:0] sample_word,iq_word;
+    reg [7:0] spectrum_word;
+    reg [1:0] iq_lane;
+    reg has_data;
+    reg [5:0] capture_index,bin_index,sample_index,phase_index;
+    wire signed [15:0] sample_i=sample_word[15:0],sample_q=sample_word[31:16];
+    reg signed [15:0] coefficient_cos,coefficient_sin;
     reg signed [31:0] product_ic,product_qs,product_qc,product_is;
     reg signed [39:0] acc_real,acc_imag;
     wire signed [32:0] term_real={product_ic[31],product_ic}+{product_qs[31],product_qs};
@@ -177,7 +190,6 @@ module rx_observer #(
     reg [39:0] signal_sum;
     wire signed [31:0] input_square_i=iq_i*iq_i;
     wire signed [31:0] input_square_q=iq_q*iq_q;
-    wire [5:0] phase_index=bin_index*sample_index;
     wire [5:0] shifted_bin=bin_index+6'd32;
     wire outer_bin=bin_index>=EDGE_BIN && bin_index<=64-EDGE_BIN;
     wire [47:0] normalized_log=log_value>>(log_exponent>=4 ? log_exponent-6'd4 : 6'd0);
@@ -185,6 +197,20 @@ module rx_observer #(
     wire [2:0] exponent_tenth=log_exponent>=40 ? 3'd4 : log_exponent>=30 ? 3'd3 :
         log_exponent>=20 ? 3'd2 : log_exponent>=10 ? 3'd1 : 3'd0;
     wire [11:0] absolute_db={1'b0,exponent_db}+{9'd0,exponent_tenth}+{7'd0,fraction_db(log_mantissa[3:0])};
+    // Port A: capture writes, DFT reads. Port B: reader only.
+    wire [5:0] port_a_address=state==CAPTURE ? capture_index : sample_index;
+    always @(posedge clk) begin
+        if(state==CAPTURE && iq_valid)iq_memory[capture_index]<={iq_q,iq_i};
+        sample_word<=iq_memory[port_a_address];
+        iq_word<=iq_memory[iq_addr[7:2]];
+        iq_lane<=iq_addr[1:0];
+        if(state==SAVE_BIN)spectrum_memory[shifted_bin]<=quant_byte;
+        spectrum_word<=spectrum_memory[spectrum_addr];
+    end
+    assign spectrum_data=has_data ? spectrum_word : 8'd0;
+    assign iq_data=!has_data ? 8'd0 : iq_word[8*iq_lane +: 8];
+    // floor(n/5) == (n*1639)>>13 exactly for 0 <= n <= 1275.
+    wire [21:0] quant_product=quant_numerator*14'd1639;
     assign busy=state!=IDLE || valid;
     // synthesis translate_off
     initial if(FULL_SCALE<1 || FULL_SCALE>32768 || SAMPLE_RATE_HZ<1 || EDGE_BIN<1 || EDGE_BIN>32)
@@ -192,15 +218,15 @@ module rx_observer #(
     // synthesis translate_on
     always @(posedge clk) begin
         if(rst) begin
-            state<=IDLE;valid<=0;spectrum<=0;iq<=0;capture_t_us<=0;
+            state<=IDLE;valid<=0;has_data<=0;capture_t_us<=0;
             power_dbfs_x10<=-1200;noise_dbfs_x10<=-1200;snr_db_x10<=0;
-            dropped_count<=0;capture_index<=0;bin_index<=0;sample_index<=0;
+            dropped_count<=0;capture_index<=0;bin_index<=0;sample_index<=0;phase_index<=0;
             acc_real<=0;acc_imag<=0;capture_power_valid<=0;capture_power<=0;
             signal_sum<=0;noise_sum<=0;noise_power<=0;log_value<=0;
             log_exponent<=0;log_mantissa<=0;log_target<=0;log_db<=0;
             signal_db<=0;noise_db<=0;quant_numerator<=0;quant_byte<=0;
             div_dividend<=0;div_quotient<=0;div_remainder<=0;div_count<=0;
-            sample_i<=0;sample_q<=0;coefficient_cos<=0;coefficient_sin<=0;
+            coefficient_cos<=0;coefficient_sin<=0;
             product_ic<=0;product_qs<=0;product_qc<=0;product_is<=0;
             normalized_real<=0;normalized_imag<=0;square_real<=0;square_imag<=0;
         end else begin
@@ -215,17 +241,15 @@ module rx_observer #(
                     state<=CAPTURE;capture_index<=0;signal_sum<=0;noise_sum<=0;
                 end
                 CAPTURE:if(iq_valid)begin
-                    memory_i[capture_index]<=iq_i;memory_q[capture_index]<=iq_q;
-                    // Outputs are built in place while valid is low. They remain
-                    // immutable from valid assertion until ready accepts them.
-                    iq[capture_index*32 +: 32]<={iq_q,iq_i};
+                    // The RAMs are only written while valid is low, so a
+                    // published result is immutable until ready releases it.
                     if(capture_index==0)capture_t_us<=t_us;
                     if(capture_index==63)begin
-                        bin_index<=0;sample_index<=0;acc_real<=0;acc_imag<=0;state<=LOAD;
+                        bin_index<=0;sample_index<=0;phase_index<=0;acc_real<=0;acc_imag<=0;state<=LOAD;
                     end else capture_index<=capture_index+1'b1;
                 end
                 LOAD:begin
-                    sample_i<=memory_i[sample_index];sample_q<=memory_q[sample_index];
+                    // sample_word is read from port A at sample_index this edge.
                     coefficient_cos<=sine(phase_index+6'd16);coefficient_sin<=sine(phase_index);state<=MULTIPLY;
                 end
                 MULTIPLY:begin
@@ -236,7 +260,10 @@ module rx_observer #(
                     acc_real<=acc_real+{{7{term_real[32]}},term_real};
                     acc_imag<=acc_imag+{{7{term_imag[32]}},term_imag};
                     if(sample_index==63)state<=NORMALIZE;
-                    else begin sample_index<=sample_index+1'b1;state<=LOAD;end
+                    else begin
+                        // phase = bin*sample mod 64, accumulated instead of multiplied.
+                        sample_index<=sample_index+1'b1;phase_index<=phase_index+bin_index;state<=LOAD;
+                    end
                 end
                 NORMALIZE:begin
                     normalized_real<=acc_real>>>20;normalized_imag<=acc_imag>>>20;state<=SQUARE;
@@ -274,15 +301,14 @@ module rx_observer #(
                     end
                 end
                 BIN_QUANT:begin
-                    // Unsigned bounded division: eleven bits, not a signed
-                    // 32-bit general divider on the spectrum write path.
-                    quant_byte<=quant_numerator/11'd5;state<=SAVE_BIN;
+                    // Bounded divide-by-five as an exact reciprocal multiply.
+                    quant_byte<=quant_product[20:13];state<=SAVE_BIN;
                 end
                 SAVE_BIN:begin
-                    spectrum[shifted_bin*8 +: 8]<=quant_byte;
+                    // RAM write of quant_byte at shifted_bin happens above.
                     if(bin_index==63)state<=FINISH;
                     else begin
-                        bin_index<=bin_index+1'b1;sample_index<=0;
+                        bin_index<=bin_index+1'b1;sample_index<=0;phase_index<=0;
                         acc_real<=0;acc_imag<=0;state<=LOAD;
                     end
                 end
@@ -304,7 +330,7 @@ module rx_observer #(
                 FINISH_PUBLISH:begin
                     power_dbfs_x10<=signal_db;noise_dbfs_x10<=noise_db;
                     snr_db_x10<=signal_db>noise_db ? signal_db-noise_db : 16'sd0;
-                    valid<=1;state<=IDLE;
+                    valid<=1;has_data<=1;state<=IDLE;
                 end
                 default:state<=IDLE;
             endcase

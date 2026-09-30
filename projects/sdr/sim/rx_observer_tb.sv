@@ -8,14 +8,27 @@ module rx_observer_tb;
     wire [31:0] capture_t_us;
     reg [31:0] expected_t_us;
     always @(posedge clk)t_us<=t_us+1;
-    wire [511:0] spectrum;
-    wire [2047:0] iq;
+    // Reconstructed from the observer's registered byte read ports.
+    reg [511:0] spectrum;
+    reg [2047:0] iq;
+    reg [5:0] spectrum_addr=0;
+    reg [7:0] iq_addr=0;
+    wire [7:0] spectrum_data,iq_data;
     wire signed [15:0] power_dbfs_x10,noise_dbfs_x10,snr_db_x10;
     wire [31:0] dropped_count;
     rx_observer dut(.*);
     reg [2047:0] expected_iq;
     reg [511:0] saved_spectrum;
     integer n,k,peak,peak_value,value;
+    task read_results;
+      begin
+        for(k=0;k<256;k=k+1) begin
+          spectrum_addr=k[5:0];iq_addr=k[7:0];@(negedge clk);
+          if(k<64) spectrum[8*k +: 8]=spectrum_data;
+          iq[8*k +: 8]=iq_data;
+        end
+      end
+    endtask
     task capture(input integer tone,input integer amplitude);
       begin
         @(negedge clk); trigger=1;
@@ -28,7 +41,7 @@ module rx_observer_tb;
           iq_valid=1;@(negedge clk);
         end
         iq_valid=0;
-        wait(valid);@(negedge clk);
+        wait(valid);@(negedge clk);read_results();
         if(capture_t_us!==expected_t_us)$fatal(1,"capture timestamp not first sample");
         if(iq!==expected_iq) $fatal(1,"IQ snapshot changed samples");
       end
@@ -59,7 +72,7 @@ module rx_observer_tb;
       saved_spectrum=spectrum;
       // Results survive arbitrary input and triggers while blocked.
       trigger=1;repeat(3) @(negedge clk);trigger=0;
-      iq_valid=1;iq_i=123;repeat(5) @(negedge clk);iq_valid=0;
+      iq_valid=1;iq_i=123;repeat(5) @(negedge clk);iq_valid=0;read_results();
       if(!valid || spectrum!==saved_spectrum || iq!==expected_iq || dropped_count!=3)
         $fatal(1,"stalled output or busy-trigger accounting failed");
       consume();
@@ -72,7 +85,7 @@ module rx_observer_tb;
       if(noise_dbfs_x10<power_dbfs_x10+45 || snr_db_x10!=0)
         $fatal(1,"outer-bin integrated noise estimate incorrect");
       // Reset clears held data and accounting.
-      rst=1;repeat(2) @(negedge clk);rst=0;
+      rst=1;repeat(2) @(negedge clk);rst=0;read_results();
       if(valid || busy || dropped_count || spectrum || iq) $fatal(1,"reset failed");
       $display("PASS rx_observer: positive/negative tone bins, dBFS scaling, zero floor, noise estimate, IQ capture and output stalls");$finish;
     end

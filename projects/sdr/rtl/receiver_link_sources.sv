@@ -178,13 +178,20 @@ module receiver_link_sources #(
         assign data[PF]=frame_payload[8*idx[PF]+:8];
         wire observation_valid;
         wire [31:0] capture_t_us;
-        wire [511:0] spectrum;
-        wire [2047:0] iq_snapshot;
+        wire [7:0] spectrum_byte,iq_byte;
         wire signed [15:0] power_dbfs,noise_dbfs,snr_db;
-        wire observation_ready=!pause && !req[PS] && !req[PI];
+        // The observer's RAMs are the held transport record: it stays blocked
+        // (valid high) until both SPECTRUM and IQ have been fully streamed.
+        reg observation_streaming;
+        wire observation_start=observation_valid && !observation_streaming && !pause && !req[PS] && !req[PI];
+        wire observation_release=observation_streaming && !req[PS] && !req[PI];
+        wire [15:0] spectrum_index=idx[PS]-16'd22;
+        wire [15:0] iq_index=idx[PI]-16'd12;
         rx_observer #(.SAMPLE_RATE_HZ(IQ_RATE),.FULL_SCALE(8192)) observer(
             .clk(clk),.rst(datapath_rst),.iq_valid(iq_valid),.iq_i(iq_i),.iq_q(iq_q),.trigger(due_spectrum),
-            .t_us(t_us),.capture_t_us(capture_t_us),.valid(observation_valid),.ready(observation_ready),.spectrum(spectrum),.iq(iq_snapshot),
+            .t_us(t_us),.capture_t_us(capture_t_us),.valid(observation_valid),.ready(observation_release),
+            .spectrum_addr(spectrum_index[5:0]),.spectrum_data(spectrum_byte),
+            .iq_addr(iq_index[7:0]),.iq_data(iq_byte),
             .power_dbfs_x10(power_dbfs),.noise_dbfs_x10(noise_dbfs),.snr_db_x10(snr_db),
             .dropped_count(observer_dropped[g]));
         reg [191:0] metrics_payload;
@@ -193,28 +200,35 @@ module receiver_link_sources #(
         always @(posedge clk) if(accept[PM]) metrics_payload <= {bad_count[g],good_count[g],
             sync_count[g],frequency_offset,snr_db,noise_dbfs,power_dbfs,7'd0,locked,CH};
         assign data[PM]=metrics_payload[8*idx[PM]+:8];
-        reg [511:0] saved_spectrum;
-        reg [2047:0] saved_iq;
         reg [31:0] observation_t,saved_center;
         reg [15:0] row;
-        assign trigger[PS]=observation_valid && observation_ready;
-        assign trigger[PI]=observation_valid && observation_ready;
+        assign trigger[PS]=observation_start;
+        assign trigger[PI]=observation_start;
         assign len[PS]=86;assign mtype[PS]=T_SPECTRUM;
         assign len[PI]=268;assign mtype[PI]=T_IQ;
         always @(posedge clk) begin
             if(rst) row<=0;
             else if(accept[PS]) begin
-                saved_spectrum<=spectrum;saved_iq<=iq_snapshot;observation_t<=capture_t_us;
-                saved_center<=center_hz;row<=row+1'b1;
+                observation_t<=capture_t_us;saved_center<=center_hz;row<=row+1'b1;
             end
+            // req rises on the edge after accept, so release waits for both
+            // messages' final bytes rather than firing on the start edge.
+            if(datapath_rst || observation_release) observation_streaming<=0;
+            else if(observation_start) observation_streaming<=1;
         end
         wire [175:0] spectrum_header={8'd0,8'd50,-16'sd1200,32'd1562500,saved_center,
             observation_t,16'd64,row,8'd1,CH};
-        wire [15:0] spectrum_index=idx[PS]-22;
-        assign data[PS]=idx[PS]<22 ? spectrum_header[8*idx[PS]+:8] : saved_spectrum[8*spectrum_index+:8];
+        // Header bytes use one register stage; body bytes come from the observer's
+        // registered read port, within link_msg_port's LATENCY budget.
+        reg spectrum_in_header,iq_in_header;
+        reg [7:0] spectrum_header_byte,iq_header_byte;
         wire [95:0] iq_header={32'(IQ_RATE),observation_t,16'd64,8'd0,CH};
-        wire [15:0] iq_index=idx[PI]-12;
-        assign data[PI]=idx[PI]<12 ? iq_header[8*idx[PI]+:8] : saved_iq[8*iq_index+:8];
+        always @(posedge clk) begin
+            spectrum_in_header<=idx[PS]<22;spectrum_header_byte<=spectrum_header[8*idx[PS][4:0]+:8];
+            iq_in_header<=idx[PI]<12;iq_header_byte<=iq_header[8*idx[PI][3:0]+:8];
+        end
+        assign data[PS]=spectrum_in_header ? spectrum_header_byte : spectrum_byte;
+        assign data[PI]=iq_in_header ? iq_header_byte : iq_byte;
     end endgenerate
     reg [15:0] transport_dropped=0;
     wire [4:0] drop_sum[0:N];
