@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { drawConstellation, drawSparkline, fitCanvas } from '../lib/draw';
   import { signedKhz } from '../lib/format';
-  import { HISTORY, history, historyVersion, iqSnaps, metrics } from '../lib/link';
+  import { HISTORY, frozen, history, historyVersion, iqSnapsView as iqSnaps, metricsView as metrics } from '../lib/link';
   import type { Channel } from '../lib/types';
   import Panel from './Panel.svelte';
 
@@ -22,13 +22,21 @@
     const { ctx, w } = fitCanvas(iqCv);
     drawConstellation(ctx, w, $iqSnaps[channel] ?? [], colorVar);
   }
+  // Freeze stops drawing only: the rings keep filling, and a copy taken at freeze time is drawn instead.
+  let still: { rssi: readonly number[]; snr: readonly number[] } | null = null;
   function drawHistory() {
     if (!rssiCv || !snrCv) return;
+    const rssi = still?.rssi ?? history[channel].rssi.values();
+    const snr = still?.snr ?? history[channel].snr.values();
     const r = fitCanvas(rssiCv);
-    drawSparkline(r.ctx, r.w, r.h, history[channel].rssi.values(), colorVar, m?.power_unit === 'dBFS' ? [-90, 0] : [-115, -70], HISTORY);
+    drawSparkline(r.ctx, r.w, r.h, rssi, colorVar, m?.power_unit === 'dBFS' ? [-90, 0] : [-115, -70], HISTORY);
     const s = fitCanvas(snrCv);
-    drawSparkline(s.ctx, s.w, s.h, history[channel].snr.values(), colorVar, [0, 40], HISTORY);
+    drawSparkline(s.ctx, s.w, s.h, snr, colorVar, [0, 40], HISTORY);
   }
+  $effect(() => {
+    still = $frozen ? { rssi: [...history[channel].rssi.values()], snr: [...history[channel].snr.values()] } : null;
+    drawHistory();
+  });
 
   $effect(() => {
     void $appearanceVersion;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { hex32 } from '../../lib/format';
-  import { stats, status } from '../../lib/link';
+  import { statsView as stats, statusView as status } from '../../lib/link';
   const f = $derived($status?.fields);
   const channels = $derived(f ? ['A', 'B'].filter((_, n) => (f.channels >> n) & 1).join('') || '-' : '');
 </script>

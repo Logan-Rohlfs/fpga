@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { linkStats } from '../../lib/link';
+  import { linkStatsView as linkStats } from '../../lib/link';
   const f = $derived($linkStats?.fields);
 </script>
 

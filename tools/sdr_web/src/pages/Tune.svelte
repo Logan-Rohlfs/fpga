@@ -13,7 +13,7 @@
   import Waterfall from '../components/Waterfall.svelte';
   import type { Overlay } from '../lib/draw';
   import { khz, mhz, signedKhz } from '../lib/format';
-  import { connection, hello, link, metrics, role, stats, tuning } from '../lib/link';
+  import { connection, hello, link, metricsView as metrics, role, stats, tuning } from '../lib/link';
   import type { Channel, SpectrumMsg, TuningChanges } from '../lib/types';
   import { scaleOverride, tuneChannel } from '../lib/view';
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { frameLog } from '../../lib/link';
+  import { frameLogView as frameLog } from '../../lib/link';
 </script>
 
 {#if $frameLog.length}

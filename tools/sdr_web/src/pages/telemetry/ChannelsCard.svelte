@@ -1,6 +1,6 @@
 <script lang="ts">
   import { signedKhz } from '../../lib/format';
-  import { metrics } from '../../lib/link';
+  import { metricsView as metrics } from '../../lib/link';
   import type { Channel } from '../../lib/types';
   const CHANNELS: Channel[] = ['A', 'B'];
 </script>

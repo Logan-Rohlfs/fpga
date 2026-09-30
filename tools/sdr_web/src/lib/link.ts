@@ -1,5 +1,5 @@
 /** The one WebSocket connection and the stores every component reads. */
-import { get, writable } from 'svelte/store';
+import { type Readable, get, readable, writable } from 'svelte/store';
 import { Ring } from './ring';
 import { SeriesStore } from './series';
 import { createCoalescer } from './throttle';
@@ -67,6 +67,34 @@ export const dataVersion = writable(0);
 export const droppedFrames = writable(0);
 export const subscribed = writable<string[]>([]);
 
+/** Follows `src`, but holds its last value while the display is frozen. For display readers only. */
+export function frozenView<T>(src: Readable<T>): Readable<T> {
+  return readable(get(src), (set) => {
+    let isFrozen = false;
+    let started = false;
+    const offFrozen = frozen.subscribe((f) => {
+      isFrozen = f;
+      if (!f && started) set(get(src));
+    });
+    // A reader that mounts while frozen still starts from the current value.
+    const offSrc = src.subscribe((value) => {
+      if (!isFrozen || !started) set(value);
+    });
+    started = true;
+    return () => {
+      offFrozen();
+      offSrc();
+    };
+  });
+}
+export const metricsView = frozenView(metrics);
+export const linkStatsView = frozenView(linkStats);
+export const statusView = frozenView(status);
+export const bestView = frozenView(best);
+export const frameLogView = frozenView(frameLog);
+export const iqSnapsView = frozenView(iqSnaps);
+export const statsView = frozenView(stats);
+
 const spectrumListeners = new Set<(m: SpectrumMsg) => void>();
 export function onSpectrum(fn: (m: SpectrumMsg) => void): () => void {
   spectrumListeners.add(fn);
@@ -121,7 +149,16 @@ function bumpData(): void {
 // ---- server clock: later cards pass serverNow() as "now" so relative times survive clock skew.
 let serverNowOffset: number | null = null;
 let serverOffsetAt = 0;
-/** Record a server timestamp. Stale (snapshot) rows only lower the estimate, so the highest recent one wins. */
+/** Rows still expected in each channel's snapshot (after its `history` marker). */
+const snapshotRemaining = new Map<string, number>();
+/** Count `n` rows against a channel's snapshot; true when they are all snapshot (historic) rows. */
+function inSnapshot(channel: string, n: number): boolean {
+  const left = snapshotRemaining.get(channel) ?? 0;
+  if (left <= 0) return false;
+  snapshotRemaining.set(channel, Math.max(0, left - n));
+  return true;
+}
+/** Record a live server timestamp. Callers skip snapshot rows, so old history never drags the offset back. */
 function noteServerTime(t: number): void {
   if (!Number.isFinite(t)) return;
   const now = Date.now() / 1000;
@@ -175,19 +212,22 @@ function applyFlight(origin: FlightOrigin, fieldCount: number, rows: FlightRows)
     }
     return;
   }
+  const historic = inSnapshot(origin === 'best' ? 'flight' : `flight.${origin}`, rows.n);
   const store = flightStores[origin];
   if (!store) return;
-  for (let i = 0; i < rows.n; i++) store.append(rows.t[i], rows.flags[i], rows.values, i * fieldCount);
-  if (rows.n) {
-    if (rows.flags[rows.n - 1] & 1) synthetic.set(true);
-    noteServerTime(rows.t[rows.n - 1]);
+  let anySynthetic = false;
+  for (let i = 0; i < rows.n; i++) {
+    store.append(rows.t[i], rows.flags[i], rows.values, i * fieldCount);
+    anySynthetic ||= !!(rows.flags[i] & 1);
   }
+  if (anySynthetic) synthetic.set(true);
+  if (rows.n && !historic) noteServerTime(rows.t[rows.n - 1]);
   bumpData();
 }
 
 function applySpectrum(msg: SpectrumMsg): void {
   synthetic.update((seen) => seen || msg.synthetic);
-  noteServerTime(msg.t_us / 1e6);
+  if (!inSnapshot(`spectrum.${msg.channel}`, 1)) noteServerTime(msg.t_us / 1e6);
   for (const fn of spectrumListeners) fn(msg);
 }
 
@@ -208,13 +248,16 @@ function pushMetricsHistory(ch: Channel, rssi: number, snr: number): void {
 function applyRecord(msg: RecordMsg): void {
   const r = msg.record;
   synthetic.update((seen) => seen || r.synthetic);
-  noteServerTime(r.t);
+  const isFrame = r.type === 'CHAN_FRAME' || r.type === 'BEST_TELEM';
+  if (!(isFrame && inSnapshot('frames', 1))) noteServerTime(r.t);
   switch (r.type) {
     case 'STATUS': status.set(r); break;
     case 'LINK_STATS':
       linkStats.set(r);
-      linkStatsRing.update((ring) => [...ring, { t: r.t, from_a: num(r.fields.from_a), from_b: num(r.fields.from_b) }]
-        .slice(-LINK_STATS_MAX));
+      linkStatsRing.update((ring) => {
+        if (ring.length && r.t <= ring[ring.length - 1].t) return ring;   // a reconnect repeats the latest record
+        return [...ring, { t: r.t, from_a: num(r.fields.from_a), from_b: num(r.fields.from_b) }].slice(-LINK_STATS_MAX);
+      });
       bumpData();
       break;
     case 'BEST_TELEM': best.set(r); break;
@@ -238,7 +281,7 @@ function applyRecord(msg: RecordMsg): void {
       break;
     }
   }
-  if (r.type === 'CHAN_FRAME' || r.type === 'BEST_TELEM') {
+  if (isFrame) {
     if (r.type === 'CHAN_FRAME') frameLog.update((l) => [msg.text, ...l].slice(0, FRAME_LOG_MAX));
     frames.update((l) => [...l, msg].slice(-FRAMES_MAX));
     bumpData();
@@ -263,7 +306,8 @@ function applyMetricsHistory(msg: MetricsHistoryMsg): void {
 }
 
 /** A `history` marker is a hard reset of that channel's store; its snapshot rows follow. */
-function resetChannel(channel: string): void {
+function resetChannel(channel: string, count: number): void {
+  snapshotRemaining.set(channel, count);
   const [kind, sub] = channel.split('.') as [string, Channel | undefined];
   switch (kind) {
     case 'flight':
@@ -318,7 +362,7 @@ export function handleMessage(msg: ServerMsg | ArrayBuffer): void {
     case 'error': notify(msg.text, 'warn'); break;
     case 'record': applyRecord(msg); break;
     case 'subscribed': subscribed.set(msg.channels); break;
-    case 'history': resetChannel(msg.channel); break;
+    case 'history': resetChannel(msg.channel, msg.count); break;
     case 'events':
       if (msg.reset) eventsStore.set(msg.items.slice(-EVENTS_MAX));
       else eventsStore.update((l) => [...l, ...msg.items].slice(-EVENTS_MAX));
@@ -355,6 +399,7 @@ export function resetState(): void {
   bumpPending = false;
   serverNowOffset = null;
   serverOffsetAt = 0;
+  snapshotRemaining.clear();
 }
 
 export function defaultUrl(loc: Location = window.location): string {
@@ -454,7 +499,6 @@ export class LinkClient {
   setSubscriptions(channels: string[]): void {
     const next = [...new Set(channels)].sort();
     this.wanted = next;
-    allocateFlightStores(next);
     if (this.subTimer) clearTimeout(this.subTimer);
     this.subTimer = setTimeout(() => {
       this.subTimer = null;
@@ -467,6 +511,8 @@ export class LinkClient {
     const key = this.wanted.join(',');
     if (key === this.sentKey) return;
     this.sentKey = key;
+    // Store lifetime follows what the server was told, so a quick remove/re-add keeps its rows.
+    allocateFlightStores(this.wanted);
     this.send({ type: 'subscribe', channels: this.wanted });
   }
 

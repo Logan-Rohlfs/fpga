@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { best } from '../../lib/link';
+  import { bestView as best } from '../../lib/link';
   const apex = $derived($best?.fields.apex);
 </script>
 

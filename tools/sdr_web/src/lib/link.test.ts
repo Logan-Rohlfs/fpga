@@ -4,7 +4,7 @@ import golden from './wire.golden.json';
 import {
   FRAME_LOG_MAX, LinkClient, dataVersion, droppedFrames, eventsStore, flightSchema, flightStores, frameLog, frames,
   frozen, handleMessage, hello, history, iqSnaps, linkStatsRing, metrics, metricsStores, onSpectrum, onSpectrumReset,
-  resetState, role, serverNow, setFrameScheduler, status, subscribed, tuning,
+  frozenView, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
 } from './link';
 import type { FlightSchema, GuiEvent, HelloMsg, RecordMsg } from './types';
 
@@ -67,6 +67,7 @@ beforeEach(() => {
   resetState();
   handleMessage(helloMsg());
 });
+afterEach(() => { vi.restoreAllMocks(); });
 const runFrame = () => { const cbs = frameCallbacks; frameCallbacks = []; cbs.forEach((cb) => cb()); };
 
 describe('handleMessage', () => {
@@ -185,6 +186,7 @@ describe('handleMessage', () => {
 
   it('keeps the last 600 LINK_STATS', () => {
     for (let i = 0; i < 605; i++) handleMessage(record('LINK_STATS', { from_a: i, from_b: 2 * i }, 'ls', i));
+    handleMessage(record('LINK_STATS', { from_a: 0, from_b: 0 }, 'ls', 604));   // repeated after a reconnect
     const ring = get(linkStatsRing);
     expect(ring.length).toBe(600);
     expect(ring[0]).toEqual({ t: 5, from_a: 5, from_b: 10 });
@@ -216,7 +218,38 @@ describe('handleMessage', () => {
     vi.spyOn(Date, 'now').mockReturnValue(1000_000);
     handleMessage(record('STATUS', { version: 1 }, 's', 1010));
     expect(serverNow()).toBeCloseTo(1010, 6);
-    vi.restoreAllMocks();
+  });
+
+  it('ignores snapshot rows for the server clock', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000_000);
+    handleMessage(flightRows(2, [{ t: 1010, values: [1, 1, 5] }]));
+    now.mockReturnValue(1010_000);   // well past the hold time
+    handleMessage({ type: 'history', channel: 'flight', count: 2 });
+    handleMessage(flightRows(2, [{ t: 900, values: [1, 1, 5] }, { t: 901, values: [1, 1, 5] }]));
+    expect(serverNow()).toBeCloseTo(1020, 6);
+    handleMessage(flightRows(2, [{ t: 1030, values: [1, 1, 5] }]));
+    expect(serverNow()).toBeCloseTo(1030, 6);
+  });
+
+  it('marks data synthetic when any row of a batch is', () => {
+    const buf = flightRows(2, [{ t: 1, values: [1, 1, 5] }, { t: 2, values: [1, 1, 5] }]);
+    new DataView(buf).setUint8(8 + 22 + 8, 0);   // second row not synthetic; the first still is
+    handleMessage(buf);
+    expect(get(synthetic)).toBe(true);
+  });
+
+  it('holds a frozen view while frozen and catches up after', () => {
+    const view = frozenView(status);
+    const seen: (number | undefined)[] = [];
+    const off = view.subscribe((r) => seen.push(r?.fields.version));
+    handleMessage(record('STATUS', { version: 1 }));
+    frozen.set(true);
+    handleMessage(record('STATUS', { version: 2 }));
+    expect(get(view)?.fields.version).toBe(1);
+    expect(get(frozenView(status))?.fields.version).toBe(2);   // a reader mounted while frozen starts current
+    frozen.set(false);
+    off();
+    expect(seen).toEqual([undefined, 1, 2]);
   });
 
   it('resetState clears every store', () => {
@@ -268,7 +301,11 @@ describe('LinkClient subscriptions', () => {
 
   it('receives binary frames as ArrayBuffers', () => {
     expect(Socket.instances[0].binaryType).toBe('arraybuffer');
+    const rows: number[] = [];
+    const off = onSpectrum((m) => rows.push(m.row));
     Socket.instances[0].onmessage?.({ data: spectrumB });
+    off();
+    expect(rows).toEqual([7]);
   });
 
   it('debounces by 250 ms and sends only on change', () => {
@@ -295,10 +332,25 @@ describe('LinkClient subscriptions', () => {
 
   it('allocates A/B flight stores only while subscribed', () => {
     client.setSubscriptions(['events', 'flight', 'flight.A']);
+    expect(flightStores.A).toBeUndefined();
+    vi.advanceTimersByTime(250);
     expect(flightStores.A?.fieldCount).toBe(F);
     handleMessage(flightRows(0, [{ t: 10, values: [1, 1, 5] }]));
     expect(flightStores.A?.length).toBe(1);
     client.setSubscriptions(['events', 'flight']);
+    vi.advanceTimersByTime(250);
     expect(flightStores.A).toBeUndefined();
+  });
+
+  it('keeps an A/B store when removed and re-added within the debounce', () => {
+    client.setSubscriptions(['events', 'flight', 'flight.A']);
+    vi.advanceTimersByTime(250);
+    handleMessage(flightRows(0, [{ t: 10, values: [1, 1, 5] }]));
+    client.setSubscriptions(['events', 'flight']);
+    vi.advanceTimersByTime(100);
+    client.setSubscriptions(['events', 'flight', 'flight.A']);
+    vi.advanceTimersByTime(300);
+    expect(subs(Socket.instances[0])).toHaveLength(1);
+    expect(flightStores.A?.length).toBe(1);
   });
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { linkStats } from '../lib/link';
+  import { linkStatsView as linkStats } from '../lib/link';
   import Panel from './Panel.svelte';
 
   const f = $derived($linkStats?.fields);
