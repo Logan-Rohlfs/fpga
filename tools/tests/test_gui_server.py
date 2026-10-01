@@ -237,6 +237,31 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         await operator.close()
         await viewer.close()
 
+    async def test_auto_switch_is_operator_only_and_triggers_switch_live(self):
+        viewer, _ = await self.connect()
+        await viewer.send_json(dict(type='preset_auto_switch', enabled=True))
+        self.assertEqual((await self.recv(viewer, self.of('error')))['code'], 'not_admin')
+        self.assertFalse(self.server.presets.state()['auto_switch'])
+        obj = self.preset('boosted')
+        self.server.presets.save(obj, None)
+        start = self.preset('launchpad')
+        start['triggers'] = [dict(on='phase', value='BOOST', preset='boosted')]
+        self.server.presets.save(start, None)
+        self.server.presets.set_live('launchpad')
+        event = dict(kind='phase', text='ARMED \u2192 BOOST', category='flight', t=0, id=1)
+        self.server.hub._events([event])
+        self.assertEqual(self.server.presets.state()['live'], 'launchpad')   # auto-switch still off
+        operator = await self.operator()
+        await operator.send_json(dict(type='preset_auto_switch', enabled=True))
+        await self.recv(viewer, lambda m: m['type'] == 'presets' and m['auto_switch'])
+        self.server.hub._events([event])
+        msg = await self.recv(viewer, lambda m: m['type'] == 'presets' and m['live'] == 'boosted')
+        self.assertTrue(msg['auto_switch'])
+        notice = await self.recv(viewer, self.of('notice'))
+        self.assertEqual(notice['text'], 'Auto-switched to Mine (phase BOOST)')
+        await operator.close()
+        await viewer.close()
+
     async def test_operator_preset_errors_are_replied_with_codes(self):
         operator = await self.operator()
         await operator.send_json(dict(type='preset_save', preset=self.preset('flight'), base_revision=None))

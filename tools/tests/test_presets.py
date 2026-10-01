@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from sdr_cli import presets
-from sdr_cli.presets import PresetError, PresetStore
+from sdr_cli.presets import PresetError, PresetStore, TriggerEngine
 
 BUILTIN = Path(presets.__file__).resolve().parent / 'presets'
 CARD_TYPES_JSON = Path(presets.__file__).resolve().parents[1] / 'sdr_web/src/lib/cards/card-types.json'
@@ -259,6 +259,69 @@ class StoreTest(unittest.TestCase):
         listing = self.store.all()
         self.assertEqual([p['id'] for p in listing], ['flight'])
         self.assertEqual(listing[0]['revision'], 1)
+
+
+def flight_event(kind, text='x', category='flight'):
+    return dict(kind=kind, text=text, category=category)
+
+
+def phase(old, new):
+    return flight_event('phase', '{} \u2192 {}'.format(old, new))
+
+
+class TriggerTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.store = PresetStore(BUILTIN, self.dir / 'presets', self.dir / 'state.json')
+        self.engine = TriggerEngine(self.store)
+        self.save('start', [{'on': 'phase', 'value': 'BOOST', 'preset': 'boost'}])
+        self.save('boost', [{'on': 'event', 'value': 'burnout', 'preset': 'coast'},
+                            {'on': 'event', 'value': 'landing', 'preset': 'ghost'}])
+        self.save('coast', [])
+        self.store.set_live('start')
+
+    def save(self, pid, triggers):
+        obj = good()
+        obj.update(id=pid, name=pid, triggers=triggers)
+        self.store.save(obj, None)
+
+    def test_off_means_no_switch(self):
+        self.assertIsNone(self.engine.on_event(phase('ARMED', 'BOOST')))
+        self.assertEqual(self.store.state()['live'], 'start')
+
+    def test_phase_then_event_triggers_chain(self):
+        self.store.set_auto_switch(True)
+        self.assertIsNone(self.engine.on_event(phase('IDLE', 'ARMED')))
+        self.assertEqual(self.engine.on_event(phase('ARMED', 'BOOST')), 'boost')
+        self.assertEqual(self.store.state()['live'], 'boost')
+        self.assertEqual(self.engine.last, ('boost', 'phase BOOST'))
+        self.assertEqual(self.engine.on_event(flight_event('burnout')), 'coast')
+        self.assertEqual(self.store.state()['live'], 'coast')
+
+    def test_missing_target_and_same_target_are_ignored(self):
+        self.store.set_auto_switch(True)
+        self.store.set_live('boost')
+        self.assertIsNone(self.engine.on_event(flight_event('landing')))
+        self.assertEqual(self.store.state()['live'], 'boost')
+
+    def test_only_flight_category_and_matching_text(self):
+        self.store.set_auto_switch(True)
+        self.store.set_live('boost')
+        self.assertIsNone(self.engine.on_event(flight_event('burnout', category='link')))
+        self.store.set_live('start')
+        self.assertIsNone(self.engine.on_event(phase('BOOST', 'COAST')))
+        self.assertIsNone(self.engine.on_event(flight_event('phase', 'ARMED \u2192 XBOOST')))
+        self.assertIsNone(self.engine.on_event(flight_event('signal_loss', category='link')))
+        self.assertEqual(self.store.state()['live'], 'start')
+
+    def test_demo_loop_reset_does_not_switch_back(self):
+        self.store.set_auto_switch(True)
+        self.store.set_live('coast')
+        for ev in (phase('LANDED', 'IDLE'), flight_event('flight_reset')):
+            self.assertIsNone(self.engine.on_event(ev))
+        self.assertEqual(self.store.state()['live'], 'coast')
 
 
 if __name__ == '__main__':

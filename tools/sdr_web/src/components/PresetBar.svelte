@@ -5,13 +5,13 @@
 
   interface Entry { id: string; name: string; builtin: boolean }
   let {
-    entries, shownId, liveId, defaultId, follow, operator, edit, dirty, stale, saved, builtin, canDelete, saveAsPending,
-    onselect, onfollow, onedit, onsave, onsaveas, ondiscard, ondelete, onsetlive, onsetdefault,
+    entries, autoSwitch, shownId, liveId, defaultId, follow, operator, edit, dirty, stale, saved, builtin, canDelete, saveAsPending,
+    onselect, onfollow, onedit, onsave, onsaveas, ondiscard, ondelete, onsetlive, onsetdefault, onautoswitch,
   }: {
-    entries: Entry[]; shownId: string | null; liveId: string; defaultId: string; follow: boolean; operator: boolean;
+    entries: Entry[]; autoSwitch: boolean; shownId: string | null; liveId: string; defaultId: string; follow: boolean; operator: boolean;
     edit: boolean; dirty: boolean; stale: Stale; saved: boolean; builtin: boolean; canDelete: boolean; saveAsPending: boolean;
     onselect: (id: string) => void; onfollow: (on: boolean) => void; onedit: (on: boolean) => void; onsave: () => void;
-    onsaveas: (name: string) => void; ondiscard: () => void; ondelete: () => void; onsetlive: () => void; onsetdefault: () => void;
+    onsaveas: (name: string) => void; ondiscard: () => void; ondelete: () => void; onsetlive: () => void; onsetdefault: () => void; onautoswitch: (on: boolean) => void;
   } = $props();
 
   const liveName = $derived(entries.find((e) => e.id === liveId)?.name ?? liveId);
@@ -36,6 +36,7 @@
   <label class="follow"><input type="checkbox" checked={follow} onchange={(e) => onfollow(e.currentTarget.checked)} />
     Follow operator</label>
   <span class="live" title="The layout the Operator is showing to viewers">Live: {liveName}</span>
+  {#if autoSwitch && !operator}<span class="live" title="The Operator's layout changes on flight events">Auto-switch on</span>{/if}
 
   {#if operator}
     <span class="sep" aria-hidden="true"></span>
@@ -56,6 +57,9 @@
     <button class="btn" disabled={!saved || dirty || shownId === liveId} onclick={onsetlive}
       title={dirty ? 'Save first' : undefined}>Show to viewers</button>
     <button class="btn" disabled={!saved || dirty || shownId === defaultId} onclick={onsetdefault}>Make default</button>
+    <label class="follow" title="Change the live layout on flight events, using the live layout's triggers">
+      <input type="checkbox" checked={autoSwitch} onchange={(e) => onautoswitch(e.currentTarget.checked)} />
+      Auto-switch</label>
     <button class="btn" disabled={!canDelete} onclick={ondelete}
       title={shownId === defaultId ? 'Choose another default first' : undefined}>Delete</button>
   {/if}

@@ -2,7 +2,7 @@
 
 Builtin presets ship in tools/sdr_cli/presets/ (read-only). Local presets live in a writable
 directory, one JSON file per preset, and the live/default/auto_switch state in a small state file.
-Triggers are stored and validated only; nothing acts on them yet.
+TriggerEngine acts on the live preset's triggers when auto-switch is on.
 """
 import json
 import os
@@ -265,3 +265,40 @@ class PresetStore:
         builtin = {i['id'] for i in self._builtins()}
         items = [dict(i, builtin=i['id'] in builtin) for i in self.all()]
         return dict(type='presets', items=items, **self.state())
+
+
+class TriggerEngine:
+    """Switch the live preset on flight events (spec section 6). Toolkit-free.
+
+    Only flight-category events count. A phase trigger matches a ``phase`` event whose text ends
+    with "-> <value>"; an event trigger matches the event kind (one of FLIGHT_KINDS).
+    """
+
+    def __init__(self, store):
+        self.store = store
+        self.last = None   # (target id, description) of the most recent switch, for the notice
+
+    def on_event(self, event):
+        """Return the new live preset id when this event switched it, else None."""
+        kind = event.get('kind')
+        if event.get('category') != 'flight' or not (kind == 'phase' or kind in FLIGHT_KINDS):
+            return None
+        state = self.store.state()
+        if not state['auto_switch']:
+            return None
+        live = self.store.get(state['live'])
+        if live is None:
+            return None
+        text = event.get('text')
+        for trigger in live.get('triggers', []):
+            if trigger['on'] == 'phase':
+                hit = kind == 'phase' and isinstance(text, str) and text.endswith(' \u2192 ' + trigger['value'])
+            else:
+                hit = trigger['value'] == kind
+            target = trigger['preset']
+            if not hit or target == state['live'] or self.store.get(target) is None:
+                continue
+            self.store.set_live(target)
+            self.last = (target, '{} {}'.format(trigger['on'], trigger['value']))
+            return target
+        return None

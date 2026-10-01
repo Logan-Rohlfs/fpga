@@ -64,6 +64,7 @@ class Hub:
         self.subscribers = []
         self.arrivals = deque()
         self.active_source = None
+        self.on_event = None        # optional callable(event dict), called for each derived event
         self.client_counts = None   # optional callable returning {operators, viewers}
         self.last_error = None      # why the last run() ended 'down', for the source supervisor
         self.source = dict(kind='none', state='starting', detail='', responds_to_tuning=False)
@@ -176,6 +177,11 @@ class Hub:
             return []
         for event in events:
             self.history.add_event(event)
+            if self.on_event is not None:
+                try:
+                    self.on_event(event)
+                except Exception:
+                    logger.exception('GUI event callback failed')
         return [Outgoing('events', 'stream', 'events', dumps(dict(type='events', items=events, reset=False)))]
 
     # ---- stats and source state

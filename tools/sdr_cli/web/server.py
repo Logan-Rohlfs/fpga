@@ -20,7 +20,7 @@ from .. import __version__, apex, freqplan, maps
 from ..core import ToolError
 from ..fanout import CHANNELS, Outbox
 from ..hub import Hub, dumps
-from ..presets import BUILTIN_DIR, PresetError, PresetStore
+from ..presets import BUILTIN_DIR, PresetError, PresetStore, TriggerEngine
 from ..protocol import PROTOCOL_VERSION
 from ..roles import ADMIN, RoleManager
 from ..sources import Backoff, classify_open_error, from_args
@@ -33,7 +33,8 @@ BUILD_HINT = 'GUI is not built. Run: cd tools/sdr_web && npm install && npm run 
 BUSY_DETAIL = '{} is held by another process (another ./sdr gui, ./sdr tui or receive?). Close it; retrying.'
 WSAEADDRINUSE = 10048
 PRESET_ACTIONS = dict(preset_save='save presets', preset_delete='delete presets',
-                      preset_set_live='choose the live preset', preset_set_default='choose the default preset')
+                      preset_set_live='choose the live preset', preset_set_default='choose the default preset',
+                      preset_auto_switch='change auto-switch')
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ class GuiServer:
         self.clock = clock
         self.presets = presets   # None disables the preset features
         self.root = Path(root) if root is not None else None   # holds .sdr/maps; None disables tiles and sites
+        self.triggers = TriggerEngine(presets) if presets is not None else None
         self.clients = {}
         self.source_task = None
         self.tasks = []
@@ -104,6 +106,8 @@ class GuiServer:
         self.retrying = False
         self.hub.client_counts = self.client_counts
         self.hub.subscribe(self.offer)
+        if self.triggers is not None:
+            self.hub.on_event = self.on_event
 
     def lock(self):
         if self._source_lock is None:
@@ -448,6 +452,19 @@ class GuiServer:
         else:
             client.put(error('unknown_type', 'Unknown message type: {}'.format(kind)))
 
+    def on_event(self, event):
+        """Hub callback: a flight event may switch the live preset when auto-switch is on."""
+        try:
+            target = self.triggers.on_event(event)
+        except OSError:
+            logger.exception('GUI preset auto-switch failed')
+            return
+        if target is None:
+            return
+        name = next((i['name'] for i in self.presets.all() if i['id'] == target), target)
+        self.broadcast(self.presets.message())
+        self.broadcast(dict(type='notice', text='Auto-switched to {} ({})'.format(name, self.triggers.last[1])))
+
     def _preset_action(self, client, kind, data, is_admin):
         if not is_admin:
             client.put(error('not_admin', 'Only the Operator can {}.'.format(PRESET_ACTIONS[kind])))
@@ -462,6 +479,8 @@ class GuiServer:
                 self.presets.delete(data.get('id'))
             elif kind == 'preset_set_live':
                 self.presets.set_live(data.get('id'))
+            elif kind == 'preset_auto_switch':
+                self.presets.set_auto_switch(data.get('enabled') is True)
             else:
                 self.presets.set_default(data.get('id'))
         except PresetError as exc:
