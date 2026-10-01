@@ -114,6 +114,12 @@ class ValidateTest(unittest.TestCase):
                 self.assertEqual(obj['id'], path.stem)
                 presets.validate(obj)
 
+    def test_default_flight_preset_card_types(self):
+        obj = json.loads((BUILTIN / 'flight.json').read_text())
+        self.assertEqual(obj['id'], 'flight')
+        types = {c['type'] for c in obj['cards']}
+        self.assertTrue({'state', 'number', 'plot', 'map', 'trajectory3d', 'events', 'link', 'waterfall'} <= types)
+
 
 class StoreTest(unittest.TestCase):
     def setUp(self):
