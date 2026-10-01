@@ -11,7 +11,7 @@
   import { appearanceVersion } from '../lib/theme';
   import { unitFor, unitLabel, unitPrefs } from '../lib/units';
   import {
-    type PlotInput, type PlotSeries, type ViewState, axesFor, buildData, columnOf, eventMarkers, expandSeries, plotSize, quantityOf,
+    type PlotInput, type PlotSeries, type ViewState, axesFor, buildData, columnOf, eventMarkers, expandSeries, plotSize, quantityOf, scaleKeyOf,
     storeFor, viewRange, yRanges,
   } from '../lib/cards/plot';
   import { cardStatus } from '../lib/cards/status';
@@ -104,7 +104,7 @@
       series: [
         {},
         ...series.map((s, i) => {
-          const q = quantityOf(s.field, $flightSchema) ?? qs[0];
+          const q = scaleKeyOf(s.field, $flightSchema, qs);
           return {
             label: label(s), scale: q, stroke: cssVar(PALETTE[i % PALETTE.length]), width: 1.5, spanGaps: true, points: { show: false },
             dash: s.source === 'B' ? [6, 4] : undefined,
@@ -160,7 +160,7 @@
       ? buildData(ins, range[0], range[1], $unitPrefs, cardUnits)
       : [[], ...series.map(() => [])];
     markers = showEvents ? eventMarkers($eventsStore, range[0], range[1]) : [];
-    ranges = yRanges(data, series.map((s) => quantityOf(s.field, $flightSchema) ?? ''), yFixed);
+    ranges = yRanges(data, series.map((s) => scaleKeyOf(s.field, $flightSchema, axes.quantities)), yFixed);
     plot.setData(data as uPlot.AlignedData, true);
   }
 

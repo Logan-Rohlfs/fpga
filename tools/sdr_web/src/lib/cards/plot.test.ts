@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SeriesStore } from '../series';
 import type { FlightSchema, GuiEvent } from '../types';
 import type { UnitPrefs } from '../units';
-import { axesFor, buildData, eventMarkers, expandSeries, plotSize, storeFor, viewRange, yRanges } from './plot';
+import { axesFor, buildData, eventMarkers, expandSeries, plotSize, quantityOf, scaleKeyOf, storeFor, viewRange, yRanges } from './plot';
 
 const schema: FlightSchema = {
   version: 1,
@@ -129,7 +129,7 @@ describe('yRanges', () => {
     expect(r.speed[1]).toBeGreaterThan(5);
     expect(r.speed[1]).toBeLessThan(6);
   });
-  it('ignores values outside the window rows given, nulls and non-finite values', () => {
+  it('gives [0, 1] to a quantity whose values are all null or non-finite', () => {
     const r = yRanges([[1, 2], [null, NaN as unknown as number]], ['length'], null);
     expect(r.length).toEqual([0, 1]);
   });
@@ -148,5 +148,28 @@ describe('plotSize', () => {
     expect(plotSize(400, 300, 24)).toEqual({ width: 400, height: 300 - 24 - 6 });
     expect(plotSize(400, 300, 70)).toEqual({ width: 400, height: 300 - 70 - 6 });
     expect(plotSize(10, 10, 24)).toEqual({ width: 50, height: 50 });
+  });
+});
+
+describe('scaleKeyOf', () => {
+  it('is the quantity, falling back to the first axis for a field with none', () => {
+    expect(scaleKeyOf('alt_agl_m', schema, ['length'])).toBe(quantityOf('alt_agl_m', schema));
+    expect(scaleKeyOf('nope', schema, ['length', 'speed'])).toBe('length');
+    expect(scaleKeyOf('nope', schema, [])).toBe('');
+  });
+  it('keys yRanges under the same scale the series is drawn on', () => {
+    const qs = ['length'];
+    const keys = ['alt_agl_m', 'nope'].map((f) => scaleKeyOf(f, schema, qs));
+    expect(yRanges([[1, 2], [10, 20], [100, 200]], keys, null).length[1]).toBeGreaterThan(200);
+  });
+});
+
+describe('plotSize with a tall legend (old formula regression)', () => {
+  it('old build formula overflowed; plotSize keeps canvas + legend inside the host', () => {
+    const hostH = 300, legendH = 70;
+    const oldBuild = hostH - 40;   // pre-fix build(): ignored the real legend height
+    expect(oldBuild + legendH).toBeGreaterThan(hostH);
+    const { height } = plotSize(400, hostH, legendH);
+    expect(height + legendH).toBeLessThanOrEqual(hostH);
   });
 });

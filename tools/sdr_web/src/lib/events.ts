@@ -14,6 +14,12 @@ export function filterEvents(
   return newestFirst ? out.reverse() : out;
 }
 
+/** Server-clock time of the newest flight_reset (the start of the current flight segment), or null. */
+export function latestSegmentStart(items: readonly GuiEvent[]): number | null {
+  for (let i = items.length - 1; i >= 0; i--) if (items[i].category === 'flight' && items[i].kind === 'flight_reset') return items[i].t;
+  return null;
+}
+
 export function lastLaunch(items: readonly GuiEvent[]): number | null {
   for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === 'launch') return items[i].t;
   return null;

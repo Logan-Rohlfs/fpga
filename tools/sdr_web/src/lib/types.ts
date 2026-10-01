@@ -16,8 +16,10 @@ export interface AdminInfo { label: string; since: number }
 export interface RfReference { lo_hz: number; injection: Injection; inferred?: boolean; confirmed_by?: 'ack' | 'report' }
 export interface ReceiverProfile {
   id: string; label: string; rf_label?: string;
-  /** Demo profile: flight-schema keys the demo ROM generator emulates (absent from the flight log). */
+  /** Demo profile: flight-schema keys the demo ROM generator emulates (absent from the simulation log). */
   emulated_fields?: string[]; emulated_note?: string; replay_note?: string;
+  /** Demo profile: header badge text and tooltips (board build, host demo source). */
+  badge?: string; badge_title?: string; badge_title_host?: string;
 }
 export interface SourceState {
   profile?: ReceiverProfile;

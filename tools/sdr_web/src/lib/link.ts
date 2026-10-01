@@ -1,6 +1,6 @@
 /** The one WebSocket connection and the stores every component reads. */
 import { type Readable, derived, get, readable, writable } from 'svelte/store';
-import { latestSegmentStart } from './cards/segment';
+import { latestSegmentStart } from './events';
 import { SeriesStore } from './series';
 import { createCoalescer } from './throttle';
 import type {

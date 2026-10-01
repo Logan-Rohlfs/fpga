@@ -16,6 +16,11 @@ export function quantityOf(field: string, schema: FlightSchema | null): string |
   return schema?.fields.find((f) => f.key === field)?.quantity ?? null;
 }
 
+/** The uPlot scale key a series is drawn on: its quantity, or the first axis' quantity when its field has none. One rule for build() and yRanges. */
+export function scaleKeyOf(field: string, schema: FlightSchema | null, axisQuantities: string[]): string {
+  return quantityOf(field, schema) ?? axisQuantities[0] ?? '';
+}
+
 /** Distinct quantities in series order. A plot has at most two value axes (left and right). */
 export function axesFor(series: PlotSeries[], schema: FlightSchema | null): { quantities: string[]; ok: boolean; error?: string } {
   const quantities: string[] = [];

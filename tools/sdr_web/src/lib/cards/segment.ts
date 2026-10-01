@@ -1,15 +1,5 @@
 /** "Current segment" filtering shared by the Plot, Map and 3D trajectory cards (spec section 7). A flight segment starts at the newest flight_reset. */
-import type { GuiEvent } from '../types';
-
 export type Segment = 'current' | 'all';
-
-/** Server-clock time of the newest flight_reset in `events`, or null when there is none. */
-export function latestSegmentStart(events: readonly GuiEvent[]): number | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].category === 'flight' && events[i].kind === 'flight_reset') return events[i].t;
-  }
-  return null;
-}
 
 /** Earliest row time to show: -Infinity for `all` (or when no segment has started), else the segment start. */
 export function segmentFloor(segment: unknown, start: number | null): number {
