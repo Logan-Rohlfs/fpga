@@ -5,7 +5,7 @@ import type { SourceState } from './types';
 const src = (control_state?: string, extra: Partial<SourceState> = {}): SourceState => ({
   kind: 'serial', state: 'running', detail: '', responds_to_tuning: true, control_state, ...extra,
 });
-const applied = (confirmed_by: string) => ({ lo_hz: 1, injection: 'low', confirmed_by }) as unknown as SourceState['applied'];
+const applied = (confirmed_by: 'ack' | 'report'): SourceState['applied'] => ({ lo_hz: 1, injection: 'low', confirmed_by });
 
 describe('controlStateText', () => {
   it('treats a missing source or state as detecting', () => {

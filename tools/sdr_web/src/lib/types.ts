@@ -13,7 +13,7 @@ export interface Derived {
   image_hz: number; nco_ftw: number; nco_resolution_hz: number; warnings: string[];
 }
 export interface AdminInfo { label: string; since: number }
-export interface RfReference { lo_hz: number; injection: Injection; inferred?: boolean }
+export interface RfReference { lo_hz: number; injection: Injection; inferred?: boolean; confirmed_by?: 'ack' | 'report' }
 export interface ReceiverProfile { id: string; label: string; rf_label?: string }
 export interface SourceState {
   profile?: ReceiverProfile;
@@ -102,5 +102,4 @@ export type ClientMsg =
   | { type: 'preset_delete'; id: string }
   | { type: 'preset_set_live'; id: string }
   | { type: 'preset_set_default'; id: string }
-  | { type: 'preset_auto_switch'; enabled: boolean }
   | { type: 'preset_auto_switch'; enabled: boolean };

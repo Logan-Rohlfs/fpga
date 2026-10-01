@@ -12,7 +12,7 @@ export function controlStateText(source: SourceState | undefined): { text: strin
     case 'detecting': return { text: 'Detecting receiver', level: 'info' };
     case 'pending': return { text: 'Sent, awaiting acknowledgement', level: 'info' };
     case 'applied': {
-      const by = (source?.applied as { confirmed_by?: string } | null | undefined)?.confirmed_by;
+      const by = source?.applied?.confirmed_by;
       return by === 'ack'
         ? { text: 'Applied (acknowledged)', level: 'good' }
         : { text: 'Applied (receiver report)', level: 'good' };

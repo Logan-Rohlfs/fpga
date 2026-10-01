@@ -76,7 +76,7 @@
   .phase.good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
   .phase.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
   .phase.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
-  .phase.accent { color: var(--accent, var(--good)); background: color-mix(in srgb, var(--accent, var(--good)) 16%, transparent); }
+  .phase.accent { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .phase.synth { color: var(--synth); background: color-mix(in srgb, var(--synth) 16%, transparent); }
   .dim { opacity: 0.6; }
   .bits { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
