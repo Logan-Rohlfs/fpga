@@ -258,6 +258,7 @@ const specs: Spec[] = [
     defaults: { channels: ['A', 'B'], window_s: 10 },
     validators: { channels: channelSubset, window_s: oneOf([5, 10, 30]) },
     channels: () => ['link'],
+    component: () => import('../../cards/LinkCard.svelte'),
     settings: [{ key: 'window_s', label: 'Rate window', kind: 'select', options: [
       { value: 5, label: '5 s' }, { value: 10, label: '10 s' }, { value: 30, label: '30 s' }] }],
   },
