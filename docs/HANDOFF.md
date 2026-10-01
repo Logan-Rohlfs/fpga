@@ -95,12 +95,18 @@ plan "Task 6 GUI flight readout".
 - **Tasks 6 and 7 are atomic.** Never stop, checkpoint or hand off between them:
   Task 6 makes the server send binary spectrum frames that the shipped frontend
   cannot decode until Task 7.
-- Approved new frontend packages (not installed yet): `leaflet`, `uplot`, `three`
+- Approved and installed frontend packages: `leaflet`, `uplot`, `three`
   (runtime) and `@types/leaflet`, `@types/three` (dev). Nothing else.
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: paused 2026-09-30. Plan Tasks 1-22, 24 and 25 are complete, reviewed and merged on `gui-prep`; every card type and the default Flight preset are in.** Still to do: the integration pass, Task 26, Task 23 and the final review. Unfinished work is saved on `wip/gui-integration` and `wip/task-26-dft`. The resume point, open items, rulings, deferred minors and the user's CSV-replay end goal are in [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md). Read that first. Host suite OK, vitest 250, svelte-check 0/0, build OK. No browser check has been done since Task 7.
+**Current task: plan Tasks 1-25 are complete on `gui-prep` except Task 26 (FPGA DFT length), which is in progress on a separate branch; Task 23 (docs) is this commit. Next: Task 26's result, then the final whole-branch review.** The integration pass, the host `--source demo`, the RocketPy demo ROM, the plot/card sizing work and per-loop segment clearing all landed after the last checkpoint; see [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md) for status and what remains.
+
+**Verified checkpoint (GUI cards).**
+- Newly run for this docs commit: host suite (322 tests, OK, 3 skipped), vitest 270 pass, svelte-check 0 errors and 0 warnings, production build, and `./sdr sim` (all PASS).
+- Run earlier in this effort (sizing commit `e73b4b4`, not repeated for this commit): a headless-Chrome overflow probe at 1440x900 and 1920x1080 with `./sdr gui --source demo`, checking that no Flight preset card scrolls or clips.
+- Not verified: no hardware run of the new RocketPy demo ROM, and no Vivado build of it (resource use and timing unmeasured; the earlier recorded-log demo build numbers below do not apply). No phone or LAN viewer was tried. Camera capture and a server-side relay are not built (the camera card only embeds a stream URL).
+- Task 26 (parameterized DFT length, UART load and timing): result pending. Placeholder: TASK 26 RESULT NOT YET RECORDED.
 
 **Preflight rulings: made.** Every finding in the
 [preflight scan](superpowers/plans/2026-09-30-gui-cards-preflight.md) is ruled, and
@@ -110,13 +116,10 @@ per-task sections to carry into each dispatch. One user clarification is recorde
 there and in the spec (§10): "events" means flight-state events, and link events are
 a separate category with their own event-log view.
 
-Continue at Task 8, then 9-15, 26, 16-23, 24. Deferred minor findings from the task
-reviews are listed in the local ledger for the final whole-branch review. The most
-relevant open ones are:
-- `metrics_history` carries no SYNTHETIC flag;
-- no browser check of the 6-7 pair has been done yet.
-(The send-loop finding was fixed in Task 25: an unexpected send error is logged and
-closes the socket with code 1011.)
+Deferred minor findings from the task reviews are in the local ledger for the final
+whole-branch review. The most relevant open one: `metrics_history` carries no
+SYNTHETIC flag. (The send-loop finding was fixed in Task 25: an unexpected send error
+is logged and closes the socket with code 1011.)
 
 The ledgers under `.superpowers/sdd/` are git-ignored local files. On another
 machine they won't exist. Rebuild progress from `git log` (task commits name
@@ -128,15 +131,9 @@ Controller rulings already made:
 - `build.tcl`, `core.py` and `tui.py` stay untouched by GUI tasks. Task 18's
   `cli.py` `maps` subparser is additive.
 - Execution order is as listed above.
-- `AGENTS.md` still says "no command receiver or acknowledgement exists yet".
-  That is stale: UART tuning is acknowledged with CONFIG. Fix it in the final
-  docs task.
+- The stale `AGENTS.md` "no command receiver" line was fixed in Task 23.
 
-**How to resume:** read the ledger and skip every task with a "Task N: complete"
-line. Continue in the execution order above, following
-`superpowers:subagent-driven-development`. Update the "Current task" line after each
-task. Verify with the commands in AGENTS.md (Python unittest, then
-`npm test && npm run check && npm run build` for frontend changes).
+**How to resume:** read the plan status doc linked above, then `git log --oneline main..gui-prep`. Verify with the commands in AGENTS.md.
 
 ## Remaining receiver-plan work
 

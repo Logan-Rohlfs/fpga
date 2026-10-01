@@ -20,6 +20,8 @@ On the Mac, from this checkout:
 ./sdr doctor              # check local tools and serial device selection
 ./sdr receive --seconds 5 # decoded link messages without reprogramming the board
 ./sdr gui --source sim    # Space Raiders web GUI; no board needed
+./sdr gui --source demo   # same, replaying the simulated IREC flight
+./sdr maps fetch --site irec-pecos  # once, online: offline map tiles for the GUI
 ```
 
 The current Mac already has a configured virtual environment and local connection

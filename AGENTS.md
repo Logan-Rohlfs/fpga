@@ -8,14 +8,15 @@
 
 The current checkpoint is a working FPGA-to-host link layer carrying SIMULATED
 data (see `docs/sdr_pipeline.drawio` and the spec in `docs/superpowers/specs/`).
-The Space Raiders SDR web GUI v1 and source combiner are implemented. See their
+The Space Raiders SDR web GUI (v1 plus the card overhaul) and source combiner are implemented. See their
 implementation status in the handoff and plans in `docs/superpowers/plans/`.
 The next upstream stage is frame sync + CRC; DSP stages follow later. Follow the user's chosen
 scope. Do not silently select DSP constants or RF settings, and do not add GUI
 dependencies beyond the spec's list (aiohttp in the `gui` extra; the frontend
-packages in `tools/sdr_web/package.json`). The user also approved `leaflet`,
-`uplot` and `three` (runtime) plus `@types/leaflet` and `@types/three` (dev) for
-the GUI overhaul; they are not installed yet. Nothing else.
+packages in `tools/sdr_web/package.json`). The GUI overhaul added `leaflet`,
+`uplot` and `three` (runtime; `three` only through dynamic `import()`) plus
+`@types/leaflet` and `@types/three` (dev). Python adds no dependency (maps use
+`urllib`). Nothing else.
 
 ## Work within the existing structure
 
@@ -26,7 +27,8 @@ the GUI overhaul; they are not installed yet. Nothing else.
   behavior consistent rather than adding separate build/program implementations.
 - **GUI layout:**
   - Logic lives in toolkit-free modules: `freqplan.py`, `roles.py`,
-    `sources.py` and `hub.py`.
+    `sources.py`, `hub.py`, `apex.py`, `units.py`, `gui_wire.py`, `events.py`,
+    `history.py`, `fanout.py`, `presets.py` and `maps.py`.
   - `web/server.py` is thin aiohttp glue.
   - The Svelte frontend lives in `tools/sdr_web/` and builds into the ignored
     `tools/sdr_cli/web/static/`.
@@ -39,8 +41,9 @@ the GUI overhaul; they are not installed yet. Nothing else.
 - Keep the link wire format in `tools/sdr_cli/protocol.py` and the RTL in step.
   `./sdr sim` cross-checks them. Stand-in producers must set `SYNTHETIC`, and
   real stages clear it only for measured data.
-- Do not label raw host writes as successful FPGA commands: no command
-  receiver or acknowledgement exists yet.
+- Do not label raw host writes as successful FPGA commands. Only UART tuning
+  (receiver control) is acknowledged, with CONFIG; anything else the host
+  sends has no receiver or acknowledgement.
 
 ## Local state and hardware
 

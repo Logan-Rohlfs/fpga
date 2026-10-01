@@ -152,17 +152,20 @@ after USB removal: reconnect explicitly with `c` when the board is back.
 
 `./sdr gui` serves the Space Raiders SDR workbench: a Tune page with the RF
 frequency plan, selectable A/B IF spectrum and waterfall, synthesizer/NCO
-controls, both constellations and signal histories; and a Telemetry page with
-reorderable, resizable cards. FLIGHT plots remain a clearly labelled placeholder.
+controls, both constellations and signal histories; and a Telemetry page of
+draggable, resizable cards (flight plots, map, 3D trajectory, state, events, link
+quality, spectrum, waterfall and more) arranged in shared, named presets.
 
 ```sh
 .venv/bin/python -m pip install -e '.[gui]'         # once: adds aiohttp
 (cd tools/sdr_web && npm install && npm run build) # Node is needed only to build
 ./sdr gui --source sim                            # no board needed
+./sdr gui --source demo                           # RocketPy flight replay, host-side, no board
 ./sdr gui --source replay --file build/sdr/link_capture.bin --loop
 ./sdr gui                                        # UART; close other readers first
 ./sdr gui --lan                                  # allow viewers on the local network
-./sdr setup --gui-password                       # prompted, stored hashed
+./sdr setup --gui-password                       # prompted, stored hashed (the Operator password)
+./sdr maps fetch --site irec-pecos               # once, while online: offline map tiles
 ```
 
 The default URL is `http://127.0.0.1:8080`. Use `--http-port` to change it and
@@ -170,10 +173,13 @@ The default URL is `http://127.0.0.1:8080`. Use `--http-port` to change it and
 can connect. Fonts and scripts are bundled; viewers need no internet access.
 For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
 
-- **Viewer/Admin:** everyone starts as a Viewer. One Admin can change shared
-  tuning; log in through the header. With no password configured, only localhost
-  can become Admin. Taking over requires confirmation and demotes the old Admin.
-  Reloading resumes Admin through a session token within a 15-second grace period.
+- **Operator/Viewer:** everyone starts as a Viewer. One Operator can change shared
+  tuning, edit and publish layouts and use Reconnect; log in through the header
+  (the wire role is still `admin`). With no password configured, only localhost
+  can become Operator. Taking over requires confirmation and demotes the old
+  Operator. Reloading resumes Operator through a session token within a
+  15-second grace period. Operator-only actions are enforced by the server, not
+  just hidden in the UI.
 - **Tune:** drag/scroll the RF plan or edit the LO digits; drag the waterfall or
   edit the NCO field. All tuning is validated and quantized in Python. Receiver,
   synthesizer and filter values are a host model with placeholder hardware
@@ -183,15 +189,13 @@ For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
   selection and Freeze are per viewer. Space toggles Freeze outside inputs.
   The header cycles System/Dark/Light themes. Synthetic content is labelled
   SIMULATED; it is not an RF measurement.
-- **Telemetry:** Edit layout enables drag reorder, corner/arrow-key resizing,
-  and earlier/later buttons (also usable on touch devices). Layout and theme
-  are saved locally in the browser; Reset layout restores the defaults.
+- **Telemetry cards and presets:** see the next subsection.
 - **Disconnection:** the browser retries automatically and dims old data. The
   banner tells the two failures apart: "Server unreachable" means the browser
   cannot reach the GUI server; "Server up. …" means the server runs but the board
   UART is not delivering. Receiving continues while the display is frozen.
   Tuning is saved in ignored `.sdr/gui_state.json`.
-- **Auto-switch:** with the Operator's Auto-switch toggle on, the live layout's
+- **Auto-switch** (see Presets below): with the Operator's Auto-switch toggle on, the live layout's
   `triggers` are active: a flight phase change (`phase` trigger) or a launch,
   burnout, apogee or landing event (`event` trigger) makes the target layout live
   for every client, with an "Auto-switched to ..." notice. Link events never
@@ -216,6 +220,87 @@ For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
 - **LAN security:** plain HTTP provides protection against accidental/casual
   tuning changes, not network sniffing. Use a trusted network. Password hashes
   are masked by `sdr config`; new config writes use owner-only permissions on POSIX.
+
+### Cards and presets
+
+The Telemetry page is a 12-column grid of cards. Card types: `plot` (uPlot
+time series, up to 6 series), `number`, `state` (flight phase), `events`
+(flight or link category), `map` (Leaflet over local tiles), `trajectory3d`
+(three.js, loaded only when such a card exists), `camera` (a stream URL),
+`waterfall`, `spectrum`, `constellation`, `link` (link and channel quality),
+`health`, `gps` and `frames`. Every card has a settings popover; the Operator
+edits it, and Viewers see the settings read-only. Quantities have a unit
+override, and the header offers a global unit system.
+
+- **Presets** are named layouts shared by everyone. Built-in presets ship in
+  `tools/sdr_cli/presets/` (read-only; the default is "Flight"). Operator-saved
+  presets live in the ignored `.sdr/gui/presets/`, and the live/default
+  choice and Auto-switch flag in `.sdr/gui/preset_state.json`. The Operator
+  enters edit mode to drag, resize, add and remove cards, then Saves, Saves as a
+  new preset, Discards, or Makes default. "Show to viewers" makes a preset live for
+  everyone. Each browser has a Follow toggle: following shows the live preset,
+  and unticking it lets that viewer pick another preset without changing the live one.
+- **`segment`:** the plot, map and trajectory cards take `segment: current | all`
+  (default `current`). `current` shows only data since the newest flight-reset
+  event; `all` shows everything in the ring. A flight reset happens when the
+  phase falls back to IDLE or ARMED from BOOST, COAST, DESCENT or LANDED, which
+  is what every loop of the demo replay does. Older segments stay in the ring;
+  they are only hidden.
+- **Auto-switch triggers:** a preset's `triggers` list entries of
+  `{on: phase|event, value, preset}`. A `phase` trigger fires on entering a
+  flight phase; an `event` trigger fires on `launch`, `burnout`, `apogee` or
+  `landing`. They act only while the Operator's Auto-switch is on and only from
+  the live preset. The target preset need not exist; a missing target is ignored.
+  Triggers are edited in the preset JSON (there is no trigger editor in the UI).
+- **Labels:** cards driven by SYNTHETIC data say so in their header (SIMULATED),
+  alongside data age. The demo source and bitstream use `SIM FLIGHT · SIMULATED
+  ADC`. Values appear exactly as decoded; nothing is corrected.
+- **Camera:** the card embeds a viewer-fetched stream URL (`http`/`https`). Each
+  viewer pulls the stream directly, so on a shared hotspot use a low-rate stream.
+  Capture from a host USB/HDMI device and a server-side relay are future work.
+
+### Demo data
+
+`./sdr gui --source demo` runs the flight replay entirely on the host: the same
+RocketPy simulation of the IREC 2026 flight (Pecos, TX) that the `--demo`
+bitstream carries, sent as FLIGHT frames on the same schedule and with the same
+per-antenna loss windows. No FPGA and no receiver run: the signal, noise,
+spectrum and I/Q are a modelled stand-in, every record is flagged SYNTHETIC, and
+tuning is ignored. The GUI labels it `SIM FLIGHT · SIMULATED ADC`.
+
+To see it come from the board instead, build and load the opt-in bitstream:
+`./sdr build --demo`, then `./sdr program --demo` (the `latest-demo` bundle;
+plain `latest` is the default build). Details of the ROM are in the
+[SDR guide](../projects/sdr/README.md#apex-flight-replay-demo-opt-in-build).
+The loop is about 70 s, so each pass produces a new segment.
+
+### Offline maps
+
+Browsers never fetch remote tiles. The server serves tiles from `.sdr/maps/`
+(ignored), which `./sdr maps fetch` fills from the USGS National Map
+(imagery and topo). Run it while online, before going to the field:
+
+```sh
+./sdr maps list                                   # sites, tile counts, sizes
+./sdr maps fetch --site irec-pecos --dry-run      # print the estimate only
+./sdr maps fetch --site irec-pecos                # imagery and topo, resumable
+./sdr maps fetch --all --layer imagery --rate 2   # every site, gentler
+```
+
+Sites are in `tools/sdr_cli/sites.json`; add local ones in
+`.sdr/gui/sites.json` (a local entry replaces a tracked one with the same id).
+Fetching is rate-limited (default 4 requests/s, at most 8) and resumable;
+tiles the service lacks are recorded as missing, and `--retry-missing` asks again.
+With no tiles the map card draws a plain coordinate grid and still plots the track.
+
+### Bandwidth
+
+Each viewer subscribes only to the data channels its cards use, and the
+server coalesces frequent updates (a new message replaces an unsent one of the same kind). With
+the Flight preset a viewer receives about 10 kB/s or less before compression:
+flight rows at 20 Hz, link statistics at 5 Hz and two spectrum rows at 5 Hz. Ten
+viewers are therefore about 100 kB/s, which a phone hotspot carries. Camera
+streams are not included because browsers fetch them directly.
 
 Verification:
 

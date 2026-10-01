@@ -204,7 +204,7 @@ floats are little-endian.
 | `preset_delete` | operator | `{id}` |
 | `preset_set_live` | operator | `{id}` |
 | `preset_set_default` | operator | `{id}` |
-| `preset_auto_switch` | operator | `{enabled}` (OPTIONAL task 24 only) |
+| `preset_auto_switch` | operator | `{enabled}` |
 | `login`, `resume`, `logout`, `tune`, `use_compiled_profile`, `reconnect_source`, `ping` | as v1 | unchanged |
 
 A non-operator sending an operator message receives
@@ -463,8 +463,8 @@ Validation (`presets.validate(obj) -> dict`, which raises `PresetError(code, tex
   `phase` value must be in `apex.PHASES`. An `event` value must be one of
   `launch`, `burnout`, `apogee` or `landing`. `preset` matches the id pattern.
   A target need not exist; missing targets are ignored at switch time.
-  **Triggers are stored and validated only. Nothing acts on them until the
-  OPTIONAL task 24.**
+  **Triggers are stored and validated; with the Operator's Auto-switch on they
+  switch the live preset (task 24, implemented).**
 - The whole preset serializes to ≤ 64 KiB.
 
 The server validates structure. The frontend `registry.sanitize(type, config)`
@@ -601,7 +601,8 @@ measurement and pointer handling.
   - `moveCard(cards, id, x, y)`: clamp to bounds, place, push colliding cards
     down recursively, then compact;
   - `resizeCard(cards, id, w, h, minW, minH)`: the same push-and-compact;
-  - `addCard(cards, card)`: place at the first free row, leftmost;
+  - `addCard(cards, card, minW, minH)`: place at the first free row, leftmost,
+    raising the size to the card type's minimum;
   - `removeCard`;
   - `readingOrder(cards)` (sort by y, then x);
   - `reflow(cards, cols)` for narrow screens;
@@ -845,7 +846,7 @@ The attribution shown on maps is "Basemap: USGS The National Map".
 
 ### 13.5 GPS validity
 
-`geo.gpsValid(row)` is true only when `gps_fix ∈ {2, 3, 4}` (2D, 3D, 3D+DR),
+`geo.gpsValid(fix, lat, lon)` (with a `rowValid(row)` wrapper over a decoded row) is true only when `gps_fix ∈ {2, 3, 4}` (2D, 3D, 3D+DR),
 the latitude and longitude are finite with `|lat| ≤ 90` and `|lon| ≤ 180`, and
 they are not both zero. **Refinement:** DR (1) counts as not a position fix.
 
@@ -1000,8 +1001,7 @@ Nothing here claims hardware verification.
 - Remote tile fetching by browsers; OpenStreetMap tiles; tiles outside the
   registry radii.
 - User accounts or more than one privileged role; per-viewer server-side state.
-- Automatic preset switching, except the OPTIONAL task 24. Triggers are only
-  stored until then.
+- Automatic switching on anything other than flight phase and the four flight events.
 - HTTPS; Pi service packaging (as in v1).
 - DSP constants or RF settings. The demo `rf_label` repeats existing documented
   demo facts only.
