@@ -205,6 +205,7 @@ const specs: Spec[] = [
     defaults: { site: null, layer: 'imagery', follow: true, show_track: true, source: 'best' },
     validators: { site: nullableText(40), layer: oneOf(['imagery', 'topo']), follow: bool, show_track: bool, source: oneOf(SOURCES) },
     channels: (c) => flightChannels(c.source),
+    component: () => import('../../cards/MapCard.svelte'),
     settings: [...siteLayer, { key: 'follow', label: 'Follow the vehicle', kind: 'bool' },
       { key: 'show_track', label: 'Show track', kind: 'bool' }, sourceField],
   },

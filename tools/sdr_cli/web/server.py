@@ -16,7 +16,7 @@ import webbrowser
 
 from aiohttp import WSMsgType, web
 
-from .. import __version__, apex, freqplan
+from .. import __version__, apex, freqplan, maps
 from ..core import ToolError
 from ..fanout import CHANNELS, Outbox
 from ..hub import Hub, dumps
@@ -83,7 +83,7 @@ class GuiServer:
     sleep = staticmethod(asyncio.sleep)   # injectable: the serial supervisor's retry wait
 
     def __init__(self, source_factory, roles, state_path, static_dir=STATIC_DIR, hub=None, clock=time.monotonic,
-                 presets=None):
+                 presets=None, root=None):
         self.source_factory = source_factory
         self.roles = roles
         self.state_path = Path(state_path)
@@ -93,6 +93,7 @@ class GuiServer:
         self.hub = hub or Hub()
         self.clock = clock
         self.presets = presets   # None disables the preset features
+        self.root = Path(root) if root is not None else None   # holds .sdr/maps; None disables tiles and sites
         self.clients = {}
         self.source_task = None
         self.tasks = []
@@ -119,6 +120,7 @@ class GuiServer:
         app = web.Application()
         app.router.add_get('/ws', self.websocket)
         app.router.add_get('/', self.index)
+        app.router.add_get('/tiles/{layer}/{z}/{x}/{y}', self.tile)
         assets = self.static_dir / 'assets'
         if assets.is_dir():
             app.router.add_static('/assets', assets)
@@ -131,6 +133,34 @@ class GuiServer:
         if not index.is_file():
             raise web.HTTPServiceUnavailable(text=BUILD_HINT)
         return web.FileResponse(index)
+
+    async def tile(self, request):
+        """Local map tiles only (spec 13.4): validated by maps.tile_path, never a remote fallback."""
+        if self.root is None:
+            raise web.HTTPNotFound()
+        info = request.match_info
+        try:
+            numbers = []
+            for name in ('z', 'x', 'y'):
+                if not (info[name].isascii() and info[name].isdigit() and len(info[name]) <= 9):
+                    raise ValueError('{} must be a non-negative integer'.format(name))
+                numbers.append(int(info[name]))
+            path = maps.tile_path(self.root, info['layer'], *numbers)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc))
+        if path is None:
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={'Cache-Control': 'max-age=86400'})
+
+    def sites_message(self):
+        """hello.sites: each registry site plus the zooms actually downloaded per layer."""
+        if self.root is None:
+            return []
+        try:
+            return maps.sites_with_coverage(self.root)
+        except ToolError as exc:
+            logger.warning('map sites unavailable: %s', exc)
+            return []
 
     async def _start(self, app):
         await self.start_source()
@@ -327,7 +357,7 @@ class GuiServer:
         client.put(dict(type='hello', server_version=__version__, protocol_version=PROTOCOL_VERSION,
                         source=dict(self.hub.source), role=role, budget=role['budget'],
                         tuning=self.tuning_message(), flight_schema=apex.flight_schema(),
-                        channels=list(CHANNELS), sites=[]))
+                        channels=list(CHANNELS), sites=self.sites_message()))
         if self.presets is not None:
             client.put(self.presets.message())
         client.outbox.offer(self.hub.stats_outgoing())
@@ -520,7 +550,7 @@ def run_gui(root, config, args):
     factory = from_args(config, args.source, file=args.file, speed=args.speed, loop=args.loop)
     roles = RoleManager(config.get('gui_admin_hash', ''))
     presets = PresetStore(BUILTIN_DIR, root / '.sdr/gui/presets', root / '.sdr/gui/preset_state.json')
-    server = GuiServer(factory, roles, root / '.sdr/gui_state.json', presets=presets)
+    server = GuiServer(factory, roles, root / '.sdr/gui_state.json', presets=presets, root=root)
     host = '0.0.0.0' if args.lan else '127.0.0.1'
     preflight_bind(host, args.http_port)
     url = 'http://127.0.0.1:{}/'.format(args.http_port)

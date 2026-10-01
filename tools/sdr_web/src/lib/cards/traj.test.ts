@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { SeriesStore } from '../series';
 import type { FlightSchema } from '../types';
-import { altitudeColor, enu, gpsValid, groundTiles, tileXY, trackPoints } from './traj';
+import { enu, gpsValid, tileXY } from '../geo';
+import { altitudeColor, groundTiles, trackPoints } from './traj';
 
 const keys = ['gps_fix', 'lat_deg', 'lon_deg', 'alt_agl_m'];
 const schema: FlightSchema = { version: 1, fields: keys.map((key) => ({ key, label: key, quantity: 'x' })) };
