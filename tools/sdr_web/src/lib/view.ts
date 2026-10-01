@@ -6,3 +6,6 @@ export type ScaleOverride = { mode: 'auto' } | { mode: 'manual'; low: number; hi
 
 export const scaleOverride = writable<ScaleOverride>({ mode: 'auto' });
 export const tuneChannel = writable<Channel>('A');
+
+/** Channels the displayed Telemetry preset needs (set by the Telemetry page, read by the subscription effect). */
+export const telemetryChannels = writable<string[]>([]);

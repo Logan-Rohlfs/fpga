@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PAD, fOf, ifToRf, makeAxis, ticks, xOf } from './axis';
 import { LUT } from './colormap';
 import { hex32, khz, mhz, signedKhz } from './format';
-import { move, resize, sanitize } from './layout';
 import { Ring } from './ring';
 import { createCoalescer } from './throttle';
 import { paintRow } from './waterfall';
@@ -53,21 +52,6 @@ describe('colormap and waterfall rows', () => {
     expect([out[0], out[1], out[2], out[3]]).toEqual([LUT[0], LUT[1], LUT[2], 255]);
     expect([out[8], out[9], out[10]]).toEqual([LUT[765], LUT[766], LUT[767]]);
     expect(out[4]).toBe(LUT[Math.round((30 / 70) * 255) * 3]);
-  });
-});
-
-describe('card layout', () => {
-  const defaults = [{ id: 'a', w: 2, h: 1 }, { id: 'b', w: 1, h: 1 }, { id: 'c', w: 4, h: 2 }];
-  it('sanitizes saved layouts', () => {
-    expect(sanitize(null, defaults)).toEqual(defaults);
-    expect(sanitize([{ id: 'c', w: 9, h: 0 }, { id: 'zzz', w: 1, h: 1 }, { id: 'c', w: 1, h: 1 }], defaults)).toEqual([
-      { id: 'c', w: 4, h: 1 }, { id: 'a', w: 2, h: 1 }, { id: 'b', w: 1, h: 1 },
-    ]);
-  });
-  it('moves and resizes', () => {
-    expect(move(defaults, 'c', 'a', false).map((c) => c.id)).toEqual(['c', 'a', 'b']);
-    expect(move(defaults, 'a', 'b', true).map((c) => c.id)).toEqual(['b', 'a', 'c']);
-    expect(resize(defaults, 'b', 3, 9, 2)).toEqual([defaults[0], { id: 'b', w: 2, h: 4 }, defaults[2]]);
   });
 });
 

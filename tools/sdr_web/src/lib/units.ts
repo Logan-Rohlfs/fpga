@@ -70,3 +70,13 @@ export function unitLabel(quantity: string, unit: string | null): string {
   if (!unit) return '';
   return unitDef(quantity, unit)?.label ?? unit;
 }
+
+/** Every quantity name in the catalogue. */
+export function quantityNames(): string[] {
+  return Object.keys(quantities);
+}
+
+/** The units offered for a quantity, in catalogue order (empty for dimensionless quantities). */
+export function unitOptions(quantity: string): { id: string; label: string }[] {
+  return (quantities[quantity]?.units ?? []).map(({ id, label }) => ({ id, label }));
+}

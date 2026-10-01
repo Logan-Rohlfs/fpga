@@ -4,7 +4,7 @@ import { Ring } from './ring';
 import { SeriesStore } from './series';
 import { createCoalescer } from './throttle';
 import type {
-  Channel, ClientMsg, FlightSchema, GuiEvent, HelloMsg, MetricsHistoryMsg, RecordJson, RecordMsg, RoleMsg, ServerMsg,
+  Channel, ClientMsg, FlightSchema, GuiEvent, HelloMsg, MetricsHistoryMsg, PresetsMsg, RecordJson, RecordMsg, RoleMsg, ServerMsg,
   SpectrumMsg, StatsMsg, TakeoverMsg, TuningChanges, TuningMsg,
 } from './types';
 import { type FlightOrigin, type FlightRows, decodeBinary } from './wire';
@@ -13,7 +13,6 @@ export interface Notice { id: number; text: string; kind: 'info' | 'warn' }
 export interface LinkStatsPoint { t: number; from_a: number; from_b: number }
 
 export const HISTORY = 300;              // 30 s of CHAN_METRICS at 10 Hz (Tune sparklines)
-export const FRAME_LOG_MAX = 200;
 export const FRAMES_MAX = 200;
 export const EVENTS_MAX = 2000;
 export const LINK_STATS_MAX = 600;
@@ -33,10 +32,9 @@ export const tuning = writable<TuningMsg | null>(null);
 export const stats = writable<StatsMsg | null>(null);
 export const status = writable<RecordJson | null>(null);
 export const linkStats = writable<RecordJson | null>(null);
-export const best = writable<RecordJson | null>(null);
 export const metrics = writable<Partial<Record<Channel, RecordJson>>>({});
 export const iqSnaps = writable<Partial<Record<Channel, [number, number][][]>>>({});
-export const frameLog = writable<string[]>([]);
+export const presets = writable<PresetsMsg | null>(null);
 export const takeover = writable<TakeoverMsg | null>(null);
 export const notices = writable<Notice[]>([]);
 /** Read only by drawing code. Ingestion never stops, so freezing leaves no gaps. */
@@ -90,8 +88,6 @@ export function frozenView<T>(src: Readable<T>): Readable<T> {
 export const metricsView = frozenView(metrics);
 export const linkStatsView = frozenView(linkStats);
 export const statusView = frozenView(status);
-export const bestView = frozenView(best);
-export const frameLogView = frozenView(frameLog);
 export const iqSnapsView = frozenView(iqSnaps);
 export const statsView = frozenView(stats);
 
@@ -260,7 +256,6 @@ function applyRecord(msg: RecordMsg): void {
       });
       bumpData();
       break;
-    case 'BEST_TELEM': best.set(r); break;
     case 'CHAN_METRICS': {
       const ch = r.fields.channel as Channel;
       metrics.update((m) => ({ ...m, [ch]: r }));
@@ -282,7 +277,6 @@ function applyRecord(msg: RecordMsg): void {
     }
   }
   if (isFrame) {
-    if (r.type === 'CHAN_FRAME') frameLog.update((l) => [msg.text, ...l].slice(0, FRAME_LOG_MAX));
     frames.update((l) => [...l, msg].slice(-FRAMES_MAX));
     bumpData();
   }
@@ -316,7 +310,6 @@ function resetChannel(channel: string, count: number): void {
       break;
     case 'frames':
       frames.set([]);
-      frameLog.set([]);
       break;
     case 'spectrum':
       if (sub === 'A' || sub === 'B') for (const fn of spectrumResetListeners) fn(sub);
@@ -370,15 +363,15 @@ export function handleMessage(msg: ServerMsg | ArrayBuffer): void {
       break;
     case 'metrics_history': applyMetricsHistory(msg); break;
     case 'dropped': droppedFrames.update((n) => n + msg.count); break;
+    case 'presets': presets.set(msg); break;
   }
 }
 
 /** Test helper: back to a fresh page state. */
 export function resetState(): void {
-  [hello, role, tuning, stats, status, linkStats, best, takeover, flightSchema].forEach((s) => s.set(null));
+  [hello, role, tuning, stats, status, linkStats, takeover, flightSchema, presets].forEach((s) => s.set(null));
   metrics.set({});
   iqSnaps.set({});
-  frameLog.set([]);
   frames.set([]);
   frozen.set(false);
   synthetic.set(false);

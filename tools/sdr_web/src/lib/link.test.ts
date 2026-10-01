@@ -2,9 +2,9 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from './wire.golden.json';
 import {
-  FRAME_LOG_MAX, LinkClient, dataVersion, droppedFrames, eventsStore, flightSchema, flightStores, frameLog, frames,
+  FRAMES_MAX, LinkClient, dataVersion, droppedFrames, eventsStore, flightSchema, flightStores, frames,
   frozen, handleMessage, hello, history, iqSnaps, linkStatsRing, metrics, metricsStores, onSpectrum, onSpectrumReset,
-  frozenView, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
+  frozenView, presets, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
 } from './link';
 import type { FlightSchema, GuiEvent, HelloMsg, RecordMsg } from './types';
 
@@ -94,14 +94,24 @@ describe('handleMessage', () => {
     expect(Array.from(m.latest()!.values)).toEqual([-80, -100, 30, 12, 5, 1]);
   });
 
-  it('bounds the frame log newest first and the frames ring oldest first', () => {
-    for (let i = 0; i < FRAME_LOG_MAX + 5; i++) handleMessage(record('CHAN_FRAME', { channel: 'A' }, `f${i}`));
-    const log = get(frameLog);
-    expect(log.length).toBe(FRAME_LOG_MAX);
-    expect(log[0]).toBe(`f${FRAME_LOG_MAX + 4}`);
+  it('bounds the frames ring, oldest first', () => {
+    for (let i = 0; i < FRAMES_MAX + 5; i++) handleMessage(record('CHAN_FRAME', { channel: 'A' }, `f${i}`));
     const ring = get(frames);
-    expect(ring.length).toBe(200);
-    expect(ring[ring.length - 1].text).toBe(`f${FRAME_LOG_MAX + 4}`);
+    expect(ring.length).toBe(FRAMES_MAX);
+    expect(ring[ring.length - 1].text).toBe(`f${FRAMES_MAX + 4}`);
+  });
+
+  it('stores the presets message and clears it on reset', () => {
+    expect(get(presets)).toBeNull();
+    const msg = {
+      type: 'presets' as const, items: [{ schema: 1, id: 'flight', name: 'Flight', revision: 1, builtin: true,
+        grid: { cols: 12 }, cards: [], triggers: [] }],
+      live: 'flight', default: 'flight', auto_switch: false,
+    };
+    handleMessage(msg);
+    expect(get(presets)).toEqual(msg);
+    resetState();
+    expect(get(presets)).toBeNull();
   });
 
   it('keeps receiving while frozen; freeze only stops drawing', () => {
@@ -153,7 +163,6 @@ describe('handleMessage', () => {
     handleMessage({ type: 'history', channel: 'spectrum.B', count: 120 });
     off();
     expect(get(frames)).toEqual([]);
-    expect(get(frameLog)).toEqual([]);
     expect(resets).toEqual(['B']);
   });
 

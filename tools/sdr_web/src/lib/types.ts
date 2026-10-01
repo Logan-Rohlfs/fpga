@@ -78,9 +78,15 @@ export interface MetricsHistoryMsg {
   snr: (number | null)[]; df: (number | null)[]; crc_good: (number | null)[]; crc_bad: (number | null)[];
   power_unit: string | null;
 }
+/** A stored preset as the server sends it (sdr_cli/presets.py message()). Cards are untrusted until sanitizeGrid. */
+export interface PresetItem {
+  schema: number; id: string; name: string; revision: number; builtin: boolean;
+  grid: { cols: number }; cards: unknown[]; triggers: unknown[];
+}
+export interface PresetsMsg { type: 'presets'; items: PresetItem[]; live: string; default: string; auto_switch: boolean }
 export interface DroppedMsg { type: 'dropped'; channel: 'frames'; count: number }
 export type ServerMsg = HelloMsg | RecordMsg | StatsMsg | TuningMsg | RoleMsg | TakeoverMsg | ErrorMsg
-  | SubscribedMsg | HistoryMsg | EventsMsg | MetricsHistoryMsg | DroppedMsg | { type: 'pong' };
+  | SubscribedMsg | HistoryMsg | EventsMsg | MetricsHistoryMsg | DroppedMsg | PresetsMsg | { type: 'pong' };
 
 export type ClientMsg =
   | { type: 'login'; password: string; label: string; takeover: boolean }

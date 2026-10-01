@@ -9,7 +9,7 @@
   import { connectionBanner } from './lib/status';
   import { channelsFor } from './lib/subscriptions';
   import { type ThemeChoice, applyTheme, loadTheme, nextTheme, refreshAppearance } from './lib/theme';
-  import { tuneChannel } from './lib/view';
+  import { telemetryChannels, tuneChannel } from './lib/view';
   import Telemetry from './pages/Telemetry.svelte';
   import Tune from './pages/Tune.svelte';
 
@@ -20,12 +20,10 @@
   let page = $state<PageId>(fromHash());
   let theme = $state<ThemeChoice>(loadTheme());
   let hidden = $state(document.hidden);
-  // The current Telemetry cards read only link and frame records (Task 10 derives this from the preset).
-  const TELEMETRY_CHANNELS = ['link', 'frames'];
   const banner = $derived(connectionBanner($connection, $stats?.source ?? $hello?.source));
 
   $effect(() => {
-    link.setSubscriptions(channelsFor(page, { tuneChannel: $tuneChannel, cardChannels: TELEMETRY_CHANNELS, hidden }));
+    link.setSubscriptions(channelsFor(page, { tuneChannel: $tuneChannel, cardChannels: $telemetryChannels, hidden }));
   });
 
   onMount(() => {
