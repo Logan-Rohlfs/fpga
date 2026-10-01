@@ -1,7 +1,8 @@
 # SDR handoff
 
-Checkpoint updated 2026-09-30 (branch `gui-prep`). **The host link layer works
-on hardware, and a sample-driven receiver chain now closes timing at 100 MHz.**
+Checkpoint updated 2026-10-01 (branch `gui-prep`). **The host link layer works
+on hardware. A sample-driven receiver chain closed timing at 100 MHz on an
+earlier RTL; the current RTL has not been through Vivado (see Timing and area).**
 GUI v1, the source combiner, the receiver chain and the APEX flight replay demo
 are implemented. The FPGA sends every message type at 1 Mbaud, and the `sdr` CLI
 and dashboard decode and display them.
@@ -18,7 +19,7 @@ planned stages are in [`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio).
 (2) the open receiver-plan tasks, see [Remaining receiver-plan work](#remaining-receiver-plan-work).
 If you are resuming cold, read those two sections first.
 
-## Sample-driven receiver continuation (timing closed; review and board acceptance open)
+## Sample-driven receiver continuation (timing evidence predates later RTL changes; review and board acceptance open)
 
 The user authorized guessed, configurable radio characteristics and completion
 with only the ADC input simulated. This supersedes the earlier wait for confirmed
@@ -36,7 +37,7 @@ ADC vectors (clean, noisy/offset, corrupted CRC), RTL-generated ADC samples,
 no-signal/recovery, and complete UART/CONFIG tests. Host/GUI checks passed
 following independent review fixes.
 
-**Timing and area: closed.** The first Vivado run failed setup at -16.941 ns
+**Timing and area: closed on the earlier RTL only; not re-measured on the current RTL.** The first Vivado run failed setup at -16.941 ns
 with 97% LUTs (`build/sdr/failed-20260929-190956-6f3870be/`), and an intermediate
 run still failed by -12.430 ns (`failed-20260930-101513-6765bf0b`). The observer
 now reads from RAMs, the decimator divider is a pipelined reciprocal multiply,
@@ -48,6 +49,14 @@ differ from the old RTL only in timestamps (at most 1 us later). Default bundle
 pipelining advisories. The worst remaining path is in `source_combiner`
 (`frame_key` -> `a_older`, 12 logic levels), so margin is thin but positive.
 Intermediate failed reports are preserved under `build/sdr/failed-20260930-*`.
+
+**Staleness warning.** Every WNS/WHS/LUT figure here and in the demo section below was
+measured before Task 26 restructured `rx_observer` (RAM-backed, parameterized DFT
+length). That change alters the default bitstream netlist even at the default 64 bins,
+and the demo ROM has since changed to the RocketPy simulation. No Vivado build has run
+on the current RTL because the build host was offline. Run `./sdr build --all` and
+inspect timing and DRC for both variants before calling either bitstream timing-clean
+or board-ready.
 
 **Parallel builds.** `./sdr build --all` builds the default and demo variants
 concurrently with Vivado threads sized from the host core count (`--cores N`
@@ -75,7 +84,7 @@ programs the demo. Ctrl-C cancels concurrent builds cleanly.
   returned to `running` on its own after the holder released the port. USB unplug
   and `./sdr program` during a GUI session were **not** exercised for this task.
 
-## GUI overhaul progress (in progress)
+## GUI overhaul progress (complete; final review done)
 
 The user requested a card-based, multi-viewer GUI overhaul (card dashboard,
 presets, flight readout, multi-user performance). It supersedes the old receiver
@@ -100,10 +109,10 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: plan Tasks 1-25 are complete on `gui-prep` except Task 26 (FPGA DFT length), which is in progress on a separate branch; Task 23 (docs) is done. Next: Task 26's result, then the final whole-branch review.** The integration pass, the host `--source demo`, the RocketPy demo ROM, the plot/card sizing work and per-loop segment clearing all landed after the last checkpoint; see [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md) for status and what remains.
+**Current task: the GUI cards plan is complete on `gui-prep`, including Task 26 (FPGA DFT length), and the final whole-branch review is done with its fixes applied. Open: a Vivado build of the default and demo bitstreams on the current RTL (`./sdr build --all`; the build host was offline), a board run of the new RocketPy demo ROM, and a real-browser smoke pass.** See [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md) for status and what remains.
 
 **Verified checkpoint (GUI cards).**
-- Newly run for this docs commit: host suite (322 tests, OK, 3 skipped), vitest 270 pass, svelte-check 0 errors and 0 warnings, production build, and `./sdr sim` (all PASS).
+- Newly run for the final-review fix wave (2026-10-01): host suite (326 tests, OK, 3 skipped), vitest 275 pass, svelte-check 0 errors and 0 warnings, production build, and `./sdr sim` (all PASS, exit 0). No Vivado run and no board access in that wave.
 - Run earlier in this effort (sizing commit `e73b4b4`, not repeated for this commit): a headless-Chrome overflow probe at 1440x900 and 1920x1080 with `./sdr gui --source demo`, checking that no Flight preset card scrolls or clips.
 - Not verified: no hardware run of the new RocketPy demo ROM, and no Vivado build of it (resource use and timing unmeasured; the earlier recorded-log demo build numbers below do not apply). No phone or LAN viewer was tried. Camera capture and a server-side relay are not built (the camera card only embeds a stream URL).
 - Task 26 (parameterized DFT length): `sdr_top` parameter `SPECTRUM_BINS` (64, 128 or 256; other values fail elaboration) sets the `rx_observer` DFT length.
@@ -124,10 +133,12 @@ per-task sections to carry into each dispatch. One user clarification is recorde
 there and in the spec (§10): "events" means flight-state events, and link events are
 a separate category with their own event-log view.
 
-Deferred minor findings from the task reviews are in the local ledger for the final
-whole-branch review. The most relevant open one: `metrics_history` carries no
-SYNTHETIC flag. (The send-loop finding was fixed in Task 25: an unexpected send error
-is logged and closes the socket with code 1011.)
+Deferred minor findings from the task reviews were triaged in the final whole-branch
+review; the fixes landed (for example `metrics_history` now carries the SYNTHETIC flag
+via `history.py`, and the send-loop error closes the socket with code 1011). The
+final-review fix wave also made Freeze hold the Raw frames and Events cards, made a
+display segment start only after a LANDED reset, hardened multi-series plot merging
+and separated serial permission errors from a busy port.
 
 The ledgers under `.superpowers/sdd/` are git-ignored local files. On another
 machine they won't exist. Rebuild progress from `git log` (task commits name
@@ -207,10 +218,9 @@ measured). apex finding for the user, not changed here: airbrakes.yaml / FSW-mod
 PID gains (Kp 0.4, Kd -0.04, Mach gate 240 m/s) differ from fsw/src/config.h
 (0.6, -0.05, 260). Details and the full
 assumption list are in the [SDR guide](../projects/sdr/README.md#apex-flight-replay-demo-opt-in-build).
-The GUI flight card is not built yet (it is part of the GUI overhaul). The host
-already decodes FLIGHT fields (`sdr_cli.apex`).
+The GUI flight card exists (GUI cards plan); the host decodes FLIGHT fields in `sdr_cli.apex`.
 
-- Default bitstream unchanged: HEAD and the new RTL give byte-identical
+- (Historical, before Task 26.) Default bitstream unchanged: HEAD and the new RTL gave byte-identical
   default UART captures and ADC samples in simulation. Default build
   `20260930-110814-cc50decc` matched the Task 1 bitstream body byte for byte
   (WNS +0.120 ns, WHS +0.023 ns, 5,241 LUTs, 6,911 FFs, 0 BRAM, 41 DSPs).

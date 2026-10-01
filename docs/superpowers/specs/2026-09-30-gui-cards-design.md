@@ -670,7 +670,8 @@ The frontend tests cover event filtering and formatting (`lib/events.ts`).
 
 Event object: `{id: int (monotonic), t: float, kind, category: 'flight'|'link',
 text, channel: 'A'|'B'|null, value: number|null, quantity: string|null,
-segment: int, synthetic: bool}`.
+segment: int, synthetic: bool, prev_phase: str|null}`. `prev_phase` is set
+only on `flight_reset` (the phase before the regression).
 
 **Refinement (user, 2026-09-30):** "events" primarily means flight-state
 events (phase transitions such as launch and burnout). Link events are a
@@ -690,7 +691,7 @@ preset triggers use flight events only.
 | `apogee` | First exit from COAST in the segment. `value` is the maximum `alt_agl_m` seen in the segment, `t` is the time of that maximum, and the quantity is length. |
 | `max_velocity` | Emitted with `apogee`. `value` is the maximum `velocity_mps` in the segment up to that point. |
 | `landing` | Entering LANDED. |
-| `flight_reset` | The phase regresses to IDLE or ARMED from BOOST, COAST, DESCENT or LANDED. Text is "New flight segment (replay loop or flight-computer restart)". The segment counter increments, and max-alt, max-velocity and apogee state reset. |
+| `flight_reset` | The phase regresses to IDLE or ARMED from BOOST, COAST, DESCENT or LANDED. Text is "New flight segment (replay loop or flight-computer restart)". The segment counter increments, and max-alt, max-velocity and apogee state reset. `prev_phase` carries the phase before the reset. The GUI starts a new *display* segment (`segment: current`) only when `prev_phase` is LANDED; a reset from BOOST, COAST or DESCENT (mid-flight reboot) keeps the pre-reboot track visible. |
 
 **Refinement:** the segment rule exists because the demo loops every 15.65 s
 (ARMED … DESCENT → ARMED). The loop is shown as new segments, not corrected or
@@ -755,7 +756,7 @@ fixed 22 px high. Only rows in the window are in the DOM.
 | The source sends no FLIGHT frames (the default bitstream sends TEST frames) | Flight cards show "No FLIGHT frames from this source. The default bitstream sends TEST frames; build with --demo for the flight replay." after 5 s with other frames arriving. |
 | Stale data | A header chip `stale 3.2 s` when the newest row is older than 1 s (flight), 3 s (link) or 2 s (spectrum). The value stays visible and is muted. |
 | GPS invalid | See §13.5. Map and 3D say "GPS position invalid: fix SEARCHING, 0 sats. Horizontal position unknown." |
-| SYNTHETIC data | A card header badge `SIMULATED` when the newest row or record it shows has the SYNTHETIC flag. With profile `apex_demo`, flight-fed cards instead show `REPLAY · SIMULATED ADC` with the tooltip "Replayed IREC 2026 flight through the real receiver; the ADC input is simulated". The global header pill is unchanged. |
+| SYNTHETIC data | A card header badge `SIMULATED` when the newest row or record it shows has the SYNTHETIC flag. With profile `apex_demo`, flight-fed cards instead show `SIM FLIGHT · SIMULATED ADC` with the tooltip "RocketPy simulation of the IREC 2026 competition flight (Pecos TX) through the real receiver; the ADC input is simulated" (host demo source: "... replayed by the host demo source (no FPGA); signal metrics are modelled"). The global header pill is unchanged. |
 | Disconnected or source down | v1 banner and dimming. Cards keep the last data. |
 | Tiles missing | Leaflet shows a neutral "tile not downloaded" tile. The map footer says "Run ./sdr maps fetch --site <id> on the server". |
 | No sites downloaded | The Map card shows the track on a blank grid with a lat/lon graticule and the same hint. |
