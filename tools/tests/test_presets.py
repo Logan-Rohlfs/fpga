@@ -323,6 +323,16 @@ class TriggerTest(unittest.TestCase):
             self.assertIsNone(self.engine.on_event(ev))
         self.assertEqual(self.store.state()['live'], 'coast')
 
+    def test_phase_trigger_on_idle_switches_after_a_reset(self):
+        # A preset can opt in to switching back on the loop reset; the engine treats IDLE like any phase.
+        self.save('landed', [{'on': 'phase', 'value': 'IDLE', 'preset': 'start'}])
+        self.store.set_auto_switch(True)
+        self.store.set_live('landed')
+        self.assertIsNone(self.engine.on_event(phase('LANDED', 'ARMED')))
+        self.assertEqual(self.engine.on_event(phase('LANDED', 'IDLE')), 'start')
+        self.assertEqual(self.store.state()['live'], 'start')
+        self.assertEqual(self.engine.last, ('start', 'phase IDLE'))
+
 
 if __name__ == '__main__':
     unittest.main()

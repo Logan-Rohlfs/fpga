@@ -31,7 +31,7 @@ def parser():
     setup.add_argument('--project', choices=['sdr', 'blink'])
     setup.add_argument('--interactive', action='store_true', help='Prompt for connection settings')
     setup.add_argument('--gui-password', action='store_true',
-                       help='Prompt for the GUI Admin password (stored hashed in .sdr/config.json)')
+                       help='Prompt for the GUI Operator password (stored hashed in .sdr/config.json)')
     doctor = sub.add_parser('doctor', help='Check tools and board ports')
     doctor.add_argument('--remote', action='store_true', help='Also check SSH and the Vivado path')
     doctor.add_argument('--board', action='store_true', help='Also query JTAG via openFPGALoader')
@@ -125,7 +125,7 @@ def prompt_gui_password(read=getpass.getpass, interactive=None):
         interactive = sys.stdin.isatty()
     if not interactive:
         raise ToolError('Setting the GUI password needs a terminal.')
-    first = read('New GUI Admin password: ')
+    first = read('New GUI Operator password: ')
     if len(first) < 8:
         raise ToolError('Use at least 8 characters.')
     if read('Repeat the password: ') != first:
@@ -135,7 +135,7 @@ def prompt_gui_password(read=getpass.getpass, interactive=None):
 
 
 def public_config(config):
-    """Settings safe to print: the Admin password hash is masked."""
+    """Settings safe to print: the Operator password hash is masked."""
     return dict(config, gui_admin_hash='(set)' if config.get('gui_admin_hash') else '')
 
 
