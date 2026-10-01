@@ -94,6 +94,7 @@ interface Spec {
   channels(config: Config): string[];
   settings?: SettingField[];
   titleOf?(config: Config): string;
+  component?: CardMeta['component'];
 }
 
 function meta(spec: Spec): CardMeta {
@@ -110,7 +111,7 @@ function meta(spec: Spec): CardMeta {
   };
   return {
     type: spec.type, title: spec.title, min: spec.min, phoneMinH: spec.phoneMinH, defaults: spec.defaults,
-    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf,
+    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf, component: spec.component,
     channels: (config) => [...new Set(spec.channels(sanitize(config)))],
   };
 }
@@ -156,6 +157,7 @@ const specs: Spec[] = [
       { key: 'show_events', label: 'Show events', kind: 'bool' },
       { key: 'units', label: 'Units', kind: 'units' },
     ],
+    component: () => import('../../cards/PlotCard.svelte'),
   },
   {
     type: 'number', title: 'Value', min: { w: 2, h: 2 }, phoneMinH: 3,
