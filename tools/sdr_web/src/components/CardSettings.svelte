@@ -1,7 +1,7 @@
 <script lang="ts">
   // Per-type settings form, generated from the card meta's `settings` descriptor. Every edit is run through the
   // type's sanitize before it is reported, so a bad value cannot leave the form. Viewers get it read-only.
-  import { REGISTRY, type Config, type SettingField } from '../lib/cards/registry';
+  import { REGISTRY, SERIES_SOURCES, type Config, type SettingField } from '../lib/cards/registry';
   import { flightSchema } from '../lib/link';
   import { quantityNames, unitOptions } from '../lib/units';
 
@@ -13,7 +13,7 @@
   const meta = $derived(REGISTRY[type]);
   const fields = $derived($flightSchema?.fields ?? []);
   const METRICS = ['m.rssi', 'm.noise', 'm.snr', 'm.df'];
-  const SOURCES = ['best', 'A', 'B'];
+  const SOURCE_LABELS: Record<string, string> = { best: 'Best', A: 'A', B: 'B', both: 'A and B' };
   const quantities = quantityNames().filter((q) => unitOptions(q).length > 1);
   const id = (key: string) => `cs-${type}-${key}`;
 
@@ -102,7 +102,7 @@
               </select>
               <select aria-label="Series {i + 1} source" disabled={readonly} value={s.source}
                 onchange={(e) => setSeries(i, { source: e.currentTarget.value })}>
-                {#each SOURCES as src (src)}<option value={src}>{src}</option>{/each}
+                {#each SERIES_SOURCES as src (src)}<option value={src}>{SOURCE_LABELS[src]}</option>{/each}
               </select>
               {#if !readonly}<button class="btn" aria-label="Remove series {i + 1}" disabled={series().length <= 1}
                 onclick={() => set('series', series().filter((_, j) => j !== i))}>Remove</button>{/if}

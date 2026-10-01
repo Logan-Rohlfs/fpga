@@ -42,6 +42,8 @@ const nullableInt = (lo: number, hi: number): Validator => (v, d) => (v === null
 const text = (max: number): Validator => (v, d) => (typeof v === 'string' && v.length >= 1 && v.length <= max ? v : d);
 const nullableText = (max: number): Validator => (v, d) => (v === null ? null : text(max)(v, d));
 const SOURCES = ['best', 'A', 'B'] as const;
+/** Plot series may also overlay A and B (`both`, expanded by plot.ts expandSeries). */
+export const SERIES_SOURCES = [...SOURCES, 'both'] as const;
 
 const url: Validator = (v, d) => (typeof v === 'string' && v.length <= 500 && /^https?:\/\/\S+$/i.test(v) ? v : d);
 
@@ -57,7 +59,7 @@ const seriesList: Validator = (v, d) => {
   if (!Array.isArray(v)) return d;
   const out: { field: string; source: string }[] = [];
   for (const item of v) {
-    if (isObj(item) && typeof item.field === 'string' && item.field && item.field.length <= 40 && SOURCES.includes(item.source as never)) {
+    if (isObj(item) && typeof item.field === 'string' && item.field && item.field.length <= 40 && SERIES_SOURCES.includes(item.source as never)) {
       out.push({ field: item.field, source: item.source as string });
     }
   }

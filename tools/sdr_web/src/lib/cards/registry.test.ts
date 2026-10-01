@@ -80,6 +80,10 @@ describe('registry', () => {
     expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'A' }] })).toEqual(['flight.A', 'events']);
     expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'best' }], show_events: false })).toEqual(['flight']);
     expect(REGISTRY.plot.channels({ series: [{ field: 'm.rssi', source: 'B' }], show_events: false })).toEqual(['link']);
+    expect(REGISTRY.plot.sanitize({ series: [{ field: 'alt_agl_m', source: 'both' }] }).series)
+      .toEqual([{ field: 'alt_agl_m', source: 'both' }]);
+    expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'both' }], show_events: false }))
+      .toEqual(['flight.A', 'flight.B']);
     expect(REGISTRY.waterfall.channels({ channel: 'B' })).toEqual(['spectrum.B']);
     expect(REGISTRY.camera.channels({})).toEqual([]);
     expect(REGISTRY.number.channels({ source: 'both' })).toEqual(['flight.A', 'flight.B']);
