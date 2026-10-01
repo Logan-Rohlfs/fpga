@@ -25,9 +25,9 @@ export function crcSpan(frameLen: number): [number, number] {
 }
 
 /** One-line text for a frame row and whether it failed its CRC (record field or parsed APEX frame). */
-export function frameLabel(r: RecordMsg): { text: string; crcBad: boolean } {
+export function frameLabel(r: RecordMsg): { text: string; crcBad: boolean; synthetic: boolean } {
   const f = r.record.fields;
   const crcBad = f.crc_ok === false || f.apex?.crc_ok === false;
   const base = r.text || r.record.type;
-  return { text: crcBad && !/CRC-BAD/.test(base) ? `${base} CRC-BAD` : base, crcBad };
+  return { text: crcBad && !/CRC-BAD/.test(base) ? `${base} CRC-BAD` : base, crcBad, synthetic: r.record.synthetic === true };
 }

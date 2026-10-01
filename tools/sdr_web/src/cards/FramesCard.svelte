@@ -11,7 +11,7 @@
   const view = $derived(localView ?? (config.view === 'hex' ? 'hex' : 'text'));
   const filter = $derived((['all', 'A', 'B', 'best'].includes(config.filter as string) ? config.filter : 'all') as FrameFilter);
 
-  type Line = { head: true; text: string; bad: boolean } | { head: false; pre: string; crc: string };
+  type Line = { head: true; text: string; bad: boolean; syn: boolean } | { head: false; pre: string; crc: string };
   function hexLine(group: string, offset: number, span: [number, number]): Line {
     const bytes = group.match(/../g) ?? [];
     const pre: string[] = [];
@@ -26,7 +26,7 @@
     const out: Line[] = [];
     for (const m of items) {
       const l = frameLabel(m);
-      out.push({ head: true, text: l.text, bad: l.crcBad });
+      out.push({ head: true, text: l.text, bad: l.crcBad, syn: l.synthetic });
       const raw = m.record.raw ?? '';
       const span = crcSpan(raw.length / 2);
       hexGroups(raw).forEach((g, gi) => out.push(hexLine(g, gi * 16, span)));
@@ -54,13 +54,13 @@
           {#if view === 'hex'}
             {@const l = lines[i]}
             {#if l.head}
-              <span class="head" class:bad={l.bad}>{l.text}</span>
+              <span class="head" class:bad={l.bad}>{l.text}</span>{#if l.syn}<span class="syn" title="Simulated data">SIM</span>{/if}
             {:else}
               <span class="hex">{l.pre}<span class="crc">{l.crc}</span></span>
             {/if}
           {:else}
             {@const l = frameLabel(items[i])}
-            <span class="head" class:bad={l.crcBad}>{l.text}</span>
+            <span class="head" class:bad={l.crcBad}>{l.text}</span>{#if l.synthetic}<span class="syn" title="Simulated data">SIM</span>{/if}
           {/if}
         {/snippet}
       </VirtualList>
@@ -77,6 +77,7 @@
   .list { flex: 1; min-height: 0; font-size: 12px; }
   .empty { padding: 12px; margin: 0; }
   .head, .hex { padding: 0 8px; }
+  .syn { flex: none; font-size: 10px; padding: 0 6px; opacity: 0.7; }
   .bad { color: var(--bad); }
   .hex { color: var(--muted); }
   .crc { color: var(--brand); }

@@ -36,8 +36,13 @@ describe('crcSpan', () => {
 
 describe('frameLabel', () => {
   it('flags CRC-BAD from fields.crc_ok', () => expect(frameLabel(rec('CHAN_FRAME', { crc_ok: false }, 'a')))
-    .toEqual({ text: 'a CRC-BAD', crcBad: true }));
+    .toEqual({ text: 'a CRC-BAD', crcBad: true, synthetic: false }));
   it('flags CRC-BAD from apex.crc_ok', () => expect(frameLabel(rec('BEST_TELEM', { apex: { crc_ok: false } }, 'b')).crcBad).toBe(true));
   it('does not duplicate an existing marker', () => expect(frameLabel(rec('BEST_TELEM', { crc_ok: false }, 'b CRC-BAD')).text).toBe('b CRC-BAD'));
-  it('is good otherwise', () => expect(frameLabel(rec('BEST_TELEM', { crc_ok: true }, 'ok'))).toEqual({ text: 'ok', crcBad: false }));
+  it('is good otherwise', () => expect(frameLabel(rec('BEST_TELEM', { crc_ok: true }, 'ok'))).toEqual({ text: 'ok', crcBad: false, synthetic: false }))
+  it('carries the synthetic flag', () => {
+    const r = rec('BEST_TELEM');
+    r.record.synthetic = true;
+    expect(frameLabel(r).synthetic).toBe(true);
+  });;
 });

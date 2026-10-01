@@ -11,6 +11,8 @@
   const allKinds = $derived<readonly string[]>(category === 'link' ? LINK_KINDS : FLIGHT_CATEGORY_KINDS);
   // Chip toggles are a local view filter; null means "follow the configured kinds".
   let local = $state<{ category: string; kinds: string[] } | null>(null);
+  let seenKinds: unknown;
+  $effect.pre(() => { if (config.kinds !== seenKinds) { seenKinds = config.kinds; local = null; } });
   const kinds = $derived(
     local && local.category === category ? local.kinds : ((config.kinds as string[] | undefined) ?? [...allKinds]),
   );
