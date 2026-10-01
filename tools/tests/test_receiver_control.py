@@ -3,10 +3,17 @@ import unittest
 from dataclasses import replace
 from sdr_cli.freqplan import TuningState, with_lo
 from sdr_cli.protocol import crc16_ccitt
-from sdr_cli.receiver_control import command, tuning_words
+from sdr_cli.receiver_control import command, profile_for, tuning_words
 
 
 class ReceiverControlTests(unittest.TestCase):
+    def test_profiles_by_build_id(self):
+        self.assertEqual(profile_for(0x53445231)['id'], 'default')
+        apex = profile_for(0x53445246)
+        self.assertEqual(apex['id'], 'apex_demo')
+        self.assertIn('441.480 MHz', apex['rf_label'])
+        self.assertEqual(profile_for(0x1234), {'id': 'unknown', 'label': 'Unknown build 0x00001234'})
+
     def test_wire_command(self):
         data = command(17, 0x11223344, 0xaabbccdd, False)
         self.assertEqual(len(data), 15)

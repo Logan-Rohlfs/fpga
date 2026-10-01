@@ -12,6 +12,7 @@
   import TuningDigits from '../components/TuningDigits.svelte';
   import Waterfall from '../components/Waterfall.svelte';
   import type { Overlay } from '../lib/draw';
+  import { profileOf } from '../lib/receiver';
   import { khz, mhz, signedKhz } from '../lib/format';
   import { connection, hello, link, metricsView as metrics, role, stats, tuning } from '../lib/link';
   import type { Channel, SpectrumMsg, TuningChanges } from '../lib/types';
@@ -22,6 +23,7 @@
 
   const disabled = $derived($role?.role !== 'admin' || $connection !== 'open');
   const source = $derived($stats?.source ?? $hello?.source);
+  const profile = $derived(profileOf(source));
   const t = $derived($tuning);
   const m = $derived($metrics[$tuneChannel]?.fields);
   let row = $state<SpectrumMsg | null>(null);
@@ -54,7 +56,7 @@
 {#if !t}
   <p class="note">Waiting for the server…</p>
 {:else}
-  <p class="note assumptions">{source?.kind === 'serial' && source.responds_to_tuning ? 'ADC input is simulated; filtering, demodulation, decoding and measurements run in RTL. Rate and filter profile are fixed by this bitstream.' : 'Requested frequency plan. Hardware data is projected into RF only with a known acquisition reference.'}</p>
+  <p class="note assumptions">{source?.kind === 'serial' && source.responds_to_tuning ? 'ADC input is simulated; filtering, demodulation, decoding and measurements run in RTL. Rate and filter profile are fixed by this bitstream.' : 'Requested frequency plan. Hardware data is projected into RF only with a known acquisition reference.'}{#if source?.profile} Receiver profile: {profile.label}.{/if}</p>
   <div class="tune">
     <div class="main">
       <Panel title="Frequency plan" sub={disabled ? 'RF domain' : 'RF domain · drag or scroll to move the LO'}>
@@ -65,7 +67,8 @@
         <div class="readouts">
           <div class="ro"><span class="k">LO (requested model)</span>
             <TuningDigits revision={t} hz={t.derived.lo_hz} stepHz={t.derived.lo_step_hz} {disabled} onchange={(hz) => tune({ lo_hz: hz })} /></div>
-          <div class="ro"><span class="k">Carrier (nominal)</span><span class="v">{mhz(t.state.carrier_hz)}</span></div>
+          <div class="ro"><span class="k">Carrier (nominal)</span><span class="v">{mhz(t.state.carrier_hz)}</span>
+            {#if profile.id === 'apex_demo' && profile.rf_label}<span class="note">{profile.rf_label}</span>{/if}</div>
           <div class="ro"><span class="k">Expected IF</span><span class="v">{khz(t.derived.expected_if_hz)}</span></div>
           <div class="ro"><span class="k">Image at</span><span class="v">{mhz(t.derived.image_hz)}</span></div>
         </div>
@@ -103,7 +106,7 @@
 
     <aside class="rail">
       {#if disabled}
-        <p class="note viewer">Viewing only. Log in as Admin (top right) to change tuning.</p>
+        <p class="note viewer">Viewing only. Log in as Operator (top right) to change tuning.</p>
       {/if}
       <ReceiverPanel {t} {disabled} fixedProfile={source?.kind === 'serial' && !!source.responds_to_tuning} ontune={tune} />
       <SynthPanel {t} {disabled} ontune={tune} />

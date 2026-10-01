@@ -349,7 +349,7 @@ export function handleMessage(msg: ServerMsg | ArrayBuffer): void {
       role.set(msg);
       if (msg.token) saveToken(msg.token);
       else if (msg.role === 'viewer') clearToken();
-      if (msg.reason === 'taken_over') notify(`${msg.by ?? 'Someone'} took over Admin. You are now a Viewer.`, 'warn', 10000);
+      if (msg.reason === 'taken_over') notify(`${msg.by ?? 'Someone'} took over Operator. You are now a Viewer.`, 'warn', 10000);
       break;
     case 'takeover_required': takeover.set(msg); break;
     case 'error': notify(msg.text, 'warn'); break;

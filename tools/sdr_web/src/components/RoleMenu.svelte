@@ -1,6 +1,7 @@
 <script lang="ts">
   import { link, role, takeover } from '../lib/link';
   import { clockTime } from '../lib/format';
+  import { roleLabel } from '../lib/receiver';
 
   const LABEL_KEY = 'sdr.adminLabel';
   const loadLabel = () => { try { return localStorage.getItem(LABEL_KEY) ?? ''; } catch { return ''; } };
@@ -35,29 +36,29 @@
 
 <div class="role">
   <button class="btn" class:admin={isAdmin} aria-expanded={open} onclick={() => (open = !open)}>
-    {isAdmin ? 'Admin' : 'Viewer'}{#if !isAdmin && $role?.admin}<span class="muted"> · Admin: {$role.admin.label}</span>{/if}
+    {roleLabel($role?.role)}{#if !isAdmin && $role?.admin}<span class="muted"> · Operator: {$role.admin.label}</span>{/if}
   </button>
   {#if open}
     <div class="pop panel pb stack" role="dialog" aria-label="Role">
       {#if isAdmin && $role?.admin}
-        <p>You are Admin as <b>{$role.admin.label}</b> since {clockTime($role.admin.since)}.</p>
+        <p>You are Operator as <b>{$role.admin.label}</b> since {clockTime($role.admin.since)}.</p>
         <button class="btn" onclick={() => { link.logout(); open = false; }}>Switch to Viewer</button>
       {:else if $takeover}
-        <p>Admin is held by <b>{$takeover.held_by}</b> since {clockTime($takeover.since)}. Take over? They will become a Viewer.</p>
+        <p>Operator is held by <b>{$takeover.held_by}</b> since {clockTime($takeover.since)}. Take over? They will become a Viewer.</p>
         <div class="row">
           <button class="btn primary" onclick={confirmTakeover}>Take over</button>
           <button class="btn" onclick={cancelTakeover}>Cancel</button>
         </div>
       {:else if $role && !$role.can_admin}
-        <p class="note">No Admin password is set on the server, so only the server machine can become Admin.
+        <p class="note">No Operator password is set on the server, so only the server machine can become Operator.
           Set one there with <code>./sdr setup --gui-password</code>.</p>
       {:else}
         <form class="stack" onsubmit={submit}>
           <label for="role-label">Your name</label>
           <input id="role-label" bind:value={label} maxlength="32" autocomplete="nickname" placeholder="groundstation" />
-          <label for="role-password">Admin password</label>
+          <label for="role-password">Operator password</label>
           <input id="role-password" type="password" bind:value={password} autocomplete="current-password" />
-          <button class="btn primary" type="submit">Log in as Admin</button>
+          <button class="btn primary" type="submit">Log in as Operator</button>
         </form>
       {/if}
     </div>

@@ -26,6 +26,13 @@ def fake_hub(start=1760000000.0):
 
 
 class HubTest(unittest.TestCase):
+    def test_status_build_id_sets_source_profile(self):
+        hub = Hub()
+        self.assertNotIn('profile', hub.stats_message()['source'])
+        hub.feed(p.encode_message(p.STATUS, p.build_payload(p.STATUS, dict(
+            version=p.PROTOCOL_VERSION, channels=3, uptime_ms=1, build_id=0x53445246, dropped=0)), seq=0))
+        self.assertEqual(hub.stats_message()['source']['profile']['id'], 'apex_demo')
+
     def test_feed_turns_records_into_client_messages(self):
         hub = Hub()
         seen = []
