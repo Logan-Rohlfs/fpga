@@ -1,0 +1,266 @@
+{
+  "quantities": {
+    "acceleration": {
+      "si": "m/s\u00b2",
+      "units": [
+        {
+          "factor": 1,
+          "id": "m/s\u00b2",
+          "label": "m/s\u00b2",
+          "offset": 0
+        },
+        {
+          "factor": 3.280839895,
+          "id": "ft/s\u00b2",
+          "label": "ft/s\u00b2",
+          "offset": 0
+        },
+        {
+          "factor": 0.10197162129779283,
+          "id": "g",
+          "label": "g",
+          "offset": 0
+        }
+      ]
+    },
+    "angle": {
+      "si": "deg",
+      "units": [
+        {
+          "factor": 1,
+          "id": "deg",
+          "label": "deg",
+          "offset": 0
+        }
+      ]
+    },
+    "angular_rate": {
+      "si": "rad/s",
+      "units": [
+        {
+          "factor": 1,
+          "id": "rad/s",
+          "label": "rad/s",
+          "offset": 0
+        },
+        {
+          "factor": 57.29577951308232,
+          "id": "deg/s",
+          "label": "deg/s",
+          "offset": 0
+        }
+      ]
+    },
+    "bits": {
+      "si": null,
+      "units": []
+    },
+    "coordinate": {
+      "si": "deg",
+      "units": [
+        {
+          "factor": 1,
+          "id": "deg",
+          "label": "deg",
+          "offset": 0
+        }
+      ]
+    },
+    "count": {
+      "si": null,
+      "units": []
+    },
+    "enum": {
+      "si": null,
+      "units": []
+    },
+    "enum_signed": {
+      "si": null,
+      "units": []
+    },
+    "frequency": {
+      "si": "Hz",
+      "units": [
+        {
+          "factor": 1,
+          "id": "Hz",
+          "label": "Hz",
+          "offset": 0
+        },
+        {
+          "factor": 0.001,
+          "id": "kHz",
+          "label": "kHz",
+          "offset": 0
+        },
+        {
+          "factor": 1e-06,
+          "id": "MHz",
+          "label": "MHz",
+          "offset": 0
+        }
+      ]
+    },
+    "length": {
+      "si": "m",
+      "units": [
+        {
+          "factor": 1,
+          "id": "m",
+          "label": "m",
+          "offset": 0
+        },
+        {
+          "factor": 0.001,
+          "id": "km",
+          "label": "km",
+          "offset": 0
+        },
+        {
+          "factor": 3.280839895,
+          "id": "ft",
+          "label": "ft",
+          "offset": 0
+        }
+      ]
+    },
+    "power_db": {
+      "si": "dB",
+      "units": [
+        {
+          "factor": 1,
+          "id": "dB",
+          "label": "dB",
+          "offset": 0
+        }
+      ]
+    },
+    "power_dbfs": {
+      "si": "dBFS",
+      "units": [
+        {
+          "factor": 1,
+          "id": "dBFS",
+          "label": "dBFS",
+          "offset": 0
+        }
+      ]
+    },
+    "pressure": {
+      "si": "Pa",
+      "units": [
+        {
+          "factor": 1,
+          "id": "Pa",
+          "label": "Pa",
+          "offset": 0
+        },
+        {
+          "factor": 0.01,
+          "id": "hPa",
+          "label": "hPa",
+          "offset": 0
+        },
+        {
+          "factor": 0.000295299830714,
+          "id": "inHg",
+          "label": "inHg",
+          "offset": 0
+        }
+      ]
+    },
+    "ratio": {
+      "si": "1",
+      "units": [
+        {
+          "factor": 1,
+          "id": "fraction",
+          "label": "fraction",
+          "offset": 0
+        },
+        {
+          "factor": 100,
+          "id": "%",
+          "label": "%",
+          "offset": 0
+        }
+      ]
+    },
+    "speed": {
+      "si": "m/s",
+      "units": [
+        {
+          "factor": 1,
+          "id": "m/s",
+          "label": "m/s",
+          "offset": 0
+        },
+        {
+          "factor": 3.6,
+          "id": "km/h",
+          "label": "km/h",
+          "offset": 0
+        },
+        {
+          "factor": 2.2369362920544,
+          "id": "mph",
+          "label": "mph",
+          "offset": 0
+        },
+        {
+          "factor": 3.280839895,
+          "id": "ft/s",
+          "label": "ft/s",
+          "offset": 0
+        }
+      ]
+    },
+    "temperature": {
+      "si": "\u00b0C",
+      "units": [
+        {
+          "factor": 1,
+          "id": "\u00b0C",
+          "label": "\u00b0C",
+          "offset": 0
+        },
+        {
+          "factor": 1.8,
+          "id": "\u00b0F",
+          "label": "\u00b0F",
+          "offset": 32
+        }
+      ]
+    }
+  },
+  "systems": {
+    "imperial": {
+      "acceleration": "ft/s\u00b2",
+      "angle": "deg",
+      "angular_rate": "deg/s",
+      "coordinate": "deg",
+      "frequency": "kHz",
+      "length": "ft",
+      "power_db": "dB",
+      "power_dbfs": "dBFS",
+      "pressure": "inHg",
+      "ratio": "%",
+      "speed": "ft/s",
+      "temperature": "\u00b0F"
+    },
+    "metric": {
+      "acceleration": "m/s\u00b2",
+      "angle": "deg",
+      "angular_rate": "deg/s",
+      "coordinate": "deg",
+      "frequency": "kHz",
+      "length": "m",
+      "power_db": "dB",
+      "power_dbfs": "dBFS",
+      "pressure": "hPa",
+      "ratio": "%",
+      "speed": "m/s",
+      "temperature": "\u00b0C"
+    }
+  }
+}

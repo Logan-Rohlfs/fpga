@@ -8,8 +8,15 @@
 
 The current checkpoint is a working FPGA-to-host link layer carrying SIMULATED
 data (see `docs/sdr_pipeline.drawio` and the spec in `docs/superpowers/specs/`).
-The user is building the pipeline backwards from the UART toward the XADC. Follow
-the user's chosen next stage; do not silently select DSP constants or RF settings.
+The Space Raiders SDR web GUI (v1 plus the card overhaul) and source combiner are implemented. See their
+implementation status in the handoff and plans in `docs/superpowers/plans/`.
+The next upstream stage is frame sync + CRC; DSP stages follow later. Follow the user's chosen
+scope. Do not silently select DSP constants or RF settings, and do not add GUI
+dependencies beyond the spec's list (aiohttp in the `gui` extra; the frontend
+packages in `tools/sdr_web/package.json`). The GUI overhaul added `leaflet`,
+`uplot` and `three` (runtime; `three` only through dynamic `import()`) plus
+`@types/leaflet` and `@types/three` (dev). Python adds no dependency (maps use
+`urllib`). Nothing else.
 
 ## Work within the existing structure
 
@@ -18,15 +25,25 @@ the user's chosen next stage; do not silently select DSP constants or RF setting
 - `tools/sdr_cli/core.py` owns build/program operations; `serial_io.py` owns UART;
   `cli.py` and `tui.py` expose those shared operations. Keep CLI and dashboard
   behavior consistent rather than adding separate build/program implementations.
+- **GUI layout:**
+  - Logic lives in toolkit-free modules: `freqplan.py`, `roles.py`,
+    `sources.py`, `hub.py`, `apex.py`, `units.py`, `gui_wire.py`, `events.py`,
+    `history.py`, `fanout.py`, `presets.py` and `maps.py`.
+  - `web/server.py` is thin aiohttp glue.
+  - The Svelte frontend lives in `tools/sdr_web/` and builds into the ignored
+    `tools/sdr_cli/web/static/`.
+  - Frequency math stays in Python. The frontend only draws and sends intent.
 - Python supports 3.9+. RTL simulation uses Icarus/SystemVerilog (`-g2012`).
 - `scripts/build.tcl` and `core.py:source_files` must agree on build inputs.
-  They currently include only direct `.v`/`.sv` files and one project XDC.
-  Add include files, nested RTL, ROM assets, or IP to both if a task needs them.
+  They currently include direct `.v`/`.sv` files, `projects/<project>/rom/*.mem`
+  memory images and one project XDC. Add include files, nested RTL, other assets,
+  or IP to both if a task needs them.
 - Keep the link wire format in `tools/sdr_cli/protocol.py` and the RTL in step.
   `./sdr sim` cross-checks them. Stand-in producers must set `SYNTHETIC`, and
   real stages clear it only for measured data.
-- Do not label raw host writes as successful FPGA commands: no command
-  receiver or acknowledgement exists yet.
+- Do not label raw host writes as successful FPGA commands. Only UART tuning
+  (receiver control) is acknowledged, with CONFIG; anything else the host
+  sends has no receiver or acknowledgement.
 
 ## Local state and hardware
 
@@ -54,6 +71,14 @@ For host changes:
 ```sh
 PYTHONPATH=tools .venv/bin/python -m unittest discover -s tools/tests -v
 ```
+
+For GUI frontend changes (Node needed only here):
+
+```sh
+(cd tools/sdr_web && npm install && npm test && npm run check && npm run build)
+```
+
+The GUI server tests need the extra: `.venv/bin/python -m pip install -e '.[gui]'`.
 
 For SDR RTL changes: `./sdr sim`. For blink changes: `./sdr sim --project blink`.
 Run Vivado and inspect timing/DRC reports for hardware changes before claiming a

@@ -5,6 +5,7 @@ type byte, little-endian body, CRC-16-CCITT (init 0xFFFF) over type+body, sent
 big-endian. Replace or extend once the defined flight telemetry format is supplied.
 """
 import struct
+from pathlib import Path
 
 from .protocol import crc16_ccitt
 
@@ -14,7 +15,66 @@ TEST_TEXT_LEN = 15
 FLIGHT_STRUCT = struct.Struct('<6sHBBbBff7hBHbbH')   # 41 bytes
 HK_STRUCT = struct.Struct('<H3h3h2hH')              # 20 bytes
 PHASES = ('IDLE', 'ARMED', 'BOOST', 'COAST', 'DESCENT', 'LANDED')
+PHASE_ENUM = PHASES + ('UNKNOWN',)
+INTERLOCK_BITS = {3: 'airbrakes_authorized', 4: 'servo_powered', 5: 'arm_switches_closed',
+                  6: 'logging_ready', 7: 'gps_time_valid'}
+HEALTH_BITS = {0: 'imu', 1: 'highg', 2: 'baro', 3: 'mag', 4: 'gps', 5: 'radio', 6: 'qspi', 7: 'sd'}
+GPS_FIX_LABELS = {-1: 'OFFLINE', 0: 'SEARCHING', 1: 'DR', 2: '2D', 3: '3D', 4: '3D+DR'}
+
+
+def _field(key, label, quantity, **extra):
+    return dict(key=key, label=label, quantity=quantity, **extra)
+
+
+FLIGHT_SCHEMA = (
+    _field('seq', 'Seq', 'count', digits=0),
+    _field('phase', 'Phase', 'enum', enum=list(PHASE_ENUM)),
+    _field('phase_status', 'Interlocks', 'bits', bits={str(k): v for k, v in INTERLOCK_BITS.items()}),
+    _field('health', 'Health', 'bits', bits={str(k): v for k, v in HEALTH_BITS.items()}),
+    _field('gps_fix', 'GPS fix', 'enum_signed', enum_map={str(k): v for k, v in GPS_FIX_LABELS.items()}),
+    _field('gps_sats', 'Satellites', 'count', digits=0),
+    _field('lat_deg', 'Latitude', 'coordinate', digits=6),
+    _field('lon_deg', 'Longitude', 'coordinate', digits=6),
+    _field('gps_alt_m', 'GPS alt MSL', 'length', digits=1),
+    _field('alt_agl_m', 'Altitude AGL', 'length', digits=1),
+    _field('velocity_mps', 'Velocity', 'speed', digits=1),
+    _field('pred_apogee_m', 'Predicted apogee', 'length', digits=0),
+    _field('vert_accel_mps2', 'Vertical accel', 'acceleration', digits=2),
+    _field('accel_z_mps2', 'Accel Z', 'acceleration', digits=2),
+    _field('roll_rate_rads', 'Roll rate', 'angular_rate', digits=3),
+    _field('deployment', 'Airbrake deployment', 'ratio', digits=2),
+    _field('baro_pa', 'Baro pressure', 'pressure', digits=0),
+    _field('baro_temp_c', 'Baro temp', 'temperature', digits=0),
+    _field('tilt_deg', 'Tilt', 'angle', digits=0),
+    _field('azimuth_deg', 'Azimuth', 'angle', digits=1),
+)
+
+
+def flight_schema():
+    """JSON-able schema sent to the GUI in hello.flight_schema."""
+    return dict(version=1, fields=[dict(f) for f in FLIGHT_SCHEMA])
+
+
 BODY_LEN = {TEST: 1 + TEST_TEXT_LEN, FLIGHT: FLIGHT_STRUCT.size, HOUSEKEEPING: HK_STRUCT.size}
+
+
+def with_crc(frame):
+    """Append the big-endian CRC-16-CCITT over type+body, as on the air."""
+    crc = crc16_ccitt(frame)
+    return bytes(frame) + bytes([crc >> 8, crc & 0xFF])
+
+
+def read_rom_frames(path):
+    """Frames (type+body, no CRC) of a demo-replay ROM .mem file of hex bytes."""
+    data = bytearray()
+    for line in Path(path).read_text().splitlines():
+        text = line.split('//', 1)[0].strip()
+        if text:
+            data.append(int(text, 16))
+    size = 1 + FLIGHT_STRUCT.size
+    if len(data) % size:
+        raise ValueError('{}: {} bytes is not a multiple of the {}-byte flight frame'.format(path, len(data), size))
+    return [bytes(data[i:i + size]) for i in range(0, len(data), size)]
 
 
 def _flight(body):
@@ -27,7 +87,9 @@ def _flight(body):
                 alt_agl_m=alt * 0.1, velocity_mps=vel * 0.02, pred_apogee_m=apogee * 0.1,
                 vert_accel_mps2=vacc * 0.01, accel_z_mps2=accel_z * 0.01, roll_rate_rads=roll * 0.002,
                 deployment=deploy / 255.0, baro_pa=baro2 * 2.0, baro_temp_c=btemp, tilt_deg=tilt,
-                azimuth_deg=azimuth * 0.1)
+                azimuth_deg=azimuth * 0.1, phase_status=phase_status,
+                interlocks={name: bool(phase_status >> bit & 1) for bit, name in INTERLOCK_BITS.items()},
+                health_bits={name: bool(health >> bit & 1) for bit, name in HEALTH_BITS.items()})
 
 
 def _housekeeping(body):
@@ -71,3 +133,10 @@ def summary(frame):
     elif frame['kind'] == 'HK' and 'uptime_s' in f:
         text += ' up={}s'.format(f['uptime_s'])
     return text + ('' if frame['crc_ok'] else ' CRC-BAD')
+
+
+def build_test_frame(seq, good=True):
+    """APEX TEST frame as the FPGA stand-in sends it; good=False flips the CRC's last bit."""
+    data = bytes([TEST, seq & 0xFF]) + b'APEX RADIO TEST'
+    crc = crc16_ccitt(data) ^ (0 if good else 1)
+    return data + bytes([crc >> 8, crc & 0xFF])

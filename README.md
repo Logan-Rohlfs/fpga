@@ -1,10 +1,11 @@
 # Basys 3 FPGA projects
 
 A single repository for a Basys 3 SDR receiver and its development tools.
-**Current checkpoint: the host link layer works end to end.** The SDR FPGA
+**Current checkpoint: the GUI is implemented; the host link and source combiner
+operate on synthetic frames.** The SDR FPGA
 design sends COBS-framed, CRC-checked messages of every type at 1 Mbaud: status,
 telemetry, per-channel metrics, spectrum, and I/Q. `./sdr` decodes and displays
-them. All of that content is **SIMULATED** by stand-in producers; RF acquisition
+them. The combiner selects between **SIMULATED** stand-in A/B frames; RF acquisition
 and demodulation are not implemented. See the [module map](docs/sdr_pipeline.drawio).
 
 New agents: read [AGENTS.md](AGENTS.md), then [the handoff](docs/HANDOFF.md).
@@ -18,6 +19,9 @@ On the Mac, from this checkout:
 ./sdr --help              # all inline commands
 ./sdr doctor              # check local tools and serial device selection
 ./sdr receive --seconds 5 # decoded link messages without reprogramming the board
+./sdr gui --source sim    # Space Raiders web GUI; no board needed
+./sdr gui --source demo   # same, replaying the simulated IREC flight
+./sdr maps fetch --site irec-pecos  # once, online: offline map tiles for the GUI
 ```
 
 The current Mac already has a configured virtual environment and local connection
@@ -55,6 +59,8 @@ of 120 × 36 or larger is comfortable for the dashboard.
 | `projects/sdr/constraints/` | Basys 3 pins and clock constraints |
 | `projects/sdr/host/` | Standalone hardware link checker (`check_link.py`) |
 | `tools/sdr_cli/` | Shared host operations, UART transport, CLI, and dashboard |
+| `tools/sdr_cli/web/` | GUI web server (aiohttp); built frontend lands in its ignored `static/` |
+| `tools/sdr_web/` | Svelte source for the Space Raiders SDR web GUI |
 | `tools/tests/` | Host unit and pseudo-terminal integration tests |
 | `scripts/build.tcl` | Vivado synthesis, implementation, reports, and bitstream generation |
 | `docs/HANDOFF.md` | Verified state, outstanding decisions, and next-agent context |
@@ -71,7 +77,8 @@ See [SDR hardware details](projects/sdr/README.md).
 
 `make sim PROJECT=blink|sdr` underlies the CLI simulation command. Direct Vivado
 builds use `vivado -mode batch -source scripts/build.tcl -tclargs blink|sdr` on
-Windows (use the full `vivado.bat` path if needed).
+Windows (use the full `vivado.bat` path if needed). `-tclargs sdr demo` (or
+`./sdr build --demo`) builds the opt-in APEX flight replay variant.
 
 Direct builds and `make program` use `build/PROJECT/PROJECT.bit`. The workbench
 uses `build/PROJECT/latest` to select an artifact bundle. **Use `./sdr program`

@@ -8,13 +8,15 @@ from dataclasses import dataclass, field
 import struct
 import time
 
-FLAG_SYNTHETIC, FLAG_EMPTY = 0x01, 0x02
+FLAG_SYNTHETIC, FLAG_EMPTY, FLAG_DBFS = 0x01, 0x02, 0x04
+CONFIG = 0x02
 STATUS, BEST_TELEM, CHAN_FRAME = 0x01, 0x10, 0x11
 CHAN_METRICS, LINK_STATS = 0x20, 0x21
 SPECTRUM, IQ_SNAPSHOT = 0x30, 0x31
-TYPE_NAMES = {STATUS: 'STATUS', BEST_TELEM: 'BEST_TELEM', CHAN_FRAME: 'CHAN_FRAME',
+TYPE_NAMES = {CONFIG: 'CONFIG', STATUS: 'STATUS', BEST_TELEM: 'BEST_TELEM', CHAN_FRAME: 'CHAN_FRAME',
               CHAN_METRICS: 'CHAN_METRICS', LINK_STATS: 'LINK_STATS', SPECTRUM: 'SPECTRUM',
               IQ_SNAPSHOT: 'IQ_SNAPSHOT'}
+PROTOCOL_VERSION = 2   # STATUS.version; v2 added spectrum/IQ axis metadata
 HEADER = struct.Struct('<BBBH')
 MAX_PAYLOAD = 512
 CHANNELS = ('A', 'B')
@@ -22,6 +24,7 @@ SOURCES = ('A', 'B', 'combined')
 
 # type: (fixed struct, field names, variable tail kind, tail count field)
 SCHEMAS = {
+    CONFIG: ('<BBIIB', ('command_seq', 'status', 'carrier_ftw', 'nco_ftw', 'enable'), None, None),
     STATUS: ('<BBIIH', ('version', 'channels', 'uptime_ms', 'build_id', 'dropped'), None, None),
     BEST_TELEM: ('<IBB', ('t_us', 'source', 'frame_len'), 'raw', 'frame_len'),
     CHAN_FRAME: ('<BBIhBiB', ('channel', 'crc_ok', 't_us', 'rssi_dbm_x10', 'quality', 'freq_offset_hz',
@@ -29,8 +32,12 @@ SCHEMAS = {
     CHAN_METRICS: ('<BBhhhiIII', ('channel', 'rsvd', 'rssi_dbm_x10', 'noise_dbm_x10', 'snr_db_x10',
                                   'freq_offset_hz', 'sync_hits', 'crc_good', 'crc_bad'), None, None),
     LINK_STATS: ('<IIIII', ('from_a', 'from_b', 'both_ok', 'neither_ok', 'best_sent'), None, None),
-    SPECTRUM: ('<BBHH', ('channel', 'rsvd', 'row', 'bins'), 'power', 'bins'),
-    IQ_SNAPSHOT: ('<BBH', ('channel', 'rsvd', 'pairs'), 'iq', 'pairs'),
+    # Bin k is centered at center_hz + (k - bins/2) * bin_hz, lowest frequency first.
+    # Power in dBFS is db_ref + power[k] * db_step.
+    SPECTRUM: ('<BBHHIiIhBB', ('channel', 'averages', 'row', 'bins', 't_us', 'center_hz', 'bin_mhz',
+                               'db_ref_x10', 'db_step_x100', 'rsvd'), 'power', 'bins'),
+    # int16 I/Q, full scale ±32767, captured at sample_rate_hz starting at t_us.
+    IQ_SNAPSHOT: ('<BBHII', ('channel', 'rsvd', 'pairs', 't_us', 'sample_rate_hz'), 'iq', 'pairs'),
 }
 
 
@@ -166,7 +173,21 @@ def _parse_payload(mtype, payload):
             f[key] = f.pop(key + '_x10') / 10.0
     if 'quality' in f:
         f['quality'] = f['quality'] / 255.0
+    if mtype == SPECTRUM:
+        f['bin_hz'] = f.pop('bin_mhz') / 1000.0
+        f['db_ref'] = f.pop('db_ref_x10') / 10.0
+        f['db_step'] = f.pop('db_step_x100') / 100.0
     return f
+
+
+def bin_frequency(fields, k):
+    """Center frequency in Hz (FPGA IF domain) of spectrum bin k."""
+    return fields['center_hz'] + (k - fields['bins'] // 2) * fields['bin_hz']
+
+
+def power_db(fields):
+    """Spectrum bins converted to dBFS."""
+    return [fields['db_ref'] + v * fields['db_step'] for v in fields['power']]
 
 
 def parse_message(raw, t=None):
@@ -180,8 +201,10 @@ def parse_message(raw, t=None):
     if crc16_ccitt(raw[:-2]) != crc:
         raise CrcError('crc mismatch')
     name = TYPE_NAMES.get(mtype, 'UNKNOWN(0x{:02X})'.format(mtype))
-    return Record(mtype, name, flags, seq, _parse_payload(mtype, raw[HEADER.size:-2]),
-                  time.time() if t is None else t)
+    fields = _parse_payload(mtype, raw[HEADER.size:-2])
+    if mtype in (CHAN_FRAME, CHAN_METRICS):
+        fields['power_unit'] = 'dBFS' if flags & FLAG_DBFS else 'dBm'
+    return Record(mtype, name, flags, seq, fields, time.time() if t is None else t)
 
 
 class StreamDecoder:
@@ -292,28 +315,35 @@ def describe(r):
         text = 'v{} up={:.3f}s build=0x{:08x} dropped={} ch={}'.format(
             f['version'], f['uptime_ms'] / 1000.0, f['build_id'], f['dropped'],
             ''.join(c for n, c in enumerate(CHANNELS) if f['channels'] >> n & 1) or '-')
+        if f['version'] != PROTOCOL_VERSION:
+            text += ' [HOST EXPECTS v{}: rebuild/program the FPGA]'.format(PROTOCOL_VERSION)
+    elif r.type == CONFIG:
+        text = 'command={} status={} carrier_ftw={} nco_ftw={} enabled={}'.format(
+            f['command_seq'], f['status'], f['carrier_ftw'], f['nco_ftw'], f['enable'])
     elif r.type in (BEST_TELEM, CHAN_FRAME):
         from . import apex
         if r.type == BEST_TELEM:
             text = 'src={} t={}us'.format(f['source'], f['t_us'])
         else:
-            text = '{} crc={} rssi={:.1f}dBm q={:.2f} df={}'.format(
-                f['channel'], 'ok' if f['crc_ok'] else 'BAD', f['rssi_dbm'], f['quality'], _khz(f['freq_offset_hz']))
+            text = '{} crc={} rssi={:.1f}{} q={:.2f} df={}'.format(
+                f['channel'], 'ok' if f['crc_ok'] else 'BAD', f['rssi_dbm'], f.get('power_unit', 'dBm'), f['quality'], _khz(f['freq_offset_hz']))
         text += '  APEX ' + apex.summary(f['apex'])
     elif r.type == CHAN_METRICS:
-        text = '{} rssi={:.1f}dBm noise={:.1f}dBm snr={:.1f}dB df={} sync={} good={} bad={}'.format(
-            f['channel'], f['rssi_dbm'], f['noise_dbm'], f['snr_db'], _khz(f['freq_offset_hz']),
+        text = '{} rssi={:.1f}{} noise={:.1f}{} snr={:.1f}dB df={} sync={} good={} bad={}'.format(
+            f['channel'], f['rssi_dbm'], f.get('power_unit', 'dBm'), f['noise_dbm'], f.get('power_unit', 'dBm'), f['snr_db'], _khz(f['freq_offset_hz']),
             f['sync_hits'], f['crc_good'], f['crc_bad'])
     elif r.type == LINK_STATS:
         text = 'from_A={from_a} from_B={from_b} both_ok={both_ok} neither={neither_ok} best={best_sent}'.format(**f)
     elif r.type == SPECTRUM:
         power = f['power']
         peak = max(range(len(power)), key=power.__getitem__) if power else 0
-        text = '{} row={} bins={} peak=bin{} ({:.1f}dB)'.format(
-            f['channel'], f['row'], f['bins'], peak, power[peak] / 2.0 if power else 0.0)
+        text = '{} row={} bins={}×{:.1f}Hz @{} peak={} {:.1f}dBFS'.format(
+            f['channel'], f['row'], f['bins'], f['bin_hz'], _khz(f['center_hz']),
+            _khz(bin_frequency(f, peak)), power_db(f)[peak] if power else 0.0)
     elif r.type == IQ_SNAPSHOT:
         mags = [(i * i + q * q) ** .5 for i, q in f['iq']]
-        text = '{} pairs={} |iq|avg={:.0f}'.format(f['channel'], f['pairs'], sum(mags) / len(mags) if mags else 0)
+        text = '{} pairs={} @{}S/s |iq|avg={:.0f}'.format(f['channel'], f['pairs'], f['sample_rate_hz'],
+                                                        sum(mags) / len(mags) if mags else 0)
     else:
         text = '{} payload bytes'.format(len(f.get('payload', b'')))
     return text + (' [SIMULATED]' if r.synthetic else '') + (' [EMPTY]' if r.flags & FLAG_EMPTY else '')
@@ -345,7 +375,7 @@ def golden_vectors():
     import random
     rng = random.Random(29)
     header = HEADER.pack(STATUS, FLAG_SYNTHETIC, 5, 12) + build_payload(
-        STATUS, dict(version=1, channels=3, uptime_ms=1000, build_id=0, dropped=0))
+        STATUS, dict(version=PROTOCOL_VERSION, channels=3, uptime_ms=1000, build_id=0, dropped=0))
     message = header + struct.pack('<H', crc16_ccitt(header))
     return [b'\x42', b'\x00', b'\x00\x00', b'\x11\x22\x00\x33', b'\x01' * 254, b'\x01' * 255,
             b'\x01' * 253 + b'\x00', b'\xab' * 508, bytes(rng.choice([0, rng.randrange(1, 256)]) for _ in range(600)),
@@ -382,7 +412,7 @@ if __name__ == '__main__':
         with open(args.check, 'rb') as capture:
             decoder.feed(capture.read())
         s = decoder.stats
-        missing = sorted(set(TYPE_NAMES.values()) - set(s['by_type']))
+        missing = sorted((set(TYPE_NAMES.values()) - {'CONFIG'}) - set(s['by_type']))
         errors = s['crc_errors'] + s['cobs_errors'] + s['length_errors'] + s['seq_gaps']
         print('Host decode of {}: {} messages {}, errors={}, resync={}B, missing={}'.format(
             args.check, s['messages'], dict(s['by_type']), errors, s['resync_bytes'], missing or 'none'))

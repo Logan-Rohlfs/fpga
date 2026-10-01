@@ -21,3 +21,7 @@ dist/
 # Local setup scratch files; preserve locally, never commit.
 /key.txt
 /command.txt
+
+# GUI: frontend dependencies and the built bundle (produced by `npm run build`)
+tools/sdr_web/node_modules/
+tools/sdr_cli/web/static/

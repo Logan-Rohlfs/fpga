@@ -52,7 +52,7 @@ def main() -> int:
     stats = decoder.stats
     for line in summarize(stats, args.seconds):
         print(line)
-    missing = sorted(set(TYPE_NAMES.values()) - set(stats['by_type']))
+    missing = sorted((set(TYPE_NAMES.values()) - {'CONFIG'}) - set(stats['by_type']))
     errors = stats['crc_errors'] + stats['cobs_errors'] + stats['length_errors']
     problems = []
     if missing:
@@ -64,7 +64,7 @@ def main() -> int:
     if problems:
         print('FAIL: ' + '; '.join(problems), file=sys.stderr)
         return 1
-    print(f"PASS: {stats['messages']} messages, all {len(TYPE_NAMES)} types, no errors or gaps")
+    print(f"PASS: {stats['messages']} messages, all {len(TYPE_NAMES)-1} required types, no errors or gaps")
     return 0
 
 

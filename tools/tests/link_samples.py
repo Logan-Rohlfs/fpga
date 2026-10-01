@@ -1,15 +1,27 @@
 """A small synthetic link stream containing every message type (mirrors rtl/link_test_sources.sv)."""
-from sdr_cli import protocol as p
+from pathlib import Path
+
+from sdr_cli import apex, protocol as p
+from sdr_cli.apex import build_test_frame as apex_test_frame
+
+ROM_MEM = Path(__file__).resolve().parents[2] / 'projects/sdr/rom/apex_flight.mem'
 
 
-def apex_test_frame(seq, good=True):
-    body = bytes([0x01, seq & 0xFF]) + b'APEX RADIO TEST'
-    crc = p.crc16_ccitt(body) ^ (0 if good else 1)
-    return body + bytes([crc >> 8, crc & 0xFF])
+def rom_frames():
+    """The 42-byte APEX FLIGHT frames (type+body, no CRC) of the demo replay ROM."""
+    return apex.read_rom_frames(ROM_MEM)
+
+
+with_crc = apex.with_crc
+
+
+def rom_flight_frames():
+    """ROM frames with CRC appended (44 bytes each)."""
+    return [with_crc(frame) for frame in rom_frames()]
 
 
 def sample_messages(slots=3):
-    msgs = [(p.STATUS, dict(version=1, channels=3, uptime_ms=1500, build_id=0x1234, dropped=0))]
+    msgs = [(p.STATUS, dict(version=2, channels=3, uptime_ms=1500, build_id=0x1234, dropped=0))]
     for slot in range(slots):
         bad_b = slot == 1
         msgs.append((p.BEST_TELEM, dict(t_us=slot * 50000, source=0, raw=apex_test_frame(slot))))
@@ -24,10 +36,11 @@ def sample_messages(slots=3):
                                           crc_good=slots - ch, crc_bad=ch)))
         for row in range(4):
             power = [24 + (k * 7 + row) % 16 for k in range(256)]
-            power[103] = power[153] = 140
-            msgs.append((p.SPECTRUM, dict(channel=ch, row=row, power=power)))
-        msgs.append((p.IQ_SNAPSHOT, dict(channel=ch, iq=[(8000 >> ch, 0), (0, 8000 >> ch), (-8000 >> ch, 0),
-                                                         (0, -8000 >> ch)])))
+            power[90] = power[218] = 140
+            msgs.append((p.SPECTRUM, dict(channel=ch, averages=1, row=row, t_us=row * 100000, center_hz=100000,
+                                          bin_mhz=390625, db_ref_x10=-1200, db_step_x100=50, power=power)))
+        msgs.append((p.IQ_SNAPSHOT, dict(channel=ch, t_us=0, sample_rate_hz=100000,
+                                         iq=[(8000 >> ch, 0), (0, 8000 >> ch), (-8000 >> ch, 0), (0, -8000 >> ch)])))
     msgs.append((p.LINK_STATS, dict(from_a=slots, from_b=0, both_ok=slots - 1, neither_ok=0, best_sent=slots)))
     return msgs
 

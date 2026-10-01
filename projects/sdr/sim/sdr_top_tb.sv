@@ -13,7 +13,7 @@ module sdr_top_tb;
 
     always #5 clk = ~clk;
 
-    sdr_top #(.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(20_000), .STATUS_TICKS(60)) dut (
+    sdr_top #(.LEGACY_LINK_TEST(1),.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(20_000), .STATUS_TICKS(60)) dut (
         .clk(clk), .btnC(btnC), .uart_tx(uart_tx), .led(led)
     );
 
@@ -22,6 +22,15 @@ module sdr_top_tb;
     integer n_enc = 0, n_msg, capture, messages = 0, expected_seq = -1, led_toggles = 0;
     integer count [0:255];
     integer frame_ok = 0, frame_bad = 0, best_ok = 0;
+    // Sequence-indexed scoreboard tolerates BEST preceding CHAN_FRAME on UART.
+    reg [1:0] channels_seen [0:255];
+    reg best_seen [0:255], compared [0:255];
+    reg chan_good [0:511];
+    reg [7:0] chan_quality [0:511], best_source [0:255];
+    reg signed [15:0] chan_rssi [0:511];
+    reg [31:0] chan_time [0:511], best_time [0:255];
+    reg [151:0] chan_raw [0:511], best_raw [0:255];
+    integer compared_count=0, both_good_b=0;
     reg last_led = 0;
     reg all_seen = 0;
 
@@ -41,8 +50,8 @@ module sdr_top_tb;
             8'h11: expected_len = 14 + 19;
             8'h20: expected_len = 24;
             8'h21: expected_len = 20;
-            8'h30: expected_len = 6 + 256;
-            8'h31: expected_len = 4 + 256;
+            8'h30: expected_len = 22 + 256;
+            8'h31: expected_len = 12 + 256;
             default: expected_len = -1;
         endcase
     endfunction
@@ -58,8 +67,26 @@ module sdr_top_tb;
         end
     endfunction
 
+    task automatic compare_best(input integer seq);
+        integer a,b,winner;
+        begin
+            a=seq*2; b=a+1;
+            if(channels_seen[seq]==3 && best_seen[seq] && !compared[seq]) begin
+                if(!chan_good[a] && !chan_good[b]) $fatal(1,"BEST for failed pair %0d",seq);
+                if(!chan_good[a]) winner=1;
+                else if(!chan_good[b]) winner=0;
+                else if(chan_quality[a]!=chan_quality[b]) winner=chan_quality[b]>chan_quality[a];
+                else winner=chan_rssi[b]>chan_rssi[a];
+                if(best_source[seq]!==winner || best_raw[seq]!==chan_raw[a+winner] || best_time[seq]!==chan_time[a+winner])
+                    $fatal(1,"BEST mismatch for APEX seq %0d expected source %0d got %0d",seq,winner,best_source[seq]);
+                compared[seq]=1; compared_count=compared_count+1;
+                if(winner==1 && chan_good[a] && chan_good[b]) both_good_b=both_good_b+1;
+            end
+        end
+    endtask
+
     task automatic handle_message;
-        integer i, code, len;
+        integer i, code, len, seq, ch, entry;
         reg [15:0] c;
         begin
             // COBS decode enc[0..n_enc-1] into msg[].
@@ -91,16 +118,41 @@ module sdr_top_tb;
             if (msg[0] == 8'h11) begin
                 if (apex_crc_ok(5 + 14) != msg[6]) $fatal(1, "CHAN_FRAME crc_ok flag disagrees with frame");
                 if (msg[6]) frame_ok = frame_ok + 1; else frame_bad = frame_bad + 1;
+                seq=msg[20]; ch=msg[5]; entry=seq*2+ch;
+                if(ch>1 || msg[18]!=19) $fatal(1,"invalid channel descriptor");
+                channels_seen[seq][ch]=1;
+                chan_good[entry]=msg[6]; chan_quality[entry]=msg[13];
+                chan_rssi[entry]={msg[12],msg[11]};
+                chan_time[entry]={msg[10],msg[9],msg[8],msg[7]};
+                for(integer j=0;j<19;j=j+1) chan_raw[entry][j*8+:8]=msg[19+j];
+                compare_best(seq);
             end
             if (msg[0] == 8'h10) begin
                 if (!apex_crc_ok(5 + 6)) $fatal(1, "BEST_TELEM carries a bad frame");
                 best_ok = best_ok + 1;
+                seq=msg[12];
+                if(best_seen[seq] || msg[10]!=19) $fatal(1,"duplicate BEST or invalid length");
+                best_seen[seq]=1; best_source[seq]=msg[9];
+                best_time[seq]={msg[8],msg[7],msg[6],msg[5]};
+                for(integer j=0;j<19;j=j+1) best_raw[seq][j*8+:8]=msg[11+j];
+                compare_best(seq);
             end
             if (msg[0] == 8'h01 && {msg[16], msg[15]} != 0) $fatal(1, "STATUS reports %0d dropped", {msg[16], msg[15]});
+            if (msg[0] == 8'h01 && msg[5] != 2) $fatal(1, "STATUS protocol version %0d, expected 2", msg[5]);
+            // SPECTRUM axis: center 100 kHz, 390.625 Hz bins (390625 mHz), -120.0 dBFS ref, 0.5 dB step.
+            // Payload starts at msg[5]: channel, averages, row u16, bins u16, t_us u32, center_hz, bin_mhz...
+            if (msg[0] == 8'h30 && ({msg[18], msg[17], msg[16], msg[15]} != 100000 ||
+                                    {msg[22], msg[21], msg[20], msg[19]} != 390625 ||
+                                    {msg[24], msg[23]} != 16'hfb50 || msg[25] != 50))
+                $fatal(1, "SPECTRUM axis metadata wrong");
+            // channel, rsvd, pairs u16, t_us u32, sample_rate_hz u32
+            if (msg[0] == 8'h31 && {msg[16], msg[15], msg[14], msg[13]} != 100000)
+                $fatal(1, "IQ_SNAPSHOT sample rate wrong");
             count[msg[0]] = count[msg[0]] + 1;
             messages = messages + 1;
             all_seen = count[8'h01] >= 2 && count[8'h10] > 0 && count[8'h20] >= 2 && count[8'h21] >= 2 &&
-                       count[8'h30] >= 2 && count[8'h31] >= 2 && frame_ok > 0 && frame_bad >= 2;
+                       count[8'h30] >= 2 && count[8'h31] >= 2 && frame_ok > 0 && frame_bad >= 2 &&
+                       both_good_b>0 && compared_count==best_ok;
         end
     endtask
 
@@ -126,7 +178,9 @@ module sdr_top_tb;
 
     initial begin : monitor
         reg [7:0] value;
-        for (int t = 0; t < 256; t = t + 1) count[t] = 0;
+        for (int t = 0; t < 256; t = t + 1) begin
+            count[t] = 0; channels_seen[t]=0; best_seen[t]=0; compared[t]=0;
+        end
         capture = $fopen("build/sdr/link_capture.bin", "wb");
         forever begin
             read_byte(value);
@@ -149,6 +203,7 @@ module sdr_top_tb;
         $display("PASS: %0d link messages: STATUS %0d, BEST %0d, CHAN_FRAME %0d ok/%0d bad, METRICS %0d, LINK %0d, SPECTRUM %0d, IQ %0d",
                  messages, count[8'h01], count[8'h10], frame_ok, frame_bad, count[8'h20], count[8'h21],
                  count[8'h30], count[8'h31]);
+        $display("PASS: %0d BEST payloads match ranked channel records (%0d both-good B selections)",compared_count,both_good_b);
         $finish;
     end
 

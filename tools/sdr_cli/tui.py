@@ -8,8 +8,9 @@ import shlex
 import threading
 import time
 
-from .core import ToolError, bitstream, build, program, save_config, simulate
-from .protocol import CHANNELS, describe
+from .core import ToolError, bitstream, build, build_variants, program, save_config, simulate
+from .display import WaterfallScale
+from .protocol import CHANNELS, PROTOCOL_VERSION, SPECTRUM, bin_frequency, describe, power_db
 from .serial_io import Session, safe_text
 
 
@@ -21,7 +22,8 @@ HELP = [
     'v  cycle RAW / LINK / SPECTRUM views of pane 03',
     ':  command entry                   ?  help       q  quit',
     '',
-    'Commands: connect, disconnect, sim, build, program, flash, record, stop,',
+    'Commands: connect, disconnect, sim, build, build demo, build all (both, concurrent),',
+    '          program, program demo, flash, record, stop,',
     '          port DEVICE, baud RATE, send TEXT, send-hex aa 01 ff, clear, quit',
     'Use quotes for text with spaces. Arrow up/down scroll the receive pane.',
     '',
@@ -48,6 +50,7 @@ class Dashboard:
         self.reconnect = False
         self.hex = False
         self.view = 'raw'
+        self.scales = {ch: WaterfallScale() for ch in CHANNELS}
         self.frozen = None
         self.scroll = 0
         self.rates = deque([0.0] * 90, maxlen=90)
@@ -65,7 +68,7 @@ class Dashboard:
         self.events.append((time.strftime('%H:%M:%S'), safe_text(message)))
 
     def connect(self):
-        if self.busy in ('program', 'flash'):
+        if self.busy.startswith(('program', 'flash')):
             raise ToolError('Wait for programming to finish before connecting.')
         self.session.connect()
         self.log('Connected: {} @ {} baud'.format(self.session.port, self.config['baud']))
@@ -84,8 +87,8 @@ class Dashboard:
     def start(self, operation):
         if self.busy:
             raise ToolError('Already running {}. Wait for it to finish.'.format(self.busy))
-        self.reconnect = self.session.connected and operation in ('program', 'flash')
-        if operation in ('program', 'flash'):
+        self.reconnect = self.session.connected and operation.startswith(('program', 'flash'))
+        if operation.startswith(('program', 'flash')):
             if self.session.capture_file:
                 self.record()
             self.session.disconnect()
@@ -110,8 +113,13 @@ class Dashboard:
                         simulate(self.root, self.config['project'], log)
                     elif operation == 'build':
                         build(self.root, self.config.copy(), log)
+                    elif operation == 'build-demo':
+                        build(self.root, self.config.copy(), log, demo=True)
+                    elif operation == 'build-all':
+                        build_variants(self.root, self.config.copy(), log=log)
                     else:
-                        program(self.root, self.config.copy(), persist=operation == 'flash', log=log)
+                        program(self.root, self.config.copy(), persist=operation.startswith('flash'),
+                                log=log, demo=operation.endswith('-demo'))
             except Exception as exc:
                 error = str(exc)
             self.messages.put(('done', error))
@@ -125,6 +133,12 @@ class Dashboard:
         cmd, args = words[0], words[1:]
         if cmd in ('sim', 'build', 'program') and not args:
             self.start(cmd)
+        elif cmd == 'build' and args == ['demo']:
+            self.start('build-demo')
+        elif cmd == 'build' and args == ['all']:
+            self.start('build-all')
+        elif cmd == 'program' and args == ['demo']:
+            self.start('program-demo')
         elif cmd == 'flash' and not args:
             if self.busy:
                 raise ToolError('Wait for the active operation to finish.')
@@ -336,7 +350,8 @@ class Dashboard:
             value = prompt + self.input
             self.put(h - 2, 1, value[-(w - 4):], 3 if self.confirm else 1, True)
         else:
-            self.put(h - 2, 1, '2-GFSK telemetry  ·  link protocol v1  ·  RF pipeline pending (data SIMULATED)', 4)
+            self.put(h - 2, 1, '2-GFSK telemetry  ·  link protocol v{}  ·  RF pipeline pending (data SIMULATED)'.format(
+                PROTOCOL_VERSION), 4)
         if self.help:
             width = min(w - 6, 82)
             height = len(HELP) + 2
@@ -360,9 +375,12 @@ class Dashboard:
             latest.setdefault(frame.fields['channel'], frame)
         def cell(ch, fmt, key, source=None):
             record = (source or link.metrics).get(ch)
-            return fmt.format(record.fields[key]) if record else '—'
+            if not record:
+                return '—'
+            value = fmt.format(record.fields[key])
+            return value + record.fields.get('power_unit', 'dBm') if key in ('rssi_dbm', 'noise_dbm') else value
         rows = [('{:<14}{:>{c}}{:>{c}}'.format('', 'CHANNEL A', 'CHANNEL B', c=col), 1)]
-        for label, fmt, key, source in [('RSSI dBm', '{:.1f}', 'rssi_dbm', None), ('Noise dBm', '{:.1f}', 'noise_dbm', None),
+        for label, fmt, key, source in [('Signal', '{:.1f}', 'rssi_dbm', None), ('Noise', '{:.1f}', 'noise_dbm', None),
                                         ('SNR dB', '{:.1f}', 'snr_db', None), ('Freq off Hz', '{:+d}', 'freq_offset_hz', None),
                                         ('Sync quality', '{:.2f}', 'quality', latest), ('CRC good', '{:,}', 'crc_good', None),
                                         ('CRC bad', '{:,}', 'crc_bad', None), ('Sync hits', '{:,}', 'sync_hits', None)]:
@@ -383,13 +401,22 @@ class Dashboard:
         link = self.session.link
         half = max(4, (width - 3) // 2)
         wf_height = max(1, (height - 2) // 2)
-        rows = [('{:<{w}} │ {}'.format('WATERFALL A ↑new', 'WATERFALL B ↑new', w=half), 1)]
         history = {ch: list(link.spectrum.get(ch, []))[::-1] for ch in CHANNELS}
+        def title(ch):
+            if not history[ch]:
+                return 'WATERFALL ' + ch
+            f = history[ch][0].fields
+            return 'WATERFALL {} {:.1f}–{:.1f} kHz ↑new'.format(
+                ch, bin_frequency(f, 0) / 1e3, bin_frequency(f, f['bins'] - 1) / 1e3)
+        rows = [('{:<{w}} │ {}'.format(title('A'), title('B'), w=half), 1)]
         for n in range(wf_height):
-            a, b = [shade_row(history[ch][n].fields['power'], half) if n < len(history[ch]) else ''
+            a, b = [shade_row(power_db(history[ch][n].fields), half, self.scales[ch]) if n < len(history[ch]) else ''
                     for ch in CHANNELS]
             rows.append(('{:<{w}} │ {}'.format(a, b, w=half), 0))
-        iq_height = max(3, height - wf_height - 2)
+        a, b = ['{} {:.0f}…{:.0f} dBFS'.format(self.scales[ch].mode, self.scales[ch].low, self.scales[ch].high)
+                for ch in CHANNELS]
+        rows.append(('{:<{w}} │ {}'.format(a, b, w=half), 4))
+        iq_height = max(3, height - wf_height - 3)
         snaps = [link.iq.get(ch) for ch in CHANNELS]
         points = [p for s in snaps if s for p in s.fields['iq']]
         scale = max([1] + [max(abs(i), abs(q)) for i, q in points])
@@ -427,6 +454,9 @@ class Dashboard:
             while self.running:
                 try:
                     self.session.read()
+                    for record in self.session.last_records:
+                        if record.type == SPECTRUM and record.fields['channel'] in self.scales:
+                            self.scales[record.fields['channel']].update(power_db(record.fields))
                     now = time.monotonic()
                     if now - self.rate_at >= 1:
                         self.rates.append((self.session.rx_bytes - self.rate_bytes) / (now - self.rate_at))
@@ -467,16 +497,17 @@ VIEWS = ('raw', 'link', 'spectrum')
 SHADES = ' .:-=+*#%@'
 
 
-def shade_row(power, width):
-    """Downsample spectrum bins to width characters, keeping each segment's peak."""
-    if not power or width <= 0:
+def shade_row(row_db, width, scale):
+    """Downsample dB bins to width characters (segment peak), shaded by the waterfall scale."""
+    if not row_db or width <= 0:
         return ''
-    n = len(power)
+    n = len(row_db)
     out = []
     for c in range(width):
         a = c * n // width
         b = max(a + 1, (c + 1) * n // width)
-        out.append(SHADES[min(len(SHADES) - 1, max(power[a:b]) * len(SHADES) // 256)])
+        level = scale.normalize(max(row_db[a:b]))
+        out.append(SHADES[min(len(SHADES) - 1, int(level * len(SHADES)))])
     return ''.join(out)
 
 

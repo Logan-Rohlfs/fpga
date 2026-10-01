@@ -1,5 +1,6 @@
 `timescale 1ns/1ps
-// Stand-in producers for every host-link message type. All messages carry the
+// Synthetic inputs and visualization producers, with a real source combiner.
+// All current messages carry the
 // SYNTHETIC flag: nothing here is measured. Each block is replaced by a real
 // receiver stage later, keeping its link_tx port and message layout.
 //
@@ -33,6 +34,7 @@ module link_test_sources #(
     input  wire [N-1:0]    p_ready
 );
     localparam [7:0] SYNTHETIC = 8'h01;
+    localparam [7:0] PROTOCOL_VERSION = 8'd2;   // must match tools/sdr_cli/protocol.py
     localparam [7:0] T_STATUS = 8'h01, T_BEST = 8'h10, T_FRAME = 8'h11, T_METRICS = 8'h20,
                      T_LINK = 8'h21, T_SPECTRUM = 8'h30, T_IQ = 8'h31;
     localparam integer P_BEST = 0, P_FRAME = 1, P_METRICS = 3, P_LINK = 5, P_STATUS = 6,
@@ -40,6 +42,15 @@ module link_test_sources #(
     localparam [7:0] APEX_LEN = 8'd19;      // type + seq + 15 text bytes + CRC16
     localparam integer US_CYCLES = (CLK_HZ >= 2_000_000) ? CLK_HZ / 1_000_000 : 1;
     localparam integer SPECTRUM_BINS = 256, IQ_PAIRS = 64;
+    // Axis metadata the real DDC/FFT stages will report. The stand-in describes a
+    // 256-point FFT of 100 kS/s complex baseband tuned to the 100 kHz IF:
+    // 390.625 Hz bins, dBFS = -120 + 0.5 * power.
+    localparam [31:0] SPEC_CENTER_HZ = 32'd100_000;
+    localparam [31:0] SPEC_BIN_MHZ = 32'd390_625;
+    localparam [15:0] SPEC_DB_REF_X10 = -16'sd1200;
+    localparam [7:0]  SPEC_DB_STEP_X100 = 8'd50;
+    localparam [7:0]  SPEC_AVERAGES = 8'd1;
+    localparam [31:0] IQ_RATE_HZ = 32'd100_000;
 
     // ------------------------------------------------------------ timebase
     reg [31:0] tick_div = 0;
@@ -110,7 +121,7 @@ module link_test_sources #(
     reg fail_a = 1'b0, fail_b = 1'b0;
     reg [31:0] crc_good [0:1];
     reg [31:0] crc_bad [0:1];
-    reg [31:0] from_a = 0, from_b = 0, both_ok = 0, neither_ok = 0, best_sent = 0;
+    wire [31:0] from_a, from_b, both_ok, neither_ok, best_sent;
     wire [15:0] crc_next;
 
     crc16_ccitt frame_crc_step (.crc(crc), .data(apex_byte(crc_i, apex_seq)), .next(crc_next));
@@ -126,7 +137,6 @@ module link_test_sources #(
             crc_good[1] <= 0;
             crc_bad[0] <= 0;
             crc_bad[1] <= 0;
-            {from_a, from_b, both_ok, neither_ok, best_sent} <= 0;
         end else if (due_telem) begin
             apex_seq <= slot[7:0];
             fail_a <= (ph_fail_a == FAIL_A_EVERY - 1);
@@ -145,11 +155,6 @@ module link_test_sources #(
                 slot <= slot + 1;
                 if (fail_a) crc_bad[0] <= crc_bad[0] + 1; else crc_good[0] <= crc_good[0] + 1;
                 if (fail_b) crc_bad[1] <= crc_bad[1] + 1; else crc_good[1] <= crc_good[1] + 1;
-                if (!fail_a) from_a <= from_a + 1;
-                else if (!fail_b) from_b <= from_b + 1;
-                if (!fail_a && !fail_b) both_ok <= both_ok + 1;
-                if (fail_a && fail_b) neither_ok <= neither_ok + 1;
-                else best_sent <= best_sent + 1;
             end else begin
                 crc_i <= crc_i + 1'b1;
             end
@@ -166,7 +171,8 @@ module link_test_sources #(
     assign noise_now[0] = -16'sd1000 + $signed({13'd0, slot[2:0]});
     assign noise_now[1] = -16'sd998 + $signed({13'd0, slot[3:1]});
     assign quality_now[0] = 8'd210 - {4'd0, slot[3:0]};
-    assign quality_now[1] = 8'd175 - {3'd0, slot[4:0]};
+    // Alternate which good receiver ranks higher to exercise both selection paths.
+    assign quality_now[1] = slot[3] ? (8'd235 - {4'd0, slot[3:0]}) : (8'd175 - {3'd0, slot[4:0]});
     assign fo_now[0] = 32'sd10272 + $signed({24'd0, slot[5:0], 2'b00});
     assign fo_now[1] = 32'sd10272 + $signed({24'd0, slot[4:0], 3'b000});
 
@@ -195,25 +201,17 @@ module link_test_sources #(
         end
     endgenerate
 
-    always @(posedge clk) begin
-        if (rst) dropped <= 0;
-        else if (|drop) dropped <= dropped + 1'b1;
-    end
+    // ---- Atomic synthetic candidates -> bounded real source combiner.
+    // These windows describe this test generator only (one slot every five ticks).
+    // Actual receive timing must be chosen when frame decoders are connected.
+    wire [1:0] comb_ready;
+    wire comb_valid, comb_synthetic, comb_stats_synthetic;
+    wire [7:0] comb_source, comb_len;
+    wire [31:0] comb_t;
+    wire [8*19-1:0] comb_frame;
+    wire [2*8*19-1:0] candidate_frames;
+    wire [31:0] comb_duplicates, comb_rejected;
 
-    // ---- BEST_TELEM: source A unless A failed, then B; skipped when both failed.
-    reg [7:0] best_seq = 0, best_source = 0;
-    reg [15:0] best_crc = 0;
-    reg [31:0] best_t = 0;
-    assign mtype[P_BEST] = T_BEST;
-    assign len[P_BEST] = 16'd6 + APEX_LEN;
-    assign trigger[P_BEST] = telem_go && !(fail_a && fail_b);
-    always @(posedge clk) if (accept[P_BEST]) begin
-        best_seq <= apex_seq;
-        best_crc <= frame_crc;
-        best_source <= fail_a ? 8'd1 : 8'd0;
-        best_t <= t_us;
-    end
-    wire [8*6-1:0] best_hdr = {APEX_LEN, best_source, best_t};
     function automatic [7:0] frame_byte(input [4:0] i, input [7:0] seq, input [15:0] c, input bad);
         begin
             if (i < 17) frame_byte = apex_byte(i, seq);
@@ -221,8 +219,64 @@ module link_test_sources #(
             else frame_byte = c[7:0] ^ {7'd0, bad};
         end
     endfunction
+
+    generate
+        for (g = 0; g < 19; g = g + 1) begin : comb_bytes
+            assign candidate_frames[8*g +: 8] = frame_byte(g, apex_seq, frame_crc, fail_a);
+            assign candidate_frames[8*(19+g) +: 8] = frame_byte(g, apex_seq, frame_crc, fail_b);
+        end
+    endgenerate
+
+    source_combiner #(
+        .MAX_FRAME_BYTES(19), .MATCH_CYCLES(TICK_CYCLES),
+        .DEDUPE_CYCLES(4*TICK_CYCLES), .DEDUPE_ENTRIES(4)
+    ) combiner (
+        .clk(clk), .rst(rst), .in_valid({2{telem_go}}), .in_ready(comb_ready),
+        .in_crc_ok({!fail_b, !fail_a}), .in_synthetic(2'b11),
+        .in_type({8'h01, 8'h01}), .in_seq({8'd0, apex_seq, 8'd0, apex_seq}),
+        .in_t_us({t_us, t_us}), .in_rssi_x10({rssi_now[1], rssi_now[0]}),
+        .in_quality({quality_now[1], quality_now[0]}), .in_len({APEX_LEN, APEX_LEN}),
+        .in_frame(candidate_frames), .out_valid(comb_valid), .out_ready(!req[P_BEST]),
+        .out_source(comb_source), .out_synthetic(comb_synthetic), .out_t_us(comb_t),
+        .out_len(comb_len), .out_frame(comb_frame), .from_a(from_a), .from_b(from_b),
+        .both_ok(both_ok), .neither_ok(neither_ok), .best_sent(best_sent),
+        .duplicate_count(comb_duplicates), .rejected_count(comb_rejected),
+        .stats_synthetic(comb_stats_synthetic)
+    );
+
+    // Non-stallable fake inputs explicitly account for each candidate lost to
+    // backpressure. Other link producers continue using their existing drop pulses.
+    reg [4:0] drop_count;
+    integer drop_i;
+    always @* begin
+        drop_count = 0;
+        for (drop_i = 0; drop_i < N; drop_i = drop_i + 1)
+            drop_count = drop_count + {4'd0, drop[drop_i]};
+        drop_count = drop_count + {4'd0, (telem_go && !comb_ready[0])}
+                                + {4'd0, (telem_go && !comb_ready[1])};
+    end
+    always @(posedge clk) begin
+        if (rst) dropped <= 0;
+        else dropped <= dropped + {11'd0, drop_count};
+    end
+
+    // ---- BEST_TELEM: snapshot the selected opaque frame; never read live inputs
+    // while the link drains it. Backpressure holds the next result in the combiner.
+    reg [7:0] best_source = 0;
+    reg [8*19-1:0] best_frame = 0;
+    reg [31:0] best_t = 0;
+    assign mtype[P_BEST] = T_BEST;
+    assign len[P_BEST] = 16'd6 + APEX_LEN;
+    assign trigger[P_BEST] = comb_valid && !req[P_BEST];
+    always @(posedge clk) if (accept[P_BEST]) begin
+        best_frame <= comb_frame;
+        best_source <= comb_source;
+        best_t <= comb_t;
+    end
+    wire [8*6-1:0] best_hdr = {APEX_LEN, best_source, best_t};
+    wire [15:0] best_byte_index = idx[P_BEST] - 16'd6;
     assign data[P_BEST] = (idx[P_BEST] < 6) ? best_hdr[8*idx[P_BEST][2:0] +: 8]
-                                            : frame_byte(idx[P_BEST] - 16'd6, best_seq, best_crc, 1'b0);
+                                          : best_frame[8*best_byte_index[4:0] +: 8];
 
     generate
         for (g = 0; g < 2; g = g + 1) begin : channel
@@ -263,25 +317,29 @@ module link_test_sources #(
                               noise_now[g], rssi_now[g], 8'd0, CH};
             assign data[PM] = m_payload[8*idx[PM][4:0] +: 8];
 
-            // ---- SPECTRUM: noise floor, two FSK lobes (±25 bins), and a walking tone.
+            // ---- SPECTRUM: noise floor, two FSK lobes, and a walking tone. The lobes sit
+            // at +10.4 kHz offset ±25 kHz deviation: bins 128 + (10.4 ± 25) / 0.390625.
             localparam integer PS = P_SPECTRUM + g;
             reg [15:0] s_row = 0, s_row_now = 0;
+            reg [31:0] s_t = 0;
             assign mtype[PS] = T_SPECTRUM;
-            assign len[PS] = 16'd6 + SPECTRUM_BINS;
+            assign len[PS] = 16'd22 + SPECTRUM_BINS;
             assign trigger[PS] = due_spectrum;
             always @(posedge clk) begin
                 if (rst) s_row_now <= 0;
                 else if (accept[PS]) begin
                     s_row <= s_row_now;
+                    s_t <= t_us;
                     s_row_now <= s_row_now + 1'b1;
                 end
             end
-            wire [8*6-1:0] s_hdr = {16'd256, s_row, 8'd0, CH};
-            wire [7:0] k = idx[PS][7:0] - 8'd6;
+            wire [8*22-1:0] s_hdr = {8'd0, SPEC_DB_STEP_X100, SPEC_DB_REF_X10, SPEC_BIN_MHZ, SPEC_CENTER_HZ, s_t,
+                                     16'd256, s_row, SPEC_AVERAGES, CH};
+            wire [7:0] k = idx[PS][7:0] - 8'd22;
             wire [7:0] hash = (k * 8'd37 + s_row[7:0] * 8'd13 + CH * 8'd7) ^ {2'd0, k[7:2]};
             wire [7:0] noise = 8'd24 + {4'd0, hash[3:0]};
-            wire [7:0] d_lo = (k > 8'd103) ? k - 8'd103 : 8'd103 - k;
-            wire [7:0] d_hi = (k > 8'd153) ? k - 8'd153 : 8'd153 - k;
+            wire [7:0] d_lo = (k > 8'd90) ? k - 8'd90 : 8'd90 - k;
+            wire [7:0] d_hi = (k > 8'd218) ? k - 8'd218 : 8'd218 - k;
             wire [7:0] d_lobe = (d_lo < d_hi) ? d_lo : d_hi;
             wire [7:0] lobe = (d_lobe == 0) ? 8'd140 : (d_lobe == 1) ? 8'd128 : (d_lobe == 2) ? 8'd110 :
                               (d_lobe == 3) ? 8'd90 : 8'd0;
@@ -295,22 +353,24 @@ module link_test_sources #(
                 noise_q <= noise;
             end
             wire [7:0] peak = (lobe_q > tone_q) ? lobe_q : tone_q;
-            assign data[PS] = (idx[PS] < 6) ? s_hdr[8*idx[PS][2:0] +: 8] : ((peak > noise_q) ? peak : noise_q);
+            assign data[PS] = (idx[PS] < 22) ? s_hdr[8*idx[PS][4:0] +: 8] : ((peak > noise_q) ? peak : noise_q);
 
             // ---- IQ_SNAPSHOT: points on a noisy constant-envelope circle.
             localparam integer PI = P_IQ + g;
             reg [15:0] q_snap = 0, q_snap_now = 0;
+            reg [31:0] q_t = 0;
             assign mtype[PI] = T_IQ;
-            assign len[PI] = 16'd4 + 4 * IQ_PAIRS;
+            assign len[PI] = 16'd12 + 4 * IQ_PAIRS;
             assign trigger[PI] = due_iq;
             always @(posedge clk) begin
                 if (rst) q_snap_now <= 0;
                 else if (accept[PI]) begin
                     q_snap <= q_snap_now;
+                    q_t <= t_us;
                     q_snap_now <= q_snap_now + 1'b1;
                 end
             end
-            wire [15:0] b = idx[PI] - 16'd4;
+            wire [15:0] b = idx[PI] - 16'd12;
             wire [7:0] j = b[9:2];
             wire [5:0] angle = j[5:0] * 6'd5 + q_snap[5:0] * 6'd3 + CH[5:0] * 6'd8;
             wire [7:0] ni8 = j * 8'd29 + q_snap[7:0] * 8'd7 + CH * 8'd3;
@@ -321,8 +381,8 @@ module link_test_sources #(
             wire signed [15:0] q_val = (sine(angle) >>> g) + n_q;
             reg [15:0] part = 0;
             always @(posedge clk) part <= b[1] ? q_val : i_val;
-            wire [8*4-1:0] q_hdr = {16'd64, 8'd0, CH};
-            assign data[PI] = (idx[PI] < 4) ? q_hdr[8*idx[PI][1:0] +: 8] : (b[0] ? part[15:8] : part[7:0]);
+            wire [8*12-1:0] q_hdr = {IQ_RATE_HZ, q_t, 16'd64, 8'd0, CH};
+            assign data[PI] = (idx[PI] < 12) ? q_hdr[8*idx[PI][3:0] +: 8] : (b[0] ? part[15:8] : part[7:0]);
         end
     endgenerate
 
@@ -339,7 +399,7 @@ module link_test_sources #(
     assign mtype[P_STATUS] = T_STATUS;
     assign len[P_STATUS] = 16'd12;
     assign trigger[P_STATUS] = due_status;
-    always @(posedge clk) if (accept[P_STATUS]) st_payload <= {dropped, BUILD_ID, uptime_ms, 8'd3, 8'd1};
+    always @(posedge clk) if (accept[P_STATUS]) st_payload <= {dropped, BUILD_ID, uptime_ms, 8'd3, PROTOCOL_VERSION};
     assign data[P_STATUS] = st_payload[8*idx[P_STATUS][3:0] +: 8];
 
     // 8000 * sin(2*pi*a/64), quarter-wave table.
