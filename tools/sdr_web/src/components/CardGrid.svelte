@@ -12,10 +12,10 @@
   import CardFrame from './CardFrame.svelte';
   import CardSettings from './CardSettings.svelte';
 
-  let { cards, editable, onchange }: { cards: GridCard[]; editable: boolean; onchange: (cards: GridCard[]) => void } = $props();
+  // `edit` is owned by the caller (the preset bar's Edit/Done); editing also needs a desktop-width window.
+  let { cards, editable, edit = false, onchange }: { cards: GridCard[]; editable: boolean; edit?: boolean; onchange: (cards: GridCard[]) => void } = $props();
 
   let innerWidth = $state(typeof window === 'undefined' ? 1200 : window.innerWidth);
-  let wantEdit = $state(false);
   let preview = $state<GridCard[] | null>(null);
   let drag = $state<{ id: string; px: number; py: number } | null>(null);
   let settingsId = $state<string | null>(null);
@@ -23,6 +23,9 @@
   let grid: HTMLDivElement;
   // Resolved card components by type. Loaded once per type (memoized), so layout changes never remount a card.
   let loaded = $state<Record<string, Component<any>>>({});
+  $effect(() => {
+    if (!edit) settingsId = null;
+  });
   $effect(() => {
     for (const t of new Set(cards.map((c) => c.type))) {
       if (loaded[t]) continue;
@@ -32,7 +35,7 @@
 
   const mode = $derived(modeForWidth(innerWidth));
   const cols = $derived(mode === 'desktop' ? COLS : mode === 'tablet' ? 6 : 1);
-  const editing = $derived(editable && wantEdit && mode === 'desktop');
+  const editing = $derived(editable && edit && mode === 'desktop');
   const shown = $derived(
     preview ?? (mode === 'desktop' ? cards : reflow(cards, mode === 'tablet' ? 6 : 1, minOfType)),
   );
@@ -140,9 +143,6 @@
 {#if editable}
   <div class="bar">
     {#if mode === 'desktop'}
-      <button class="btn" aria-pressed={editing} onclick={() => { wantEdit = !wantEdit; if (!wantEdit) settingsId = null; }}>
-        {editing ? 'Done' : 'Edit layout'}
-      </button>
       {#if editing}
         <label class="add">Card type
           <select bind:value={addType}>
@@ -152,7 +152,7 @@
         <button class="btn" onclick={add}>Add card</button>
         <p class="note">Drag a card by its header, resize from the corner. With a card focused: arrows move it, Shift+arrows resize it.</p>
       {/if}
-    {:else}
+    {:else if edit}
       <p class="note">Widen the window to edit the layout.</p>
     {/if}
   </div>

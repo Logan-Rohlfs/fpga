@@ -469,7 +469,8 @@ export class LinkClient {
   }
 
   send(msg: ClientMsg): void {
-    if (msg.type === 'tune' && get(role)?.role !== 'admin') return;
+    // Operator-only; the server enforces it too. A viewer's UI never sends these.
+    if ((msg.type === 'tune' || msg.type.startsWith('preset_')) && get(role)?.role !== 'admin') return;
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
@@ -520,3 +521,10 @@ export class LinkClient {
 }
 
 export const link = new LinkClient();
+
+// Preset writes. Each only sends; the outcome is the server's `presets` broadcast or an `error` notice.
+export const savePreset = (preset: unknown, baseRevision: number | null): void =>
+  link.send({ type: 'preset_save', preset, base_revision: baseRevision });
+export const deletePreset = (id: string): void => link.send({ type: 'preset_delete', id });
+export const setLivePreset = (id: string): void => link.send({ type: 'preset_set_live', id });
+export const setDefaultPreset = (id: string): void => link.send({ type: 'preset_set_default', id });
