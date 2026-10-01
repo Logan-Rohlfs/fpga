@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from './wire.golden.json';
 import {
   FRAMES_MAX, LinkClient, dataVersion, droppedFrames, eventsStore, flightSchema, flightStores, frames,
-  frozen, handleMessage, hello, history, iqSnapMeta, iqSnaps, linkStatsRing, metrics, metricsStores, onSpectrum, onSpectrumReset,
-  frozenView, presets, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
+  frozen, handleMessage, hello, iqSnapMeta, iqSnaps, latestMetrics, linkStatsNow, linkStatsRing, metricsNow, metricsStores, metricsTail,
+  onSpectrum, onSpectrumReset,
+  frozenView, powerUnit, presets, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
 } from './link';
 import type { FlightSchema, GuiEvent, HelloMsg, RecordMsg } from './types';
 
@@ -81,12 +82,16 @@ describe('handleMessage', () => {
   it('routes records into stores and history', () => {
     handleMessage(record('STATUS', { version: 2 }));
     handleMessage(record('CHAN_METRICS', {
-      channel: 'B', rssi_dbm: -80, noise_dbm: -100, snr_db: 30, freq_offset_hz: 12, crc_good: 5, crc_bad: 1,
+      channel: 'B', rssi_dbm: -80, noise_dbm: -100, snr_db: 30, freq_offset_hz: 12, crc_good: 5, crc_bad: 1, power_unit: 'dBFS',
     }, 'm', 7));
     handleMessage(record('IQ_SNAPSHOT', { channel: 'A', iq: [[1, 2]] }));
     expect(get(status)?.fields.version).toBe(2);
-    expect(get(metrics).B?.fields.rssi_dbm).toBe(-80);
-    expect(history.B.rssi.values()).toEqual([-80]);
+    expect(latestMetrics('B')).toEqual({ t: 7, rssi: -80, noise: -100, snr: 30, df: 12, crc_good: 5, crc_bad: 1, synthetic: true });
+    expect(latestMetrics('A')).toBeNull();
+    expect(get(powerUnit)).toBe('dBFS');
+    expect(metricsTail('B', 0, 300)).toEqual([-80]);
+    runFrame();
+    expect(get(metricsNow).B?.rssi).toBe(-80);
     expect(get(iqSnaps).A).toEqual([[[1, 2]]]);
     expect(get(iqSnapMeta).A).toEqual([{ sample_rate_hz: null, synthetic: true }]);
     handleMessage(record('IQ_SNAPSHOT', { channel: 'A', iq: [[3, 4]], sample_rate_hz: 100000 }));
@@ -193,7 +198,13 @@ describe('handleMessage', () => {
     expect(m.length).toBe(2);
     expect(m.valueAt(0, 0)).toBe(-70);
     expect(Number.isNaN(m.valueAt(1, 1))).toBe(true);
-    expect(history.A.rssi.values()).toEqual([-70, -71]);
+    expect(metricsTail('A', 0, 1)).toEqual([-71]);
+    expect(get(powerUnit)).toBe('dBm');
+  });
+
+  it('keeps every LINK_STATS count and exposes the newest point', () => {
+    handleMessage(record('LINK_STATS', { from_a: 3, from_b: 1, neither_ok: 2, both_ok: 9 }, 'ls', 5));
+    expect(get(linkStatsNow)).toEqual({ t: 5, from_a: 3, from_b: 1, neither_ok: 2, both_ok: 9 });
   });
 
   it('keeps the last 600 LINK_STATS', () => {
@@ -201,8 +212,8 @@ describe('handleMessage', () => {
     handleMessage(record('LINK_STATS', { from_a: 0, from_b: 0 }, 'ls', 604));   // repeated after a reconnect
     const ring = get(linkStatsRing);
     expect(ring.length).toBe(600);
-    expect(ring[0]).toEqual({ t: 5, from_a: 5, from_b: 10 });
-    expect(ring[599]).toEqual({ t: 604, from_a: 604, from_b: 1208 });
+    expect(ring[0]).toEqual({ t: 5, from_a: 5, from_b: 10, neither_ok: NaN, both_ok: NaN });
+    expect(ring[599]).toEqual({ t: 604, from_a: 604, from_b: 1208, neither_ok: NaN, both_ok: NaN });
   });
 
   it('counts dropped frames and tracks the subscribed set', () => {
@@ -273,8 +284,14 @@ describe('handleMessage', () => {
     handleMessage({ type: 'dropped', channel: 'frames', count: 3 });
     handleMessage({ type: 'subscribed', channels: ['flight'] });
     handleMessage(record('CHAN_FRAME', { channel: 'A' }));
+    handleMessage({
+      type: 'metrics_history', channel: 'B', t: [], rssi: [], noise: [], snr: [], df: [], crc_good: [], crc_bad: [],
+      power_unit: 'dBFS (relative)',
+    });
     frozen.set(true);
+    expect(get(powerUnit)).toBe('dBFS (relative)');
     resetState();
+    expect(get(powerUnit)).toBeNull();
     expect(flightStores.best.length).toBe(0);
     expect(flightStores.A).toBeUndefined();
     expect(metricsStores.A.length).toBe(0);

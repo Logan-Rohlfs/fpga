@@ -3,7 +3,8 @@
   import { onMount } from 'svelte';
   import { drawConstellation, drawSparkline, fitCanvas } from '../lib/draw';
   import { signedKhz } from '../lib/format';
-  import { HISTORY, frozen, history, historyVersion, iqSnapsView as iqSnaps, metricsView as metrics } from '../lib/link';
+  import { powerLabel } from '../lib/cards/linkq';
+  import { SPARK_POINTS, dataVersion, frozen, iqSnapsView as iqSnaps, metricsNow, metricsTail, powerUnit } from '../lib/link';
   import type { Channel } from '../lib/types';
   import Panel from './Panel.svelte';
 
@@ -14,8 +15,10 @@
   let iqCv: HTMLCanvasElement;
   let rssiCv: HTMLCanvasElement;
   let snrCv: HTMLCanvasElement;
-  const m = $derived($metrics[channel]?.fields);
-  const hasSignal = $derived(!!m && m.snr_db >= SIGNAL_SNR_DB);
+  const m = $derived($metricsNow[channel]);
+  const hasSignal = $derived(!!m && m.snr >= SIGNAL_SNR_DB);
+  const unit = $derived(powerLabel($powerUnit ?? undefined, true));
+  const fix = (x: number | undefined, d = 1) => (x !== undefined && Number.isFinite(x) ? x.toFixed(d) : '—');
 
   function drawIq() {
     if (!iqCv) return;
@@ -26,15 +29,15 @@
   let still: { rssi: readonly number[]; snr: readonly number[] } | null = null;
   function drawHistory() {
     if (!rssiCv || !snrCv) return;
-    const rssi = still?.rssi ?? history[channel].rssi.values();
-    const snr = still?.snr ?? history[channel].snr.values();
+    const rssi = still?.rssi ?? metricsTail(channel, 0, SPARK_POINTS);
+    const snr = still?.snr ?? metricsTail(channel, 2, SPARK_POINTS);
     const r = fitCanvas(rssiCv);
-    drawSparkline(r.ctx, r.w, r.h, rssi, colorVar, m?.power_unit === 'dBFS' ? [-90, 0] : [-115, -70], HISTORY);
+    drawSparkline(r.ctx, r.w, r.h, rssi, colorVar, $powerUnit === 'dBm' ? [-115, -70] : [-90, 0], SPARK_POINTS);
     const s = fitCanvas(snrCv);
-    drawSparkline(s.ctx, s.w, s.h, snr, colorVar, [0, 40], HISTORY);
+    drawSparkline(s.ctx, s.w, s.h, snr, colorVar, [0, 40], SPARK_POINTS);
   }
   $effect(() => {
-    still = $frozen ? { rssi: [...history[channel].rssi.values()], snr: [...history[channel].snr.values()] } : null;
+    still = $frozen ? { rssi: metricsTail(channel, 0, SPARK_POINTS), snr: metricsTail(channel, 2, SPARK_POINTS) } : null;
     drawHistory();
   });
 
@@ -45,7 +48,7 @@
   });
   $effect(() => {
     void $appearanceVersion;
-    void $historyVersion;
+    void $dataVersion;
     drawHistory();
   });
   onMount(() => {
@@ -72,20 +75,20 @@
     </figure>
     <div class="side">
       <div class="kv">
-        <div><div class="k">RSSI</div><div class="v">{m ? m.rssi_dbm.toFixed(1) : '—'} <small>{m?.power_unit ?? 'dBm'}</small></div></div>
-        <div><div class="k">SNR</div><div class="v">{m ? m.snr_db.toFixed(1) : '—'} <small>dB</small></div></div>
-        <div><div class="k">Δf from NCO</div><div class="v">{m ? signedKhz(m.freq_offset_hz) : '—'}</div></div>
-        <div><div class="k">Noise</div><div class="v">{m ? m.noise_dbm.toFixed(1) : '—'} <small>{m?.power_unit ?? 'dBm'}</small></div></div>
-        <div><div class="k">CRC good</div><div class="v">{m?.crc_good ?? '—'}</div></div>
-        <div><div class="k">CRC bad</div><div class="v">{m?.crc_bad ?? '—'}</div></div>
+        <div><div class="k">RSSI</div><div class="v">{fix(m?.rssi)} <small>{unit}</small></div></div>
+        <div><div class="k">SNR</div><div class="v">{fix(m?.snr)} <small>dB</small></div></div>
+        <div><div class="k">Δf from NCO</div><div class="v">{m && Number.isFinite(m.df) ? signedKhz(m.df) : '—'}</div></div>
+        <div><div class="k">Noise</div><div class="v">{fix(m?.noise)} <small>{unit}</small></div></div>
+        <div><div class="k">CRC good</div><div class="v">{fix(m?.crc_good, 0)}</div></div>
+        <div><div class="k">CRC bad</div><div class="v">{fix(m?.crc_bad, 0)}</div></div>
       </div>
       <div>
         <canvas class="spark" bind:this={rssiCv} aria-label="Channel {channel} RSSI history"></canvas>
-        <div class="cap"><span>RSSI, last 30 s</span><span>{m ? `${m.rssi_dbm.toFixed(1)} ${m.power_unit ?? 'dBm'}` : ''}</span></div>
+        <div class="cap"><span>RSSI, last 30 s</span><span>{m ? `${fix(m.rssi)} ${unit}` : ''}</span></div>
       </div>
       <div>
         <canvas class="spark" bind:this={snrCv} aria-label="Channel {channel} SNR history"></canvas>
-        <div class="cap"><span>SNR, last 30 s</span><span>{m ? `${m.snr_db.toFixed(1)} dB` : ''}</span></div>
+        <div class="cap"><span>SNR, last 30 s</span><span>{m ? `${fix(m.snr)} dB` : ''}</span></div>
       </div>
     </div>
   </div>

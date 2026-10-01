@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { linkStatsView as linkStats } from '../lib/link';
+  import { linkStatsNow } from '../lib/link';
   import Panel from './Panel.svelte';
 
-  const f = $derived($linkStats?.fields);
+  const f = $derived($linkStatsNow);
   const parts = $derived(f ? [
-    { text: 'from A', n: f.from_a as number, color: '--ch-a' },
-    { text: 'from B only', n: f.from_b as number, color: '--ch-b' },
-    { text: 'neither', n: f.neither_ok as number, color: '--bad' },
-  ] : []);
+    { text: 'from A', n: f.from_a, color: '--ch-a' },
+    { text: 'from B only', n: f.from_b, color: '--ch-b' },
+    { text: 'neither', n: f.neither_ok, color: '--bad' },
+  ].filter((p) => Number.isFinite(p.n)) : []);
   const total = $derived(parts.reduce((sum, p) => sum + p.n, 0) || 1);
 </script>
 

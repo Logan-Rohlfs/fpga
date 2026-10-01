@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PAD, fOf, ifToRf, makeAxis, ticks, xOf } from './axis';
 import { LUT } from './colormap';
 import { hex32, khz, mhz, signedKhz } from './format';
-import { Ring } from './ring';
 import { createCoalescer } from './throttle';
 import { paintRow } from './waterfall';
 
@@ -13,15 +12,6 @@ describe('format', () => {
     expect(signedKhz(-10400)).toBe('−10.4 kHz');
     expect(signedKhz(10400)).toBe('+10.4 kHz');
     expect(hex32(0x1999999a)).toBe('0x1999999A');
-  });
-});
-
-describe('Ring', () => {
-  it('keeps the newest values up to its size', () => {
-    const r = new Ring(3);
-    [1, 2, 3, 4].forEach((v) => r.push(v));
-    expect(r.values()).toEqual([2, 3, 4]);
-    expect(r.last).toBe(4);
   });
 });
 

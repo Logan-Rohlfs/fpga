@@ -14,7 +14,8 @@
   import type { Overlay } from '../lib/draw';
   import { profileOf } from '../lib/receiver';
   import { khz, mhz, signedKhz } from '../lib/format';
-  import { connection, hello, link, metricsView as metrics, role, stats, tuning } from '../lib/link';
+  import { powerLabel } from '../lib/cards/linkq';
+  import { connection, hello, link, metricsNow, powerUnit, role, stats, tuning } from '../lib/link';
   import type { Channel, SpectrumMsg, TuningChanges } from '../lib/types';
   import { scaleOverride, tuneChannel } from '../lib/view';
 
@@ -25,7 +26,8 @@
   const source = $derived($stats?.source ?? $hello?.source);
   const profile = $derived(profileOf(source));
   const t = $derived($tuning);
-  const m = $derived($metrics[$tuneChannel]?.fields);
+  const m = $derived($metricsNow[$tuneChannel]);
+  const fix = (x: number) => (Number.isFinite(x) ? x.toFixed(1) : '—');
   let row = $state<SpectrumMsg | null>(null);
   let ncoDrag: number | null = null;
 
@@ -90,9 +92,10 @@
           ondrag={dragNco} ondragend={() => (ncoDrag = null)} onrow={(r) => (row = r)} />
         <div class="chanbar mono">
           <span>Ch {$tuneChannel}</span>
-          <span>RSSI <b>{m ? `${m.rssi_dbm.toFixed(1)} ${m.power_unit ?? 'dBm'}` : '—'}</b></span>
-          <span>SNR <b>{m ? `${m.snr_db.toFixed(1)} dB` : '—'}</b></span>
-          <span>Δf from NCO <b>{m ? signedKhz(m.freq_offset_hz) : '—'}</b></span>
+          <span>RSSI <b>{m ? `${fix(m.rssi)} ${powerLabel($powerUnit ?? undefined, true)}` : '—'}</b></span>
+          <span>Noise <b>{m ? `${fix(m.noise)} ${powerLabel($powerUnit ?? undefined, true)}` : '—'}</b></span>
+          <span>SNR <b>{m ? `${fix(m.snr)} dB` : '—'}</b></span>
+          <span>Δf from NCO <b>{m && Number.isFinite(m.df) ? signedKhz(m.df) : '—'}</b></span>
           {#if row}<span>scale <b>{($scaleOverride.mode === 'manual' ? $scaleOverride.low : row.low).toFixed(0)}…{($scaleOverride.mode === 'manual' ? $scaleOverride.high : row.high).toFixed(0)} dBFS</b></span>{/if}
         </div>
       </Panel>

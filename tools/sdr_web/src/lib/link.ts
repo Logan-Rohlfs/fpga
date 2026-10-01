@@ -1,6 +1,5 @@
 /** The one WebSocket connection and the stores every component reads. */
-import { type Readable, get, readable, writable } from 'svelte/store';
-import { Ring } from './ring';
+import { type Readable, derived, get, readable, writable } from 'svelte/store';
 import { SeriesStore } from './series';
 import { createCoalescer } from './throttle';
 import type {
@@ -10,9 +9,13 @@ import type {
 import { type FlightOrigin, type FlightRows, decodeBinary } from './wire';
 
 export interface Notice { id: number; text: string; kind: 'info' | 'warn' }
-export interface LinkStatsPoint { t: number; from_a: number; from_b: number }
+export interface LinkStatsPoint { t: number; from_a: number; from_b: number; neither_ok: number; both_ok: number }
+/** The newest CHAN_METRICS sample of one channel, from its metrics ring. */
+export interface MetricsSample {
+  t: number; rssi: number; noise: number; snr: number; df: number; crc_good: number; crc_bad: number; synthetic: boolean;
+}
 
-export const HISTORY = 300;              // 30 s of CHAN_METRICS at 10 Hz (Tune sparklines)
+export const SPARK_POINTS = 300;         // 30 s of CHAN_METRICS at 10 Hz (Tune sparklines)
 export const FRAMES_MAX = 200;
 export const EVENTS_MAX = 2000;
 export const LINK_STATS_MAX = 600;
@@ -31,8 +34,6 @@ export const role = writable<RoleMsg | null>(null);
 export const tuning = writable<TuningMsg | null>(null);
 export const stats = writable<StatsMsg | null>(null);
 export const status = writable<RecordJson | null>(null);
-export const linkStats = writable<RecordJson | null>(null);
-export const metrics = writable<Partial<Record<Channel, RecordJson>>>({});
 export const iqSnaps = writable<Partial<Record<Channel, [number, number][][]>>>({});
 /** Per-snapshot metadata, index-aligned with `iqSnaps`: the snapshot's own sample rate (null if absent) and SYNTHETIC flag. */
 export interface IqSnapMeta { sample_rate_hz: number | null; synthetic: boolean }
@@ -43,11 +44,6 @@ export const notices = writable<Notice[]>([]);
 /** Read only by drawing code. Ingestion never stops, so freezing leaves no gaps. */
 export const frozen = writable(false);
 export const synthetic = writable(false);
-export const history: Record<Channel, { rssi: Ring; snr: Ring }> = {
-  A: { rssi: new Ring(HISTORY), snr: new Ring(HISTORY) },
-  B: { rssi: new Ring(HISTORY), snr: new Ring(HISTORY) },
-};
-export const historyVersion = writable(0);
 
 export const flightSchema = writable<FlightSchema | null>(null);
 /** One ring per flight origin. A and B exist only while `flight.A` / `flight.B` are subscribed. */
@@ -60,7 +56,7 @@ export const metricsStores: Record<Channel, SeriesStore> = {
   B: new SeriesStore(METRIC_FIELDS.length, METRICS_MAX),
 };
 export const linkStatsRing = writable<LinkStatsPoint[]>([]);
-/** Power unit reported with the latest metrics snapshot (null until one arrives). */
+/** Power unit of the newest metrics (metrics_history or live CHAN_METRICS); null until one arrives. */
 export const powerUnit = writable<string | null>(null);
 export const eventsStore = writable<GuiEvent[]>([]);
 /** The last FRAMES_MAX `frames` records, oldest first. */
@@ -90,11 +86,28 @@ export function frozenView<T>(src: Readable<T>): Readable<T> {
     };
   });
 }
-export const metricsView = frozenView(metrics);
-export const linkStatsView = frozenView(linkStats);
 export const statusView = frozenView(status);
 export const iqSnapsView = frozenView(iqSnaps);
 export const statsView = frozenView(stats);
+
+/** The newest sample in a channel's metrics ring, or null when it is empty. */
+export function latestMetrics(ch: Channel): MetricsSample | null {
+  const l = metricsStores[ch].latest();
+  if (!l) return null;
+  const v = l.values;
+  return { t: l.t, rssi: v[0], noise: v[1], snr: v[2], df: v[3], crc_good: v[4], crc_bad: v[5], synthetic: !!(l.flags & 1) };
+}
+/** Latest metrics per channel for display; follows the rings (once per frame) and holds while frozen. */
+export const metricsNow = frozenView(derived(dataVersion, () => ({ A: latestMetrics('A'), B: latestMetrics('B') })));
+/** Newest LINK_STATS point for display; holds while frozen. */
+export const linkStatsNow = frozenView(derived(linkStatsRing, (ring) => ring[ring.length - 1] ?? null));
+/** The last `n` values of one metrics field (METRIC_FIELDS index), oldest first, for sparklines. */
+export function metricsTail(ch: Channel, field: number, n: number): number[] {
+  const store = metricsStores[ch];
+  const out: number[] = [];
+  for (let i = Math.max(0, store.length - n); i < store.length; i++) out.push(store.valueAt(i, field));
+  return out;
+}
 
 const spectrumListeners = new Set<(m: SpectrumMsg) => void>();
 export function onSpectrum(fn: (m: SpectrumMsg) => void): () => void {
@@ -241,11 +254,6 @@ function applyBinary(buf: ArrayBuffer): void {
 // ---- JSON records and snapshots
 const num = (x: unknown): number => (typeof x === 'number' ? x : NaN);
 
-function pushMetricsHistory(ch: Channel, rssi: number, snr: number): void {
-  history[ch].rssi.push(rssi);
-  history[ch].snr.push(snr);
-}
-
 function applyRecord(msg: RecordMsg): void {
   const r = msg.record;
   synthetic.update((seen) => seen || r.synthetic);
@@ -254,20 +262,20 @@ function applyRecord(msg: RecordMsg): void {
   switch (r.type) {
     case 'STATUS': status.set(r); break;
     case 'LINK_STATS':
-      linkStats.set(r);
       linkStatsRing.update((ring) => {
         if (ring.length && r.t <= ring[ring.length - 1].t) return ring;   // a reconnect repeats the latest record
-        return [...ring, { t: r.t, from_a: num(r.fields.from_a), from_b: num(r.fields.from_b) }].slice(-LINK_STATS_MAX);
+        const f = r.fields;
+        return [...ring, {
+          t: r.t, from_a: num(f.from_a), from_b: num(f.from_b), neither_ok: num(f.neither_ok), both_ok: num(f.both_ok),
+        }].slice(-LINK_STATS_MAX);
       });
       bumpData();
       break;
     case 'CHAN_METRICS': {
       const ch = r.fields.channel as Channel;
-      metrics.update((m) => ({ ...m, [ch]: r }));
-      if (history[ch]) {
-        pushMetricsHistory(ch, r.fields.rssi_dbm, r.fields.snr_db);
-        historyVersion.update((v) => v + 1);
+      if (metricsStores[ch]) {
         const f = r.fields;
+        if (typeof f.power_unit === 'string') powerUnit.set(f.power_unit);
         metricsStores[ch].append(r.t, r.synthetic ? 1 : 0, [
           num(f.rssi_dbm), num(f.noise_dbm), num(f.snr_db), num(f.freq_offset_hz), num(f.crc_good), num(f.crc_bad),
         ]);
@@ -293,18 +301,14 @@ function applyRecord(msg: RecordMsg): void {
 function applyMetricsHistory(msg: MetricsHistoryMsg): void {
   const store = metricsStores[msg.channel];
   if (!store) return;
-  powerUnit.set(msg.power_unit);
+  if (msg.power_unit !== null) powerUnit.set(msg.power_unit);
   store.clear();
-  history[msg.channel].rssi.clear();
-  history[msg.channel].snr.clear();
   const cols = [msg.rssi, msg.noise, msg.snr, msg.df, msg.crc_good, msg.crc_bad];
   const row = new Array<number>(cols.length);
   for (let i = 0; i < msg.t.length; i++) {
     for (let k = 0; k < cols.length; k++) row[k] = cols[k]?.[i] ?? NaN;
     store.append(msg.t[i], 0, row);
-    pushMetricsHistory(msg.channel, row[0], row[2]);
   }
-  historyVersion.update((v) => v + 1);
   bumpData();
 }
 
@@ -330,13 +334,8 @@ function resetChannel(channel: string, count: number): void {
       eventsStore.set([]);
       break;
     case 'link':
-      for (const ch of ['A', 'B'] as Channel[]) {
-        metricsStores[ch].clear();
-        history[ch].rssi.clear();
-        history[ch].snr.clear();
-      }
+      for (const ch of ['A', 'B'] as Channel[]) metricsStores[ch].clear();
       linkStatsRing.set([]);
-      historyVersion.update((v) => v + 1);
       break;
   }
   bumpData();
@@ -379,18 +378,13 @@ export function handleMessage(msg: ServerMsg | ArrayBuffer): void {
 
 /** Test helper: back to a fresh page state. */
 export function resetState(): void {
-  [hello, role, tuning, stats, status, linkStats, takeover, flightSchema, presets].forEach((s) => s.set(null));
-  metrics.set({});
+  [hello, role, tuning, stats, status, takeover, flightSchema, presets, powerUnit].forEach((s) => s.set(null));
   iqSnaps.set({});
   iqSnapMeta.set({});
   frames.set([]);
   frozen.set(false);
   synthetic.set(false);
-  for (const ch of ['A', 'B'] as Channel[]) {
-    history[ch].rssi.clear();
-    history[ch].snr.clear();
-    metricsStores[ch].clear();
-  }
+  for (const ch of ['A', 'B'] as Channel[]) metricsStores[ch].clear();
   flightStores.best = new SeriesStore(DEFAULT_FLIGHT_FIELDS, FLIGHT_MAX);
   delete flightStores.A;
   delete flightStores.B;
