@@ -94,6 +94,7 @@ interface Spec {
   channels(config: Config): string[];
   settings?: SettingField[];
   titleOf?(config: Config): string;
+  component?: CardMeta['component'];
 }
 
 function meta(spec: Spec): CardMeta {
@@ -110,7 +111,7 @@ function meta(spec: Spec): CardMeta {
   };
   return {
     type: spec.type, title: spec.title, min: spec.min, phoneMinH: spec.phoneMinH, defaults: spec.defaults,
-    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf,
+    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf, component: spec.component,
     channels: (config) => [...new Set(spec.channels(sanitize(config)))],
   };
 }
@@ -164,6 +165,7 @@ const specs: Spec[] = [
       field: text(40), source: oneOf([...SOURCES, 'both']), digits: nullableInt(0, 3), thresholds, track_minmax: bool, units: unitsMap,
     },
     channels: (c) => flightChannels(c.source),
+    component: () => import('../../cards/NumberCard.svelte'),
     settings: [
       { key: 'field', label: 'Field', kind: 'field' },
       { ...sourceField, options: [...sourceField.options!, { value: 'both', label: 'A and B' }] },
@@ -177,6 +179,7 @@ const specs: Spec[] = [
     defaults: { source: 'best', show_time_in_phase: true },
     validators: { source: oneOf(SOURCES), show_time_in_phase: bool },
     channels: (c) => flightChannels(c.source),
+    component: () => import('../../cards/StateCard.svelte'),
     settings: [sourceField, { key: 'show_time_in_phase', label: 'Show time in phase', kind: 'bool' }],
   },
   {
@@ -262,11 +265,13 @@ const specs: Spec[] = [
     type: 'health', title: 'Health and flags', min: { w: 3, h: 3 }, phoneMinH: 5,
     defaults: { source: 'best' }, validators: { source: oneOf(SOURCES) },
     channels: (c) => flightChannels(c.source), settings: [sourceField],
+    component: () => import('../../cards/HealthCard.svelte'),
   },
   {
     type: 'gps', title: 'GPS status', min: { w: 2, h: 3 }, phoneMinH: 4,
     defaults: { source: 'best' }, validators: { source: oneOf(SOURCES) },
     channels: (c) => flightChannels(c.source), settings: [sourceField],
+    component: () => import('../../cards/GpsCard.svelte'),
   },
   {
     type: 'frames', title: 'Raw frames', min: { w: 3, h: 4 }, phoneMinH: 6,
