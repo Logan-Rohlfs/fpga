@@ -217,6 +217,7 @@ const specs: Spec[] = [
     defaults: { url: null, mode: 'mjpeg', fit: 'contain' },
     validators: { url: (v, d) => (v === null ? null : url(v, d)), mode: oneOf(['mjpeg', 'video']), fit: oneOf(['contain', 'cover']) },
     channels: () => [],
+    component: () => import('../../cards/CameraCard.svelte'),
     settings: [
       { key: 'url', label: 'Stream URL (http or https)', kind: 'text' },
       { key: 'mode', label: 'Mode', kind: 'select', options: [{ value: 'mjpeg', label: 'MJPEG' }, { value: 'video', label: 'Video' }] },
