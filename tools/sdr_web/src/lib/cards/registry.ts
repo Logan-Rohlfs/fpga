@@ -94,6 +94,7 @@ interface Spec {
   channels(config: Config): string[];
   settings?: SettingField[];
   titleOf?(config: Config): string;
+  component?: CardMeta['component'];
 }
 
 function meta(spec: Spec): CardMeta {
@@ -110,7 +111,7 @@ function meta(spec: Spec): CardMeta {
   };
   return {
     type: spec.type, title: spec.title, min: spec.min, phoneMinH: spec.phoneMinH, defaults: spec.defaults,
-    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf,
+    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf, component: spec.component,
     channels: (config) => [...new Set(spec.channels(sanitize(config)))],
   };
 }
@@ -189,6 +190,7 @@ const specs: Spec[] = [
       out.kinds = picked.length ? picked : all.slice();
     },
     channels: () => ['events'],
+    component: () => import('../../cards/EventsCard.svelte'),
     titleOf: (c) => (c.category === 'link' ? 'Link events' : 'Flight events'),
     settings: [
       { key: 'category', label: 'Category', kind: 'select', options: [{ value: 'flight', label: 'Flight' }, { value: 'link', label: 'Link' }] },
@@ -273,6 +275,7 @@ const specs: Spec[] = [
     defaults: { filter: 'all', view: 'text' },
     validators: { filter: oneOf(['all', 'A', 'B', 'best']), view: oneOf(['text', 'hex']) },
     channels: () => ['frames'],
+    component: () => import('../../cards/FramesCard.svelte'),
     settings: [
       { key: 'filter', label: 'Filter', kind: 'select', options: [
         { value: 'all', label: 'All' }, { value: 'A', label: 'Channel A' }, { value: 'B', label: 'Channel B' }, { value: 'best', label: 'Best' }] },
