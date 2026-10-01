@@ -13,7 +13,13 @@ module receiver_top_tb;
 
     always #5 clk = ~clk;
 
-    sdr_top #(.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(20_000), .STATUS_TICKS(20)) dut (
+    // Checks run against sdr_top's default SPECTRUM_BINS; BINS must equal it
+    // (checked at time 0). 10 ms ticks: the 10-tick SPECTRUM period (400k
+    // clocks here) also covers a 256-point capture plus DFT (~210k clocks).
+    localparam integer BINS = 64;
+    localparam integer BIN_MHZ = 100_000_000 / BINS;
+    initial if (dut.SPECTRUM_BINS != BINS) $fatal(1, "TB BINS %0d != sdr_top SPECTRUM_BINS %0d", BINS, dut.SPECTRUM_BINS);
+    sdr_top #(.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(40_000), .STATUS_TICKS(10)) dut (
         .clk(clk), .btnC(btnC), .uart_rx(1'b1), .uart_tx(uart_tx), .led(led)
     );
 
@@ -53,7 +59,7 @@ module receiver_top_tb;
             8'h11: expected_len = 14 + 19;
             8'h20: expected_len = 24;
             8'h21: expected_len = 20;
-            8'h30: expected_len = 22 + 64;
+            8'h30: expected_len = 22 + BINS;
             8'h31: expected_len = 12 + 256;
             default: expected_len = -1;
         endcase
@@ -142,17 +148,17 @@ module receiver_top_tb;
             end
             if (msg[0] == 8'h01 && {msg[16], msg[15]} != 0) $fatal(1, "STATUS reports %0d dropped", {msg[16], msg[15]});
             if (msg[0] == 8'h01 && msg[5] != 2) $fatal(1, "STATUS protocol version %0d, expected 2", msg[5]);
-            // SPECTRUM axis: center 100 kHz, 1562.5 Hz bins (1562500 mHz), -120.0 dBFS ref, 0.5 dB step.
+            // SPECTRUM axis: BINS bins, center 100 kHz, 100 kS/s / BINS bin width (mHz), -120.0 dBFS ref, 0.5 dB step.
             // Payload starts at msg[5]: channel, averages, row u16, bins u16, t_us u32, center_hz, bin_mhz...
-            if (msg[0] == 8'h30 && ({msg[18], msg[17], msg[16], msg[15]} != 100000 ||
-                                    {msg[22], msg[21], msg[20], msg[19]} != 1562500 ||
+            if (msg[0] == 8'h30 && ({msg[10], msg[9]} != BINS || {msg[18], msg[17], msg[16], msg[15]} != 100000 ||
+                                    {msg[22], msg[21], msg[20], msg[19]} != BIN_MHZ ||
                                     {msg[24], msg[23]} != 16'hfb50 || msg[25] != 50))
                 $fatal(1, "SPECTRUM axis metadata wrong");
             // channel, rsvd, pairs u16, t_us u32, sample_rate_hz u32
             if (msg[0] == 8'h31 && {msg[16], msg[15], msg[14], msg[13]} != 100000)
                 $fatal(1, "IQ_SNAPSHOT sample rate wrong");
             if(msg[0]==8'h30) begin
-                for(integer k=1;k<64;k=k+1) if(msg[27+k]!=msg[27]) spectrum_nonflat=spectrum_nonflat+1;
+                for(integer k=1;k<BINS;k=k+1) if(msg[27+k]!=msg[27]) spectrum_nonflat=spectrum_nonflat+1;
             end
             if(msg[0]==8'h31) begin
                 for(integer k=0;k<256;k=k+1) if(msg[17+k]!=0) iq_nonzero=iq_nonzero+1;

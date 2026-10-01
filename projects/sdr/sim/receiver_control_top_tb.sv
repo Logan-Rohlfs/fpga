@@ -5,7 +5,8 @@ module receiver_control_top_tb;
     reg clk=0;always #5 clk=~clk;
     reg btnC=0,uart_rx=1;
     wire uart_tx,led;
-    sdr_top #(.CLK_HZ(4000000),.BAUD_RATE(1000000),.TICK_CYCLES(20000),.STATUS_TICKS(20)) dut(.*);
+    // 10 ms ticks: the 10-tick SPECTRUM period also covers a 256-point capture plus DFT.
+    sdr_top #(.CLK_HZ(4000000),.BAUD_RATE(1000000),.TICK_CYCLES(40000),.STATUS_TICKS(10)) dut(.*);
     reg [7:0] enc[0:1023],msg[0:1023],command_bytes[0:14];
     integer capture;
     integer n_enc=0,n_msg,messages=0,expected_seq=-1,best_count=0,metrics_count=0,applies=0;

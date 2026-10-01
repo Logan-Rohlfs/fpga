@@ -10,7 +10,8 @@ module flight_top_tb;
     reg clk = 0;
     always #5 clk = ~clk;
     wire uart_tx, led;
-    sdr_top #(.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(25_000), .STATUS_TICKS(10),
+    // 10 ms ticks: the 10-tick SPECTRUM period also covers a 256-point capture plus DFT.
+    sdr_top #(.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(40_000), .STATUS_TICKS(10),
               .DEMO_FLIGHT(1)) dut (
         .clk(clk), .btnC(1'b0), .uart_rx(1'b1), .uart_tx(uart_tx), .led(led)
     );

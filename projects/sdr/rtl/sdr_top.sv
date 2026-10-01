@@ -17,7 +17,12 @@ module sdr_top #(
     parameter integer ADC_ENABLE=1,
     // Opt-in APEX flight replay demo (./sdr build --demo). STATUS then reports
     // BUILD_ID "SDRF" (0x53445246) instead of BUILD_ID.
-    parameter integer DEMO_FLIGHT=0
+    parameter integer DEMO_FLIGHT=0,
+    // Receiver SPECTRUM DFT length: 64 (1562.5 Hz bins at 100 kS/s), 128 or 256
+    // (390.625 Hz bins). 64 is the default; no Vivado build of the restructured
+    // observer exists at any length yet, so all three are simulation-verified
+    // only. host/check_receiver.py reads this default.
+    parameter integer SPECTRUM_BINS=64
 ) (
     input  wire clk,
     input  wire btnC,
@@ -75,7 +80,7 @@ module sdr_top #(
             .rejected_count(rejected_commands),.dropped_count(dropped_commands));
         receiver_link_sources #(.CLK_HZ(CLK_HZ),.TICK_CYCLES(TICK_CYCLES),
             .STATUS_TICKS(STATUS_TICKS),.BUILD_ID(DEMO_FLIGHT ? 32'h53445246 : BUILD_ID),.N(11),
-            .DEMO_FLIGHT(DEMO_FLIGHT)) sources(
+            .DEMO_FLIGHT(DEMO_FLIGHT),.SPECTRUM_BINS(SPECTRUM_BINS)) sources(
             .clk(clk),.rst(rst),.cfg_reset(cfg_reset),.pause(quiesce),.carrier_ftw(applied_carrier),.nco_step(applied_nco),
             .adc_enable(applied_enable),.req(req[N-1:1]),.p_type(p_type[8*N-1:8]),.p_flags(p_flags[8*N-1:8]),.p_len(p_len[16*N-1:16]),
             .grant(grant[N-1:1]),.p_data(p_data[8*N-1:8]),.p_valid(p_valid[N-1:1]),.p_ready(p_ready[N-1:1]));

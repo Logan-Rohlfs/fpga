@@ -15,7 +15,7 @@ ADC waveform model (A/B signed 12-bit samples)
   -> sync / byte assembly / optional dewhitening / CRC
   -> A/B source combiner -> host link -> USB UART -> CLI / web GUI
 
-Decimated I/Q -> 64-point complex DFT, power/noise estimates, I/Q snapshots
+Decimated I/Q -> 64-point complex DFT (128/256 optional), power/noise estimates, I/Q snapshots
              -> host link
 ```
 
@@ -158,15 +158,45 @@ a small synthetic log. On hardware, the same checker runs with
 
 ## Measurements and provenance
 
-- Spectrum is an actual rectangular-window 64-point complex DFT at 100 kS/s:
-  1562.5 Hz bins, centered on the applied NCO. There is no walking test tone.
+- Spectrum is an actual rectangular-window complex DFT at 100 kS/s, centered
+  on the applied NCO. There is no walking test tone. Every bin is computed;
+  none is interpolated. `sdr_top` parameter `SPECTRUM_BINS` sets the length:
+  64 (default, 1562.5 Hz bins), 128 (781.25 Hz) or 256 (390.625 Hz). Other
+  values fail elaboration. `check_receiver.py` reads the default from
+  `rtl/sdr_top.sv`; `--spectrum-bins` checks a non-default build.
+- 64 is the default: it keeps the bitstreams' previous spectrum size. No
+  Vivado build of this parameterized observer has run yet at any length, so
+  its timing, resources and DRC are unmeasured. 128 and 256 are verified in
+  simulation only: `rx_observer_tb`
+  checks all three against a floating-point DFT. The top-level tests use 10 ms
+  ticks, so the full `./sdr sim` also passed with 256 as the default during
+  Task 26. The
+  observer captures N samples (2.56 ms at 256), then computes every bin at
+  three clocks per sample per bin: about 3N² + 10N clocks, about 2 ms at 256
+  points and 100 MHz, well inside the 100 ms SPECTRUM period. 256 is the
+  upper limit: the sine table resolves 1/256 turn, and a 512-bin SPECTRUM
+  payload (534 bytes) would exceed the link's 512-byte `MAX_PAYLOAD`.
+- Link load, measured in a 2 s simulation of `sdr_top` at the hardware tick
+  and STATUS rates: 10.5% of 1 Mbaud with 64 bins (12.0% for the demo) and
+  14.4% (15.9%) with 256 bins. SPECTRUM is 22 + N payload bytes at 10 Hz per
+  channel (95 or 288 bytes on the wire); the report rate is the same at every
+  length.
+- To enable 390.625 Hz bins, set `parameter integer SPECTRUM_BINS=256` in
+  `rtl/sdr_top.sv` and `localparam integer BINS = 256` in
+  `sim/receiver_top_tb.sv` (it checks the two agree), run `./sdr sim`, then run
+  `./sdr build --all` and confirm that timing is met
+  and DRC is clean for both variants before programming. First decide the GUI
+  viewer spectrum rate: at 256 bins a viewer on the Flight preset receives
+  about 12.3 kB/s, above the 10 kB/s viewer budget in the GUI cards spec (§2.4).
+  At 64 bins it is about 8.5 kB/s.
 - I/Q snapshots contain 64 actual decimated sample pairs.
 - Signal power and noise are **relative dBFS**, not calibrated antenna dBm.
   Flag bit 2 (`0x04`) identifies this unit in channel/frame metric records;
   legacy records retain their previous labels. A coarse logarithm approximation
   is used, and full scale accounts for the DDC gain.
-- Noise is estimated from outer spectrum bins and SNR from the corresponding
-  power difference. Filtering, leakage, bursts and out-of-band signals bias this
+- Noise is the mean of the outer spectrum bins (|f| from about 35 kHz)
+  integrated over all bins, so its meaning does not depend on the DFT length.
+  SNR comes from the corresponding power difference. Filtering, leakage, bursts and out-of-band signals bias this
   estimate; it is not a calibrated noise figure or sensitivity measurement.
 - Frequency offset averages unwrapped I/Q quadrant changes. Modulation content
   affects this estimate; it is not an independent crystal-frequency measurement.
@@ -219,7 +249,8 @@ No XADC electrical interface or physical PLL driver is asserted to exist.
 
 Tests include clean/noisy/offset Gaussian ADC vectors, deliberate CRC corruption,
 synthesizable ADC output, framing recovery, stalls, signal disable/recovery,
-DFT placement/scaling, command validation, whole-UART payload checks, and the
+DFT placement/scaling, a floating-point DFT reference at 64, 128 and 256 points
+(`sim/generate_dft_vectors.py`, committed `sim/vectors/dft_*.hex`), command validation, whole-UART payload checks, and the
 independent legacy transport tests. `utilization.rpt` includes a per-module
 hierarchy table, and `timing.rpt` ends with a one-line-per-endpoint summary of the
 100 worst paths. Generated captures and reports remain in

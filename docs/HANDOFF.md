@@ -106,7 +106,15 @@ plan "Task 6 GUI flight readout".
 - Newly run for this docs commit: host suite (322 tests, OK, 3 skipped), vitest 270 pass, svelte-check 0 errors and 0 warnings, production build, and `./sdr sim` (all PASS).
 - Run earlier in this effort (sizing commit `e73b4b4`, not repeated for this commit): a headless-Chrome overflow probe at 1440x900 and 1920x1080 with `./sdr gui --source demo`, checking that no Flight preset card scrolls or clips.
 - Not verified: no hardware run of the new RocketPy demo ROM, and no Vivado build of it (resource use and timing unmeasured; the earlier recorded-log demo build numbers below do not apply). No phone or LAN viewer was tried. Camera capture and a server-side relay are not built (the camera card only embeds a stream URL).
-- Task 26 (parameterized DFT length, UART load and timing): result pending. Placeholder: TASK 26 RESULT NOT YET RECORDED.
+- Task 26 (parameterized DFT length): `sdr_top` parameter `SPECTRUM_BINS` (64, 128 or 256; other values fail elaboration) sets the `rx_observer` DFT length.
+  - Simulation: `rx_observer_tb` matches a floating-point DFT at 64, 128 and 256 points. The full `./sdr sim` passed with 256 as the default, and again with the default of 64.
+  - Measured UART load, from a 2 s `sdr_top` simulation at hardware tick and STATUS rates: 10.5% of 1 Mbaud at 64 bins (demo 12.0%) and 14.4% at 256 (demo 15.9%).
+  - The default stays 64 by controller ruling. No Vivado build of the restructured `rx_observer` (any length) has run because the build host was offline. Timing, resources and DRC are therefore unmeasured even at 64, and earlier build numbers predate this RTL.
+  - To enable 256 (390.625 Hz bins):
+    1. Decide the GUI viewer spectrum rate. At 256 bins a Flight-preset viewer receives about 12.3 kB/s, over the 10 kB/s budget.
+    2. Set `SPECTRUM_BINS=256` in `projects/sdr/rtl/sdr_top.sv` and `BINS = 256` in `projects/sdr/sim/receiver_top_tb.sv`.
+    3. Run `./sdr sim`.
+    4. Run `./sdr build --all` and confirm that WNS/WHS are at least 0 and DRC is clean for both variants. `check_receiver.py` follows the RTL default.
 
 **Preflight rulings: made.** Every finding in the
 [preflight scan](superpowers/plans/2026-09-30-gui-cards-preflight.md) is ruled, and

@@ -14,7 +14,9 @@ module receiver_link_sources #(
     parameter integer ADC_AMPLITUDE_B=1000,
     // 1 selects the APEX flight replay demo profile below (opt-in bitstream).
     parameter integer DEMO_FLIGHT=0,
-    parameter FLIGHT_ROM_FILE="projects/sdr/rom/apex_flight.mem"
+    parameter FLIGHT_ROM_FILE="projects/sdr/rom/apex_flight.mem",
+    // rx_observer DFT length: 64, 128 or 256 bins across IQ_RATE (sdr_top passes it).
+    parameter integer SPECTRUM_BINS=64
 )(
     input wire clk,rst,
     input wire cfg_reset,
@@ -33,6 +35,9 @@ module receiver_link_sources #(
     localparam integer US_CYCLES=CLK_HZ/1000000;
     localparam integer METRICS_TICKS=10,SPECTRUM_TICKS=10,IQ_TICKS=10,TELEM_TICKS=5;
     localparam integer IQ_RATE=SAMPLE_RATE_HZ/10;
+    localparam integer SPECTRUM_LOG2=$clog2(SPECTRUM_BINS);
+    // Bin width in mHz: 1562500 for 64 bins, 390625 for 256 at 100 kS/s.
+    localparam [31:0] SPECTRUM_BIN_MHZ=(64'(IQ_RATE)*1000)/SPECTRUM_BINS;
     localparam [7:0] T_BEST=8'h10,T_FRAME=8'h11,T_METRICS=8'h20,T_LINK=8'h21,T_STATUS=1,T_SPECTRUM=8'h30,T_IQ=8'h31;
     // ------------------------------------------------------------ radio profile
     // Default: the provisional TEST profile (19-byte frame, sync D391D391).
@@ -218,10 +223,10 @@ module receiver_link_sources #(
         wire observation_release=observation_streaming && !req[PS] && !req[PI];
         wire [15:0] spectrum_index=idx[PS]-16'd22;
         wire [15:0] iq_index=idx[PI]-16'd12;
-        rx_observer #(.SAMPLE_RATE_HZ(IQ_RATE),.FULL_SCALE(8192)) observer(
+        rx_observer #(.POINTS(SPECTRUM_BINS),.SAMPLE_RATE_HZ(IQ_RATE),.FULL_SCALE(8192)) observer(
             .clk(clk),.rst(datapath_rst),.iq_valid(iq_valid),.iq_i(iq_i),.iq_q(iq_q),.trigger(due_spectrum),
             .t_us(t_us),.capture_t_us(capture_t_us),.valid(observation_valid),.ready(observation_release),
-            .spectrum_addr(spectrum_index[5:0]),.spectrum_data(spectrum_byte),
+            .spectrum_addr(spectrum_index[SPECTRUM_LOG2-1:0]),.spectrum_data(spectrum_byte),
             .iq_addr(iq_index[7:0]),.iq_data(iq_byte),
             .power_dbfs_x10(power_dbfs),.noise_dbfs_x10(noise_dbfs),.snr_db_x10(snr_db),
             .dropped_count(observer_dropped[g]));
@@ -235,7 +240,7 @@ module receiver_link_sources #(
         reg [15:0] row;
         assign trigger[PS]=observation_start;
         assign trigger[PI]=observation_start;
-        assign len[PS]=86;assign mtype[PS]=T_SPECTRUM;
+        assign len[PS]=22+SPECTRUM_BINS;assign mtype[PS]=T_SPECTRUM;
         assign len[PI]=268;assign mtype[PI]=T_IQ;
         always @(posedge clk) begin
             if(rst) row<=0;
@@ -247,8 +252,8 @@ module receiver_link_sources #(
             if(datapath_rst || observation_release) observation_streaming<=0;
             else if(observation_start) observation_streaming<=1;
         end
-        wire [175:0] spectrum_header={8'd0,8'd50,-16'sd1200,32'd1562500,saved_center,
-            observation_t,16'd64,row,8'd1,CH};
+        wire [175:0] spectrum_header={8'd0,8'd50,-16'sd1200,SPECTRUM_BIN_MHZ,saved_center,
+            observation_t,16'(SPECTRUM_BINS),row,8'd1,CH};
         // Header bytes use one register stage; body bytes come from the observer's
         // registered read port, within link_msg_port's LATENCY budget.
         reg spectrum_in_header,iq_in_header;

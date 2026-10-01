@@ -15,6 +15,7 @@ equal that record; it is counted as a single-antenna cover.
 import argparse
 from collections import Counter
 import math
+import re
 from pathlib import Path
 import sys
 import time
@@ -24,6 +25,19 @@ from sdr_cli.protocol import StreamDecoder, crc16_ccitt  # noqa: E402
 
 TEST_BUILD_ID, FLIGHT_BUILD_ID = 0x53445231, 0x53445246
 FLIGHT_FRAME_BYTES = 44
+IQ_RATE_HZ = 100000
+
+
+def default_spectrum_bins():
+    """sdr_top's SPECTRUM_BINS default, read from the RTL so the two cannot drift."""
+    text = (Path(__file__).resolve().parents[1] / 'rtl' / 'sdr_top.sv').read_text()
+    match = re.search(r'parameter\s+integer\s+SPECTRUM_BINS\s*=\s*(\d+)', text)
+    if not match:
+        raise SystemExit('check_receiver: SPECTRUM_BINS default not found in rtl/sdr_top.sv')
+    return int(match.group(1))
+
+
+SPECTRUM_BINS = default_spectrum_bins()  # bins span IQ_RATE_HZ
 
 
 def frame_key(data, demo):
@@ -45,7 +59,7 @@ def payload_error(data, demo, rom):
     return None
 
 
-def validate(raw, *, no_frames=False, build_id=None, demo=False, rom=None):
+def validate(raw, *, no_frames=False, build_id=None, demo=False, rom=None, spectrum_bins=SPECTRUM_BINS):
     if build_id is None:
         build_id = FLIGHT_BUILD_ID if demo else TEST_BUILD_ID
     decoder = StreamDecoder()
@@ -109,7 +123,8 @@ def validate(raw, *, no_frames=False, build_id=None, demo=False, rom=None):
                 bests.append((epoch, record))
         if record.name == 'SPECTRUM':
             nonflat_spectrum |= len(set(f['power'])) > 1
-            if f['bins'] != 64 or f['bin_hz'] != 1562.5 or f['db_step'] != 0.5:
+            if (f['bins'] != spectrum_bins or len(f['power']) != spectrum_bins
+                    or f['bin_hz'] != IQ_RATE_HZ / spectrum_bins or f['db_step'] != 0.5):
                 errors.append('unexpected measured spectrum profile')
         if record.name == 'IQ_SNAPSHOT':
             nonzero_iq |= any(i or q for i, q in f['iq'])
@@ -167,6 +182,8 @@ def main():
                         help='Expected STATUS build_id (default SDR1, or SDRF with --demo)')
     parser.add_argument('--demo', action='store_true', help='APEX flight replay bitstream (FLIGHT frames)')
     parser.add_argument('--rom', type=Path, help='With --demo: replay ROM .mem to compare frames against')
+    parser.add_argument('--spectrum-bins', type=int, default=SPECTRUM_BINS, choices=(64, 128, 256),
+                        help=f'Expected compiled SPECTRUM DFT length (default {SPECTRUM_BINS})')
     args = parser.parse_args()
     rom = None
     if args.rom:
@@ -190,7 +207,7 @@ def main():
         with args.output.open('xb') as stream:
             stream.write(raw)
     errors, counts, compared, stats, covers = validate(raw, no_frames=args.no_frames, build_id=args.build_id,
-                                                        demo=args.demo, rom=rom)
+                                                        demo=args.demo, rom=rom, spectrum_bins=args.spectrum_bins)
     print(f'{stats["messages"]} messages {dict(counts)}; {compared} exact BEST selections'
           + (f', {covers} single-antenna covers' if args.demo else ''))
     if errors:
