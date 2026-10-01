@@ -6,6 +6,7 @@
   import RoleMenu from './components/RoleMenu.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import { connection, frozen, hello, link, stats } from './lib/link';
+  import { bindFrozen } from './lib/frame';
   import { connectionBanner } from './lib/status';
   import { channelsFor } from './lib/subscriptions';
   import { type ThemeChoice, applyTheme, loadTheme, nextTheme, refreshAppearance } from './lib/theme';
@@ -27,6 +28,7 @@
   });
 
   onMount(() => {
+    const unbindFrozen = bindFrozen(frozen);
     link.start();
     const media = matchMedia('(prefers-color-scheme: light)');
     media.addEventListener('change', refreshAppearance);
@@ -49,6 +51,7 @@
       removeEventListener('keydown', onKey);
       media.removeEventListener('change', refreshAppearance);
       link.stop();
+      unbindFrozen();
     };
   });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createScheduler } from './frame';
+import { writable } from 'svelte/store';
+import { bindFrozen, createScheduler } from './frame';
 
 function setup() {
   const queue: (() => void)[] = [];
@@ -78,5 +79,21 @@ describe('scheduler', () => {
     expect(err).toHaveBeenCalled();
     err.mockRestore();
     s.markDirty('good'); frame(); expect(n).toBe(2);
+  });
+});
+
+describe('bindFrozen', () => {
+  it('follows the freeze store and resumes pending draws on unfreeze', () => {
+    const { s, frame } = setup();
+    const frozen = writable(false);
+    const off = bindFrozen(frozen, s);
+    let n = 0;
+    s.register('a', () => n++);
+    frozen.set(true);
+    s.markDirty('a'); frame(); expect(n).toBe(0);
+    frozen.set(false); frame(); expect(n).toBe(1);
+    off();
+    frozen.set(true);
+    s.markDirty('a'); frame(); expect(n).toBe(2);   // unbound: the store no longer drives the scheduler
   });
 });

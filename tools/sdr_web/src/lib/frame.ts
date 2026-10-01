@@ -74,3 +74,8 @@ export function createScheduler(raf: Raf = defaultRaf): Scheduler {
 }
 
 export const scheduler: Scheduler = createScheduler();
+
+/** Drive `sched` from a freeze store (the Space key / Freeze button). Returns the unsubscribe. */
+export function bindFrozen(store: { subscribe(fn: (v: boolean) => void): () => void }, sched: Scheduler = scheduler): () => void {
+  return store.subscribe((v) => sched.setFrozen(v));
+}
