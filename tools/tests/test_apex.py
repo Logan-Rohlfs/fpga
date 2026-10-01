@@ -38,10 +38,10 @@ class ApexSchemaTest(unittest.TestCase):
     def test_demo_rom_first_frame(self):
         frame = apex.parse_frame(rom_flight_frames()[0])
         self.assertTrue(frame['crc_ok'])
-        # GPS, sensor and radio bits are emulated by the ROM generator (the log has no fix).
+        # GPS, sensor and radio bits are emulated by the ROM generator (the simulated log has no such fields; its GPS is simulated).
         self.assertEqual(frame['fields']['gps_fix'], 3)
         self.assertEqual(frame['fields']['health'], 0xBF)   # all but QSPI (storage_health 2 = SD only)
-        self.assertEqual(len(rom_flight_frames()), 1230)
+        self.assertEqual(len(rom_flight_frames()), 1381)
 
 
 if __name__ == '__main__':

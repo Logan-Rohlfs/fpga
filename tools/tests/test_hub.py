@@ -43,7 +43,9 @@ class HubTest(unittest.TestCase):
             outs += hub.feed(demo.step())
         profile = hub.stats_message()['source']['profile']
         self.assertEqual(profile['id'], 'apex_demo')
-        self.assertIn('lat_deg', profile['emulated_fields'])
+        self.assertIn('tilt_deg', profile['emulated_fields'])
+        self.assertNotIn('lat_deg', profile['emulated_fields'])   # GPS comes from the simulation
+        self.assertEqual(profile['badge'], 'SIM FLIGHT \u00b7 SIMULATED ADC')
         channels = {o.channel for o in outs}
         self.assertTrue({'flight', 'flight.A', 'flight.B', 'events', 'link', 'spectrum.A', 'iq.B'} <= channels)
         rows = [o for o in outs if o.channel == 'flight']

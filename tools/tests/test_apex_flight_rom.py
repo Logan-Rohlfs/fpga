@@ -3,7 +3,8 @@
 Frames are decoded with the host's APEX parser (sdr_cli.apex), not with the
 generator's packer, and compared with the CSV rows they came from. The row
 selection here is a separate implementation of the documented window rule.
-CSV-based tests skip when the apex checkout is not next to this repository.
+CSV-based tests skip when the simulated flight CSV is not available (the apex
+checkout next to this repository, or APEX_FLIGHT_CSV).
 """
 import csv
 import importlib.util
@@ -18,10 +19,11 @@ from link_samples import ROM_MEM, rom_frames, with_crc
 
 REPO = Path(__file__).resolve().parents[2]
 RTL = REPO / 'projects/sdr/rtl/receiver_link_sources.sv'
-# The flight log lives in the sibling apex checkout; APEX_FLIGHT_CSV overrides the path (for a worktree).
-CSV = Path(os.environ.get('APEX_FLIGHT_CSV') or (REPO.parent / 'apex/sim/output/log_exports/'
-                                                 'Flight_02_2026-06-17T21-28-54-800/IREC-2026-SRAD-TELEMETRY.csv'))
-EMULATED = {'gps_fix', 'gps_sats', 'lat_deg', 'lon_deg', 'gps_alt_m', 'tilt_deg', 'azimuth_deg'}
+# The RocketPy-simulated flight lives in the sibling apex checkout (gitignored output of
+# sim/scripts/export_demo_telemetry.py); APEX_FLIGHT_CSV overrides the path (for a worktree).
+CSV = Path(os.environ.get('APEX_FLIGHT_CSV') or (REPO.parent / 'apex/sim/output/demo/IREC-2026-SIM-TELEMETRY.csv'))
+# Decoded fields the simulation log lacks (the generator's EMULATED table), so they are not compared.
+EMULATED = {'tilt_deg', 'azimuth_deg'}
 
 
 def decode(frame):
@@ -63,7 +65,7 @@ class RomStructureTest(unittest.TestCase):
             self.assertTrue(6 <= len(window) <= 20)   # 0.3 to 1 s at 20 Hz
 
 
-@unittest.skipUnless(CSV.is_file(), 'apex flight CSV not available')
+@unittest.skipUnless(CSV.is_file(), 'simulated flight CSV not found at {} (set APEX_FLIGHT_CSV)'.format(CSV))
 class RomMatchesCsvTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -78,13 +80,13 @@ class RomMatchesCsvTest(unittest.TestCase):
                    if r['event'] == 'PHASE' and r['phase'] == 'LANDED' and int(r['time_ms']) > apogee][0]
         times = [int(r['time_ms']) for r in samples]
         start = min(t for t in times if t >= launch - 2000)
-        # Real time (50 ms per frame) to apogee + 3 s, then 200 ms of flight per frame to landing + 3 s.
+        # Real time (50 ms per frame) to apogee + 3 s, then 500 ms of flight per frame to landing + 3 s.
         cls.expected = []
         tick = start
         while tick <= landing + 3000:
             cls.expected.append(max((r for r in samples if int(r['time_ms']) <= tick),
                                     key=lambda r: int(r['time_ms'])))
-            tick += 50 if tick < apogee + 3000 else 200
+            tick += 50 if tick < apogee + 3000 else 500
         cls.frames = [decode(frame)['fields'] for frame in rom_frames()]
 
     def test_one_frame_per_20hz_tick(self):
@@ -102,15 +104,19 @@ class RomMatchesCsvTest(unittest.TestCase):
         for index, (fields, row) in enumerate(zip(self.frames, self.expected)):
             with self.subTest(frame=index):
                 self.assertEqual(fields['phase'], row['phase'])
-                # This log never has a fix, so the generator emulates the GPS group (checked in
-                # test_apex_flight_generator); every other field must be the logged value.
-                self.assertLessEqual(int(value(row, 'gps_fix')), 0)
-                self.assertEqual(fields['gps_fix'], 3)
+                # The simulated log has GPS on every row (fix 0 spans hold the last position), so
+                # the GPS group is the logged value; only the interlock, health, tilt and azimuth
+                # fields are emulated.
+                self.assertEqual(fields['gps_fix'], int(value(row, 'gps_fix')))
+                self.assertEqual(fields['gps_sats'], int(value(row, 'gps_sats')))
+                self.assertEqual(fields['lat_deg'], f32(value(row, 'gps_lat_deg')))
+                self.assertEqual(fields['lon_deg'], f32(value(row, 'gps_lon_deg')))
                 for name, column, lsb, scale in scaled:
                     if name in EMULATED:
                         continue
                     target = min(max(value(row, column), -32768 / scale), 32767 / scale)   # int16 clamp
-                    self.assertLessEqual(abs(fields[name] - target), lsb / 2 + 1e-6, name)
+                    # + 1e-3: the firmware scales in float32, which is coarser than 1e-6 at kilometre altitudes
+                    self.assertLessEqual(abs(fields[name] - target), lsb / 2 + 1e-3, name)
                 deploy = value(row, 'deploy')
                 self.assertTrue(deploy - 1 / 255 - 1e-6 <= fields['deployment'] <= deploy + 1e-6)
                 pressure = value(row, 'baro_pa')

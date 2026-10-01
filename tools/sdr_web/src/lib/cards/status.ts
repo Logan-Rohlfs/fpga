@@ -20,8 +20,9 @@ export interface CardStatus {
 export interface Chip { text: string; title: string }
 export interface HeaderChips { badge: Chip | null; emulated: Chip | null; stale: string | null }
 
-const REPLAY_BOARD = 'Replayed IREC 2026 flight through the real receiver; the ADC input is simulated';
-const REPLAY_HOST = 'Replayed IREC 2026 flight from the demo ROM by the host demo source (no FPGA); signal metrics are modelled';
+const SIM_BADGE = 'SIM FLIGHT · SIMULATED ADC';
+const SIM_BOARD = 'RocketPy simulation of the IREC 2026 competition flight (Pecos TX) through the real receiver; the ADC input is simulated';
+const SIM_HOST = 'RocketPy simulation of the IREC 2026 competition flight (Pecos TX) replayed by the host demo source (no FPGA); signal metrics are modelled';
 
 /** Header chips for a card status under the current source. */
 export function headerChips(status: CardStatus | null, source: SourceState | undefined, schema: FlightSchema | null): HeaderChips {
@@ -31,8 +32,8 @@ export function headerChips(status: CardStatus | null, source: SourceState | und
   const replay = status.synthetic && status.flight && profile?.id === 'apex_demo';
   let badge: Chip | null = null;
   if (replay) {
-    const base = source?.kind === 'demo' ? REPLAY_HOST : REPLAY_BOARD;
-    badge = { text: 'REPLAY · SIMULATED ADC', title: [base, profile?.replay_note].filter(Boolean).join('. ') };
+    const base = source?.kind === 'demo' ? (profile?.badge_title_host ?? SIM_HOST) : (profile?.badge_title ?? SIM_BOARD);
+    badge = { text: profile?.badge ?? SIM_BADGE, title: [base, profile?.replay_note].filter(Boolean).join('. ') };
   } else if (status.synthetic) {
     badge = { text: 'SIMULATED', title: 'Simulated data, not a measurement' };
   }

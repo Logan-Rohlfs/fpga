@@ -13,7 +13,7 @@ const demo = (kind: SourceState['kind'] = 'serial'): SourceState => ({
   kind, state: 'running', detail: '', responds_to_tuning: false,
   profile: {
     id: 'apex_demo', label: 'demo', emulated_fields: ['lat_deg'], emulated_note: 'GPS is emulated.',
-    replay_note: 'Descent at 4x.',
+    replay_note: 'Descent at 10x.',
   },
 });
 const plain: SourceState = { kind: 'sim', state: 'running', detail: '', responds_to_tuning: true };
@@ -29,13 +29,14 @@ describe('headerChips', () => {
     expect(headerChips({ synthetic: true, flight: false, age: null }, demo(), schema).badge?.text).toBe('SIMULATED');
   });
 
-  it('labels demo flight data as a replay, worded per source', () => {
+  it('labels demo flight data as a simulated flight, worded per source', () => {
     const board = headerChips({ synthetic: true, flight: true, age: null }, demo(), schema).badge!;
-    expect(board.text).toBe('REPLAY · SIMULATED ADC');
-    expect(board.title).toContain('through the real receiver');
-    expect(board.title).toContain('Descent at 4x.');
+    expect(board.text).toBe('SIM FLIGHT · SIMULATED ADC');
+    expect(board.title).toContain('RocketPy simulation of the IREC 2026 competition flight (Pecos TX) through the real receiver');
+    expect(board.title).toContain('the ADC input is simulated');
+    expect(board.title).toContain('Descent at 10x.');
     const host = headerChips({ synthetic: true, flight: true, age: null }, demo('demo'), schema).badge!;
-    expect(host.text).toBe('REPLAY · SIMULATED ADC');
+    expect(host.text).toBe('SIM FLIGHT · SIMULATED ADC');
     expect(host.title).toContain('no FPGA');
   });
 

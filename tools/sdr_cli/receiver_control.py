@@ -10,15 +10,20 @@ APEX_DEMO_BUILD_ID = 0x53445246
 PROFILES = {
     BUILD_ID: {'id': 'default', 'label': 'Default receiver profile (ADC test carrier)'},
     APEX_DEMO_BUILD_ID: {
-        'id': 'apex_demo', 'label': 'APEX flight replay demo (IREC 2026)',
+        'id': 'apex_demo', 'label': 'APEX simulated-flight demo (RocketPy, IREC 2026)',
         'rf_label': '441.480 MHz \u00b7 2GFSK \u00b125 kHz \u00b7 10 kbit/s (APEX RF4463 settings; ADC input simulated)',
-        # The demo ROM generator fills these FLIGHT fields in because the flight log lacks them
+        # The data is a RocketPy simulation, never a recorded flight; the GUI badge text comes from here.
+        'badge': 'SIM FLIGHT \u00b7 SIMULATED ADC',
+        'badge_title': ('RocketPy simulation of the IREC 2026 competition flight (Pecos TX) through the real '
+                        'receiver; the ADC input is simulated'),
+        'badge_title_host': ('RocketPy simulation of the IREC 2026 competition flight (Pecos TX) replayed by the '
+                             'host demo source (no FPGA); signal metrics are modelled'),
+        # The demo ROM generator fills these FLIGHT fields in because the simulation log lacks them
         # (projects/sdr/host/apex_flight_rom.py EMULATED; a test keeps the lists in step).
-        'emulated_fields': ['gps_fix', 'gps_sats', 'lat_deg', 'lon_deg', 'gps_alt_m', 'phase_status', 'health',
-                            'tilt_deg', 'azimuth_deg'],
-        'emulated_note': ('GPS, interlock, health, tilt and azimuth fields are emulated by the demo ROM generator '
-                          '(absent from the flight log).'),
-        'replay_note': 'Launch to landing; the descent replays at 4x speed.'},
+        'emulated_fields': ['phase_status', 'health', 'tilt_deg', 'azimuth_deg'],
+        'emulated_note': ('Interlock, health, tilt and azimuth fields are emulated by the demo ROM generator '
+                          '(absent from the simulation log).'),
+        'replay_note': 'Launch to landing; the descent replays at 10x speed.'},
 }
 
 

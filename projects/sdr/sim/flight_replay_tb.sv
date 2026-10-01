@@ -14,8 +14,8 @@ module flight_lane #(
 )(input wire clk, input wire rst, output reg done);
     // Demo profile values; flight_replay_tb checks them against the
     // elaborated receiver_link_sources DEMO_FLIGHT instance.
-    localparam integer CLK_HZ=5_000_000, FRAME_BYTES=44, DATA_BYTES=42, ROM_FRAMES=1230;
-    localparam integer LOSS_A_FIRST=60, LOSS_A_LAST=69, LOSS_B_FIRST=228, LOSS_B_LAST=237;
+    localparam integer CLK_HZ=5_000_000, FRAME_BYTES=44, DATA_BYTES=42, ROM_FRAMES=1381;
+    localparam integer LOSS_A_FIRST=60, LOSS_A_LAST=69, LOSS_B_FIRST=505, LOSS_B_LAST=514;
     localparam integer LOOP=ROM_FRAMES+GAP_SLOTS;
     wire sample_valid;
     wire signed [11:0] sample_a, sample_b;
@@ -155,14 +155,14 @@ module flight_replay_tb;
     wire [4:0] done;
     // A finished lane stops its clock so it costs no further simulation time.
     wire [4:0] lane_clk={5{clk}} & ~done;
-    // Entry and exit of A's window (60-69, coast) and of B's (228-237, across
-    // the COAST->DESCENT change at 233), and the end of the ROM through a
+    // Entry and exit of A's window (60-69, boost) and of B's (505-514, across
+    // the COAST->DESCENT change at 510), and the end of the ROM through a
     // shortened one-slot gap back to frame 0.
     flight_lane #(.START_SLOT(59),.SLOTS(2)) lane_a(.clk(lane_clk[0]),.rst(rst),.done(done[0]));
     flight_lane #(.START_SLOT(69),.SLOTS(2)) lane_a_exit(.clk(lane_clk[1]),.rst(rst),.done(done[1]));
-    flight_lane #(.START_SLOT(227),.SLOTS(2)) lane_b(.clk(lane_clk[2]),.rst(rst),.done(done[2]));
-    flight_lane #(.START_SLOT(237),.SLOTS(2)) lane_b_exit(.clk(lane_clk[3]),.rst(rst),.done(done[3]));
-    flight_lane #(.START_SLOT(1229),.SLOTS(3),.GAP_SLOTS(1)) lane_wrap(.clk(lane_clk[4]),.rst(rst),.done(done[4]));
+    flight_lane #(.START_SLOT(504),.SLOTS(2)) lane_b(.clk(lane_clk[2]),.rst(rst),.done(done[2]));
+    flight_lane #(.START_SLOT(514),.SLOTS(2)) lane_b_exit(.clk(lane_clk[3]),.rst(rst),.done(done[3]));
+    flight_lane #(.START_SLOT(1380),.SLOTS(3),.GAP_SLOTS(1)) lane_wrap(.clk(lane_clk[4]),.rst(rst),.done(done[4]));
 
     // Idle (unclocked) reference instance: the lanes must use the demo profile
     // that receiver_link_sources elaborates for the board.

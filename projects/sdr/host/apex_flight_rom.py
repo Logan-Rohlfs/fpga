@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Generate the APEX flight replay ROM for the opt-in demo bitstream.
 
-Reads the IREC 2026 flight log exported by the apex repository and writes
+Reads the RocketPy-simulated IREC 2026 competition flight exported by the apex
+repository (sim/scripts/export_demo_telemetry.py, in the exact IREC-2026-SRAD-
+TELEMETRY.csv schema) and writes
 ``projects/sdr/rom/apex_flight.mem``: one hex byte per line for ``$readmemh``.
 The build never reads the CSV; the generated ``.mem`` is checked in.
 
@@ -21,8 +23,10 @@ Replay choices (documented assumptions, not firmware facts):
   PHASE event that enters LANDED (or the last SAMPLE row if there is none).
 - Cadence: one frame per 20 Hz radio slot. Up to 3 s after apogee (the PHASE
   event that leaves COAST) each frame advances 50 ms of flight time, which is
-  real time. After that each frame advances DESCENT_STEP_MS (200 ms), so the
-  descent and landing replay at 4x speed and the ROM fits ROM_BUDGET_BYTES.
+  real time. After that each frame advances DESCENT_STEP_MS (500 ms), so the
+  descent and landing replay at 10x speed (about 405 s of flight lie between
+  there and landing) and the
+  ROM fits ROM_BUDGET_BYTES. Every frame keeps its true flight-time fields.
   Each frame uses the latest SAMPLE row at or before its flight time (a
   zero-order hold). Values are never interpolated.
 - seq: a radio counter from 0 (the CSV seq is a log counter, not radio seq).
@@ -32,9 +36,15 @@ Replay choices (documented assumptions, not firmware facts):
   gps_fix sent (>= 0) and storage_health (STORAGE_OK_FLASH=1, STORAGE_OK_SD=2;
   INFERRED to be the logged storage_health() value).
 - Fields the log does not have are EMULATED (table EMULATED below), so the demo
-  shows a complete ground-station view. Emulation is deterministic (seeded) and
-  follows the logged altitude and phase. The GUI labels these fields as
-  emulated; they are not flight data. The host decoder never invents values.
+  shows a complete ground-station view: the interlock and health bits, tilt and
+  azimuth. Emulation is deterministic (seeded) and follows the logged altitude
+  and phase. The GUI labels these fields as emulated; they are not simulation
+  output. The host decoder never invents values.
+- GPS is not emulated when the log has a position (the simulated log does, on
+  every row, including its fix-loss spans, where the last position is held and
+  gps_fix is the logged 0). Only a log with empty gps_lat_deg / gps_lon_deg gets
+  the GPS_FALLBACK group (fix, satellites, position, altitude), as the old
+  recorded flight log did.
 """
 import argparse
 import csv
@@ -47,8 +57,7 @@ import struct
 import sys
 
 REPO = Path(__file__).resolve().parents[3]
-DEFAULT_CSV = (REPO.parent / 'apex/sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800'
-               / 'IREC-2026-SRAD-TELEMETRY.csv')
+DEFAULT_CSV = REPO.parent / 'apex/sim/output/demo/IREC-2026-SIM-TELEMETRY.csv'
 DEFAULT_MEM = REPO / 'projects/sdr/rom/apex_flight.mem'
 SITES = REPO / 'tools/sdr_cli/sites.json'
 SITE_ID = 'irec-pecos'
@@ -58,7 +67,7 @@ CALLSIGN = b'KG5LDI'
 TICK_MS = 50                # 20 Hz, RADIO_TELEM_FLIGHT_HZ
 PRE_LAUNCH_MS = 2000
 POST_APOGEE_MS = 3000
-DESCENT_STEP_MS = 200       # flight time per frame after apogee + POST_APOGEE_MS (4x speed)
+DESCENT_STEP_MS = 500       # flight time per frame after apogee + POST_APOGEE_MS (10x speed)
 POST_LANDING_MS = 3000
 ROM_BUDGET_BYTES = 64 * 1024   # demo ROM budget: at most 16 of the 50 RAMB36 tiles
 PHASES = ('IDLE', 'ARMED', 'BOOST', 'COAST', 'DESCENT', 'LANDED')   # flight_state.h
@@ -77,18 +86,21 @@ GPS_SIGMA_M = 1.5           # horizontal noise per axis, 1 sigma
 GPS_ALT_SIGMA_M = 2.0
 M_PER_DEG_LAT = 111320.0
 
-# Every emulated FLIGHT field: (GUI schema key, rule). The demo receiver profile
+# Every FLIGHT field the simulated log lacks: (GUI schema key, rule). The demo receiver profile
 # (tools/sdr_cli/receiver_control.py) lists the same keys so the GUI can label
 # them as emulated; tools/tests/test_apex_flight_rom.py keeps the two in step.
-EMULATED = (
-    ('gps_fix', 'only when the logged fix is OFFLINE or SEARCHING: a 3D fix'),
-    ('gps_sats', 'with an emulated fix: 9 to 12 satellites (a slow seeded random walk), one fewer in BOOST'),
-    ('lat_deg', 'with an emulated fix: the irec-pecos pad (sites.json), moving {} m downrange per metre of '
+GPS_FALLBACK = (   # used only for a log whose position columns are empty; not in EMULATED
+    ('gps_fix', 'only when the log has no position: a 3D fix'),
+    ('gps_sats', 'without a logged position: 9 to 12 satellites (a slow seeded random walk), one fewer in BOOST'),
+    ('lat_deg', 'without a logged position: the irec-pecos pad (sites.json), moving {} m downrange per metre of '
                 'climb, then {} m/s from the altitude peak until landing, toward {} deg true, plus {} m '
                 'noise'.format(ASCENT_DRIFT, WIND_MPS, DRIFT_BEARING_DEG, GPS_SIGMA_M)),
     ('lon_deg', 'as lat_deg'),
-    ('gps_alt_m', 'with an emulated fix: pad elevation (standard-atmosphere altitude of the mean logged ARMED '
+    ('gps_alt_m', 'without a logged position: pad elevation (standard-atmosphere altitude of the mean logged ARMED '
                   'pressure) plus the logged altitude AGL, plus {} m noise'.format(GPS_ALT_SIGMA_M)),
+)
+
+EMULATED = (
     ('phase_status', 'interlock bits 3-7: airbrakes authorized in COAST, servo powered from ARMED to DESCENT, '
                      'arm switches closed from ARMED, logging ready always, GPS time valid with a 2D or 3D fix. '
                      'The phase bits 0-2 are logged.'),
@@ -259,7 +271,7 @@ class Emulator:
             self.sats = min(12, max(9, self.sats + self.rng.choice((-1, 1))))
         out = {'health_bits': HEALTH_SENSORS_AND_RADIO}
         fix = int(number(row, 'gps_fix'))
-        if fix <= 0:
+        if not (row.get('gps_lat_deg') and row.get('gps_lon_deg')):    # GPS_FALLBACK: no logged position
             fix = 3
             dist = ASCENT_DRIFT * self.peak_alt + WIND_MPS * max(0.0, (t - self.peak_ms) / 1000.0)
             bearing = math.radians(DRIFT_BEARING_DEG)
@@ -356,16 +368,16 @@ def render_mem(rows, csv_path):
     selected = select_rows(rows)
     frames = build_frames(rows)
     lines = [
-        '// APEX IREC 2026 flight replay ROM. GENERATED, do not edit.',
-        '// Regenerate: python3 projects/sdr/host/apex_flight_rom.py --csv <IREC-2026-SRAD-TELEMETRY.csv>',
-        '// Source: apex sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800/'
-        'IREC-2026-SRAD-TELEMETRY.csv',
+        '// APEX IREC 2026 RocketPy-SIMULATED competition flight replay ROM. GENERATED, do not edit.',
+        '// Regenerate: python3 projects/sdr/host/apex_flight_rom.py --csv <IREC-2026-SIM-TELEMETRY.csv>',
+        '// Source: apex sim/output/demo/IREC-2026-SIM-TELEMETRY.csv (apex branch demo-telemetry-export, '
+        'sim/scripts/export_demo_telemetry.py, seed 2026)',
         '// Source sha256: ' + digest,
         '// Window: LAUNCH_DETECTED {} ms - {} ms to LANDED {} ms + {} ms; ticks {}..{} ms'.format(
             launch, PRE_LAUNCH_MS, landing, POST_LANDING_MS, start, selected[-1][0]),
         '// Cadence: 50 ms of flight per frame to apogee {} ms + {} ms, then {} ms per frame'.format(
             apogee, POST_APOGEE_MS, DESCENT_STEP_MS),
-        '// EMULATED (absent from the log, see EMULATED in the generator): '
+        '// EMULATED (absent from the simulation log, see EMULATED in the generator): '
         + ', '.join(key for key, _ in EMULATED),
         '// {} frames x {} bytes: type 0x02 + 41-byte FLIGHT body. The RTL appends the CRC.'.format(
             len(selected), FRAME_BYTES),
@@ -390,7 +402,7 @@ def read_mem(path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--csv', type=Path, default=DEFAULT_CSV, help='APEX IREC-2026-SRAD-TELEMETRY.csv')
+    parser.add_argument('--csv', type=Path, default=DEFAULT_CSV, help='APEX IREC-2026-SIM-TELEMETRY.csv')
     parser.add_argument('--output', type=Path, default=DEFAULT_MEM)
     parser.add_argument('--check', action='store_true', help='Fail if the output differs from a fresh generation')
     args = parser.parse_args(argv)

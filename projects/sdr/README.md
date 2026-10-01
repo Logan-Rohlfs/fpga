@@ -63,8 +63,8 @@ arbitrary rates, or automatic carrier-frequency acquisition loop.
 
 ## APEX flight replay demo (opt-in build)
 
-A separate bitstream replays the IREC 2026 flight as if the APEX RF4463 sent it
-at 441.480 MHz. The frames pass through the full digital receiver with noise and
+A separate bitstream replays a RocketPy-simulated IREC 2026 competition flight
+(Pecos TX; never a recorded flight) as if the APEX RF4463 sent it at 441.480 MHz. The frames pass through the full digital receiver with noise and
 signal loss. It is an add-on. The default bitstream, its profile, resources and
 BUILD_ID do not change. Select it at build time; no board or wiring changes:
 
@@ -90,20 +90,25 @@ every record stays `SYNTHETIC`.
 | Gaussian shaping | binomial taps, approx. BT 0.5 | **assumed**: firmware leaves the chip default |
 | ADC / IF | 1 MS/s, 100 kHz, as the default | **assumed** analog front end |
 | Noise | uniform ±256 LSB on both channels (A tone 1400, B tone 1000) | demo choice |
-| Loss windows | A: slots 60–69, B: slots 228–237 (0.5 s each, every loop) | demo choice |
-| Loop | 1230 frames, then 20 silent slots (1 s); 62.5 s per loop | demo choice |
+| Loss windows | A: slots 60–69 (boost), B: slots 505–514 (COAST→DESCENT at 510); 0.5 s each, every loop | demo choice |
+| Loop | 1381 frames, then 20 silent slots (1 s); 70.05 s per loop | demo choice |
 
 Antenna A loses the signal about 1 s after launch detect, during the fast coast.
-B loses it across the COAST→DESCENT change at slot 233. During each window the
+B loses it across the COAST→DESCENT change at slot 510. During each window the
 combiner's BEST output comes from the other antenna.
 
-The ROM is `rom/apex_flight.mem`: 1230 frames × 42 bytes (type + body) =
-51,660 bytes in block RAM. The generator refuses more than 64 KiB, about 16 of
+The ROM is `rom/apex_flight.mem`: 1381 frames × 42 bytes (type + body) =
+58,002 bytes in block RAM. The generator refuses more than 64 KiB, about 16 of
 the 50 RAMB36 tiles (the 293-frame ROM used 4; the new size is not yet measured
-in Vivado). The transmitter appends the CRC. The file is checked in, so builds
-do not need the flight CSV. The CSV is not in this repository: it lives in the
-sibling apex checkout (`../apex/sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800/IREC-2026-SRAD-TELEMETRY.csv`).
-Regenerate the ROM with that checkout next to this repository, or pass `--csv`:
+in Vivado, and no build has been run on it). The transmitter appends the CRC. The file is checked in, so builds
+do not need the flight CSV. The CSV is not in this repository. It is the
+gitignored output of the apex repo's `sim/scripts/export_demo_telemetry.py`
+(branch `demo-telemetry-export` @ 5c859f7, seed 2026, standard atmosphere, IREC
+2026 Pecos TX, competition configuration, fake-Teensy FSW model in the loop),
+expected at `../apex/sim/output/demo/IREC-2026-SIM-TELEMETRY.csv`. The flight:
+apogee 3104.3 m AGL at T+24.2 s, max velocity 279.3 m/s, BOOST T+0.18, COAST
+T+4.11, DESCENT T+24.51, LANDED T+429.7; 12,891 SAMPLE rows. Regenerate the ROM
+with that checkout next to this repository, or pass `--csv`:
 
 ```sh
 python3 projects/sdr/host/apex_flight_rom.py            # rewrite rom/apex_flight.mem
@@ -115,26 +120,27 @@ table (`FLIGHT_FIELDS`, offsets and firmware scaling), matching
 `tools/sdr_cli/apex.py`. The window is the whole flight: from 2 s before
 LAUNCH_DETECTED to 3 s after the PHASE event entering LANDED. Up to 3 s after
 the PHASE event leaving COAST, each frame advances 50 ms of flight (real time).
-After that each frame advances 200 ms, so the descent and landing replay at 4×
-speed; that keeps the ROM inside its BRAM budget. Each frame takes the
+After that each frame advances 500 ms, so the descent and landing replay at 10×
+speed (about 405 s of flight in 40 s on air; each frame keeps its true flight
+time, no rows are invented); that keeps the ROM inside its BRAM budget. Each frame takes the
 latest log row at or before its flight time; values are never interpolated.
 The radio seq counts from 0, because the CSV seq is a log counter. The
 once-per-second HOUSEKEEPING beat is not replayed.
 
-The log has no GPS fix and lacks the interlock, sensor-health, tilt and azimuth
-fields. So that the demo shows a complete ground-station view, the generator
+The simulated log has GPS on every row (during its fix-loss spans `gps_fix` is
+the logged 0 and the last position is held), but it lacks the interlock,
+sensor-health, tilt and azimuth fields. So that the demo shows a complete ground-station view, the generator
 **emulates** them (table `EMULATED` in the generator, seeded and
 deterministic). Everything else is the logged value.
 
 | Field | Emulated value |
 | --- | --- |
-| `gps_fix`, `gps_sats` | Only when the logged fix is OFFLINE or SEARCHING (every row of this log): a 3D fix, 9–12 satellites |
-| `lat_deg`, `lon_deg` | The `irec-pecos` pad from `tools/sdr_cli/sites.json`, moving 0.12 m downrange per metre of climb, then 4 m/s from the altitude peak until landing, toward 62° true, plus 1.5 m noise |
-| `gps_alt_m` | Pad elevation (standard-atmosphere altitude of the mean logged ARMED pressure) plus the logged altitude AGL, plus 2 m noise |
 | `phase_status` bits 3–7 | Airbrakes authorized in COAST, servo powered ARMED–DESCENT, arm switches closed from ARMED, logging ready, GPS time valid |
 | `health` bits 0–3, 5 | IMU, high-g, baro, mag and radio on. Bits 4, 6 and 7 are derived as the firmware derives them |
 | `tilt_deg` | 2° on the rail, up to 27° at the highest logged altitude, about 100° under canopy, 88° landed |
 | `azimuth_deg` | The drift bearing with a 3° wobble while climbing, turning 20°/s under canopy |
+
+The generator keeps a GPS fallback (3D fix, 9–12 satellites, pad-based drift position and altitude) that applies only to a log whose `gps_lat_deg`/`gps_lon_deg` are empty, as the old recorded log was. It is unused with the simulated flight, so the GUI does not mark GPS as emulated. Emulated fields in this ROM: `phase_status`, `health`, `tilt_deg`, `azimuth_deg`.
 
 The demo receiver profile (`receiver_control.PROFILES`, `apex_demo`) lists the
 same fields, and the GUI marks cards that show them `EMULATED`. The host

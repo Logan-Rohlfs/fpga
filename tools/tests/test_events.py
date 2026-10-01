@@ -32,7 +32,7 @@ class FlightEventsTest(unittest.TestCase):
     def test_rom_pass_and_wrap(self):
         d = events.EventDeriver()
         frames = rom_flight_frames()
-        self.assertEqual(len(frames), 1230)   # launch to landing (rtl FLIGHT_ROM_FRAMES)
+        self.assertEqual(len(frames), 1381)   # launch to landing (rtl FLIGHT_ROM_FRAMES)
         parsed = [apex.parse_frame(f)['fields'] for f in frames]
         out = []
         for n, raw in enumerate(frames):
@@ -49,12 +49,11 @@ class FlightEventsTest(unittest.TestCase):
         self.assertEqual(out[-2]['text'], 'LANDED → ARMED')
         self.assertEqual(out[-1]['text'], 'New flight segment (replay loop or flight-computer restart)')
         # Apogee value/time are the segment maximum.
-        # The ROM keeps climbing after the flight computer reports DESCENT (frame 233), so the
-        # spec rule ("max seen in the segment up to the first COAST exit") gives a value below the
-        # ROM-wide peak. Values are shown as decoded, not corrected.
+        # The simulated flight reaches its peak before the flight computer reports DESCENT, so the
+        # segment maximum up to the first COAST exit is the ROM-wide peak.
         exit_i = next(i for i, f in enumerate(parsed) if f['phase'] == 'DESCENT')
         top = max(range(exit_i + 1), key=lambda i: parsed[i]['alt_agl_m'])
-        self.assertGreater(max(f['alt_agl_m'] for f in parsed), parsed[top]['alt_agl_m'])
+        self.assertEqual(max(f['alt_agl_m'] for f in parsed), parsed[top]['alt_agl_m'])
         apogee = next(e for e in out if e['kind'] == 'apogee')
         self.assertEqual(apogee['value'], parsed[top]['alt_agl_m'])
         self.assertEqual(apogee['t'], 0.05 * top)

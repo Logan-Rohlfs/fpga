@@ -287,7 +287,7 @@ class SimSource:
 # checks these against the RTL constants.
 DEMO_ROM = Path(__file__).resolve().parents[2] / 'projects/sdr/rom/apex_flight.mem'
 DEMO_GAP_SLOTS = 20
-DEMO_LOSS = {'A': (60, 69), 'B': (228, 237)}
+DEMO_LOSS = {'A': (60, 69), 'B': (505, 514)}
 DEMO_BUILD_ID = 0x53445246
 DEMO_DBFS = dict(A=dict(rssi=-21.0, noise=-58.0), B=dict(rssi=-24.0, noise=-58.0))
 

@@ -25,9 +25,9 @@ def event(t, phase, kind):
     return dict(record_type='EVENT', time_ms=str(t), phase=phase, event=kind)
 
 
-def sample(t, phase, alt, fix=0, lat='65.69', lon='123.22'):
+def sample(t, phase, alt, fix=0, lat='', lon='', gps_alt=''):
     return dict(record_type='SAMPLE', time_ms=str(t), phase=phase, event='', gps_fix=str(fix), gps_sats='0',
-                storage_health='2', gps_lat_deg=lat, gps_lon_deg=lon, gps_alt_msl_m='18223.8', alt_m=str(alt),
+                storage_health='2', gps_lat_deg=lat, gps_lon_deg=lon, gps_alt_msl_m=gps_alt, alt_m=str(alt),
                 vel_mps='0', pred_apogee_m='0', vert_accel_mps2='0', az_mss='-9.8', gz_rads='0', deploy='0',
                 baro_pa='90268', baro_temp_c='30')
 
@@ -61,7 +61,7 @@ def offset_m(fields):
 
 
 class ScheduleTest(unittest.TestCase):
-    def test_real_time_to_apogee_then_four_times_faster_to_landing(self):
+    def test_real_time_to_apogee_then_ten_times_faster_to_landing(self):
         ticks = gen.replay_ticks(fixture())
         self.assertEqual(ticks[0], LAUNCH - gen.PRE_LAUNCH_MS)
         steps = [b - a for a, b in zip(ticks, ticks[1:])]
@@ -120,8 +120,13 @@ class EmulationTest(unittest.TestCase):
         for x in self.frames:
             self.assertAlmostEqual(x['gps_alt_m'], elev + x['alt_agl_m'], delta=10)
 
+    def test_a_logged_position_is_kept_even_at_fix_zero(self):
+        # The simulated log holds the last position through its fix-loss spans (gps_fix 0).
+        f = decoded(fixture(fix=0, lat='31.5', lon='-103.0', gps_alt='18223.8', ))
+        self.assertTrue(all(x['gps_fix'] == 0 and x['lat_deg'] == gen.f32(31.5) for x in f))
+
     def test_a_logged_fix_is_kept(self):
-        f = decoded(fixture(fix=3, lat='31.5', lon='-103.0'))
+        f = decoded(fixture(fix=3, lat='31.5', lon='-103.0', gps_alt='18223.8'))
         self.assertTrue(all(x['lat_deg'] == gen.f32(31.5) and x['lon_deg'] == gen.f32(-103.0) for x in f))
         self.assertTrue(all(x['gps_alt_m'] == 32767 * 0.5 for x in f))   # the logged value, int16-clamped
 
@@ -157,6 +162,7 @@ class EmulationTest(unittest.TestCase):
 class EmulatedListTest(unittest.TestCase):
     def test_keys_are_schema_keys_and_match_the_demo_profile(self):
         keys = [k for k, _ in gen.EMULATED]
+        self.assertEqual(keys, ['phase_status', 'health', 'tilt_deg', 'azimuth_deg'])   # GPS is logged, not emulated
         schema = [f['key'] for f in apex.FLIGHT_SCHEMA]
         self.assertTrue(set(keys) <= set(schema))
         profile = receiver_control.profile_for(receiver_control.APEX_DEMO_BUILD_ID)

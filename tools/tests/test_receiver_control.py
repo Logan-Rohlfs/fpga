@@ -12,6 +12,10 @@ class ReceiverControlTests(unittest.TestCase):
         apex = profile_for(0x53445246)
         self.assertEqual(apex['id'], 'apex_demo')
         self.assertIn('441.480 MHz', apex['rf_label'])
+        self.assertEqual(apex['badge'], 'SIM FLIGHT \u00b7 SIMULATED ADC')
+        self.assertIn('RocketPy simulation of the IREC 2026 competition flight (Pecos TX) through the real receiver; '
+                      'the ADC input is simulated', apex['badge_title'])
+        self.assertNotIn('recorded', ' '.join(str(v) for v in apex.values()).lower())
         self.assertEqual(profile_for(0x1234), {'id': 'unknown', 'label': 'Unknown build 0x00001234'})
 
     def test_wire_command(self):

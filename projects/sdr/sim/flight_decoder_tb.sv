@@ -20,7 +20,7 @@ module flight_decoder_tb;
         .good_count(good_count),.bad_count(bad_count),.dropped_count(dropped_count),
         .timeout_count(timeout_count),.locked(locked));
 
-    reg [7:0] rom[0:1230*42-1];
+    reg [7:0] rom[0:1381*42-1];
     reg [7:0] frame[0:FRAME_BYTES-1];
     integer completes=0, last_seq=-1, last_ok=0, i;
 
