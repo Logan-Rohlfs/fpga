@@ -2,7 +2,7 @@
   // Per-channel signal quality and the combiner split. Numbers come from the metrics rings; "now" is the server clock.
   import { signedKhz } from '../lib/format';
   import { badRatio, combinerShare, frameRate, powerLabel } from '../lib/cards/linkq';
-  import { dataVersion, frozen, linkStatsRing, metricsStores, serverNow, synthetic } from '../lib/link';
+  import { dataVersion, frozen, linkStatsRing, metricsStores, powerUnit, serverNow, synthetic } from '../lib/link';
   import type { Channel } from '../lib/types';
 
   let { config }: { id: string; config: { channels?: string[]; window_s?: number } } = $props();
@@ -52,8 +52,8 @@
         <div class="col">
           <h4>Channel {c.ch}</h4>
           <dl>
-            <dt>Signal</dt><dd>{fix(c.rssi)} <small>{powerLabel(undefined, true)}</small></dd>
-            <dt>Noise</dt><dd>{fix(c.noise)} <small>{powerLabel(undefined, true)}</small></dd>
+            <dt>Signal</dt><dd>{fix(c.rssi)} <small>{powerLabel($powerUnit ?? undefined, true)}</small></dd>
+            <dt>Noise</dt><dd>{fix(c.noise)} <small>{powerLabel($powerUnit ?? undefined, true)}</small></dd>
             <dt>SNR</dt><dd>{fix(c.snr)} <small>dB</small></dd>
             <dt>Δf</dt><dd>{Number.isFinite(c.df) ? signedKhz(c.df) : '—'}</dd>
             <dt>CRC good</dt><dd>{fix(c.good, 0)}</dd>
@@ -64,7 +64,7 @@
         </div>
       {/each}
     </div>
-    <p class="note unit">Power is {powerLabel(undefined)}; rates over {windowS} s.</p>
+    <p class="note unit">Power is {powerLabel($powerUnit ?? undefined)}; rates over {windowS} s.</p>
   {/if}
   <div class="comb">
     <div class="k">Combiner</div>

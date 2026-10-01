@@ -17,6 +17,11 @@ describe('linkq', () => {
     expect(deltaOver([0, 1, 2], [100, 150, 3], 3, 10, 2)).toBe(53);
     expect(deltaOver([0, 1, 2, 3], [0, 150, 3, 3], 4, 10, 3)).toBe(153);
   });
+  it('handles a reset in frame rate and bad ratio', () => {
+    const s = store([[0, 100, 0], [5, 150, 5], [10, 3, 5]]);
+    expect(frameRate(s, 10, 10)).toBeCloseTo(5.3);
+    expect(badRatio(s, 10, 10)).toBeCloseTo(5 / 58);
+  });
   it('computes bad ratio', () => {
     const s = store([[0, 0, 0], [10, 190, 10]]);
     expect(badRatio(s, 10, 10)).toBeCloseTo(0.05);

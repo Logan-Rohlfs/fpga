@@ -57,6 +57,8 @@ export const metricsStores: Record<Channel, SeriesStore> = {
   B: new SeriesStore(METRIC_FIELDS.length, METRICS_MAX),
 };
 export const linkStatsRing = writable<LinkStatsPoint[]>([]);
+/** Power unit reported with the latest metrics snapshot (null until one arrives). */
+export const powerUnit = writable<string | null>(null);
 export const eventsStore = writable<GuiEvent[]>([]);
 /** The last FRAMES_MAX `frames` records, oldest first. */
 export const frames = writable<RecordMsg[]>([]);
@@ -285,6 +287,7 @@ function applyRecord(msg: RecordMsg): void {
 function applyMetricsHistory(msg: MetricsHistoryMsg): void {
   const store = metricsStores[msg.channel];
   if (!store) return;
+  powerUnit.set(msg.power_unit);
   store.clear();
   history[msg.channel].rssi.clear();
   history[msg.channel].snr.clear();
