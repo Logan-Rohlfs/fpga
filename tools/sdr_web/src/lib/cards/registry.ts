@@ -94,6 +94,7 @@ interface Spec {
   channels(config: Config): string[];
   settings?: SettingField[];
   titleOf?(config: Config): string;
+  component?: CardMeta['component'];
 }
 
 function meta(spec: Spec): CardMeta {
@@ -110,7 +111,7 @@ function meta(spec: Spec): CardMeta {
   };
   return {
     type: spec.type, title: spec.title, min: spec.min, phoneMinH: spec.phoneMinH, defaults: spec.defaults,
-    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf,
+    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf, component: spec.component,
     channels: (config) => [...new Set(spec.channels(sanitize(config)))],
   };
 }
@@ -208,6 +209,7 @@ const specs: Spec[] = [
     defaults: { site: null, layer: 'imagery', exaggeration: 1, source: 'best' },
     validators: { site: nullableText(40), layer: oneOf(['imagery', 'topo']), exaggeration: intIn(1, 5), source: oneOf(SOURCES) },
     channels: (c) => flightChannels(c.source),
+    component: () => import('../../cards/Trajectory3dCard.svelte'),
     settings: [...siteLayer, { key: 'exaggeration', label: 'Vertical exaggeration', kind: 'number', min: 1, max: 5 }, sourceField],
   },
   {
