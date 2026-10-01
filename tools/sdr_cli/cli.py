@@ -70,8 +70,9 @@ def parser():
     send.add_argument('--port')
     send.add_argument('--baud', type=int)
     gui = sub.add_parser('gui', help='Serve the web GUI (local only unless --lan)')
-    gui.add_argument('--source', choices=['serial', 'replay', 'sim'], default='serial',
-                     help='serial: the board (default); replay: a capture file; sim: host simulator')
+    gui.add_argument('--source', choices=['serial', 'replay', 'sim', 'demo'], default='serial',
+                     help='serial: the board (default); replay: a capture file; sim: host simulator; '
+                          'demo: the flight replay ROM on the host, as the --demo bitstream sends it (no FPGA)')
     gui.add_argument('--file', type=Path, help='Capture to replay (with --source replay)')
     gui.add_argument('--speed', type=float, default=1.0, help='Replay speed; 0 is as fast as possible')
     gui.add_argument('--loop', action='store_true', help='Replay the capture forever')

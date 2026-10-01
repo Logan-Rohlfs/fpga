@@ -4,7 +4,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from link_samples import sample_stream
+import re
+
+from link_samples import rom_flight_frames, sample_stream
 from sdr_cli import apex, freqplan, protocol as p, sources
 from sdr_cli.core import ToolError
 
@@ -160,7 +162,60 @@ class FactoryTest(unittest.TestCase):
         config = dict(port='auto', baud=1000000)
         self.assertIsInstance(sources.from_args(config, 'sim')(freqplan.TuningState), sources.SimSource)
         self.assertIsInstance(sources.from_args(config, 'serial')(None), sources.SerialSource)
+        self.assertIsInstance(sources.from_args(config, 'demo')(freqplan.TuningState), sources.DemoSource)
         with self.assertRaises(ToolError):
             sources.from_args(config, 'replay')
         with self.assertRaises(ToolError):
             sources.from_args(config, 'radio')
+
+
+RTL = Path(__file__).resolve().parents[2] / 'projects/sdr/rtl/receiver_link_sources.sv'
+
+
+def rtl_constant(name):
+    return int(re.search(r'\b' + name + r'=(\d+)', RTL.read_text()).group(1))
+
+
+class DemoSourceTest(unittest.TestCase):
+    """Host stand-in for the demo bitstream (DEMO_FLIGHT=1): the ROM frames, loss windows and loop."""
+
+    def setUp(self):
+        self.demo = sources.DemoSource(lambda: freqplan.TuningState(), seed=1)
+
+    def slots(self, first, count):
+        self.demo.tick = first
+        _, records = decode(b''.join(self.demo.step() for _ in range(count)))
+        return records
+
+    def test_profile_constants_match_the_rtl(self):
+        self.assertEqual(len(self.demo.rom), rtl_constant('FLIGHT_ROM_FRAMES'))
+        self.assertEqual(sources.DEMO_GAP_SLOTS, rtl_constant('FLIGHT_GAP_SLOTS'))
+        self.assertEqual(sources.DEMO_LOSS['A'], (rtl_constant('FLIGHT_LOSS_A_FIRST'), rtl_constant('FLIGHT_LOSS_A_LAST')))
+        self.assertEqual(sources.DEMO_LOSS['B'], (rtl_constant('FLIGHT_LOSS_B_FIRST'), rtl_constant('FLIGHT_LOSS_B_LAST')))
+
+    def test_rom_frames_in_order_synthetic_with_the_demo_build_id(self):
+        records = self.slots(0, 40)
+        self.assertTrue(all(r.synthetic for r in records))
+        status = [r for r in records if r.type == p.STATUS]
+        self.assertTrue(status and all(r.fields['build_id'] == 0x53445246 for r in status))
+        best = [r for r in records if r.type == p.BEST_TELEM]
+        self.assertEqual([r.fields['raw'] for r in best], rom_flight_frames()[:40])
+        self.assertTrue(all(r.fields['apex']['kind'] == 'FLIGHT' for r in best))
+        metrics = [r for r in records if r.type == p.CHAN_METRICS]
+        self.assertTrue(metrics and all(r.fields['power_unit'] == 'dBFS' for r in metrics))
+        self.assertEqual({r.name for r in records}, set(p.TYPE_NAMES.values()) - {'CONFIG'})
+
+    def test_loss_windows_drop_one_antenna_and_best_covers(self):
+        first, last = sources.DEMO_LOSS['A']
+        records = self.slots(first, last - first + 1)
+        frames = [r for r in records if r.type == p.CHAN_FRAME]
+        self.assertEqual({r.fields['channel'] for r in frames}, {'B'})
+        best = [r for r in records if r.type == p.BEST_TELEM]
+        self.assertEqual(len(best), last - first + 1)
+        self.assertTrue(all(r.fields['source'] == 'B' for r in best))
+
+    def test_gap_then_loop_back_to_frame_zero(self):
+        n = len(self.demo.rom)
+        records = self.slots(n - 1, sources.DEMO_GAP_SLOTS + 2)
+        best = [r.fields['raw'] for r in records if r.type == p.BEST_TELEM]
+        self.assertEqual(best, [rom_flight_frames()[n - 1], rom_flight_frames()[0]])

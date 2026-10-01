@@ -248,10 +248,10 @@ class SimSource:
             snr_db_x10=int(round((rssi - noise) * 10)), freq_offset_hz=int(round(df)),
             sync_hits=self.frames[ch], crc_good=self.good[ch], crc_bad=self.bad[ch]))
 
-    def _spectrum(self, ch, t_us, s, sig):
+    def _spectrum(self, ch, t_us, s, sig, present=True):
         model = CHANNEL_MODEL[ch]
         center = int(round(s.target_if_hz))
-        peak = 10 ** (model['peak_db'] / 10)
+        peak = 10 ** (model['peak_db'] / 10) if present else 0.0
         power = []
         for k in range(SPEC_BINS):
             f = center + (k - SPEC_BINS // 2) * SPEC_BIN_HZ
@@ -283,10 +283,105 @@ class SimSource:
             await asyncio.sleep(max(0.0, start + self.tick * TICK_S - loop.time()))
 
 
+# Demo bitstream profile (rtl/receiver_link_sources.sv, DEMO_FLIGHT=1); tools/tests/test_sources.py
+# checks these against the RTL constants.
+DEMO_ROM = Path(__file__).resolve().parents[2] / 'projects/sdr/rom/apex_flight.mem'
+DEMO_GAP_SLOTS = 20
+DEMO_LOSS = {'A': (60, 69), 'B': (228, 237)}
+DEMO_BUILD_ID = 0x53445246
+DEMO_DBFS = dict(A=dict(rssi=-21.0, noise=-58.0), B=dict(rssi=-24.0, noise=-58.0))
+
+
+class DemoSource(SimSource):
+    """Host stand-in for the demo bitstream (./sdr build --demo) when no board is attached.
+
+    Sends the checked-in replay ROM (projects/sdr/rom/apex_flight.mem) as FLIGHT frames on the
+    demo schedule: one ROM frame per 50 ms slot, DEMO_GAP_SLOTS silent slots, then the loop, with
+    the same per-antenna loss windows as the RTL. STATUS carries the demo BUILD_ID, so the GUI
+    uses the apex_demo profile. No receiver runs here: signal, noise, spectrum and I/Q are a
+    modelled stand-in in relative dBFS, and every record is flagged SYNTHETIC. Tuning is ignored.
+    """
+    kind = 'demo'
+    responds_to_tuning = False
+    detail = 'host demo replay (no FPGA)'
+
+    def __init__(self, get_tuning=None, seed=None, rom_path=DEMO_ROM):
+        from .freqplan import TuningState
+        super().__init__(lambda: TuningState(), seed=seed)
+        self.rom = [apex.with_crc(frame) for frame in apex.read_rom_frames(rom_path)]
+
+    def channel(self):
+        s = self.get_tuning()
+        return s, s.target_if_hz, 0.0, True
+
+    def _lost(self, ch, slot):
+        first, last = DEMO_LOSS[p.CHANNELS[ch]]
+        return first <= slot <= last
+
+    def _dbfs_msg(self, mtype, fields):
+        data = p.encode_message(mtype, p.build_payload(mtype, fields), seq=self.seq,
+                                flags=p.FLAG_SYNTHETIC | p.FLAG_DBFS)
+        self.seq = (self.seq + 1) & 0xFF
+        return data
+
+    def step(self):
+        """Bytes for one 50 ms slot."""
+        t_us = int(round(self.tick * TICK_S * 1e6)) & 0xFFFFFFFF
+        slot = self.tick % (len(self.rom) + DEMO_GAP_SLOTS)
+        s, sig, _, _ = self.channel()
+        out, ok = [], {0: False, 1: False}
+        if slot < len(self.rom):
+            raw = self.rom[slot]
+            for ch in (0, 1):
+                if self._lost(ch, slot):
+                    continue
+                ok[ch] = True
+                self.frames[ch] += 1
+                self.good[ch] += 1
+                rssi = DEMO_DBFS[p.CHANNELS[ch]]['rssi'] + self.rng.gauss(0, 0.5)
+                out.append(self._dbfs_msg(p.CHAN_FRAME, dict(
+                    channel=ch, crc_ok=1, t_us=t_us, rssi_dbm_x10=int(round(rssi * 10)), quality=220 - 20 * ch,
+                    freq_offset_hz=0, raw=raw)))
+            if ok[0] or ok[1]:
+                out.append(self._msg(p.BEST_TELEM, dict(t_us=t_us, source=0 if ok[0] else 1, raw=raw)))
+                self.link['best_sent'] += 1
+            if ok[0]:
+                self.link['from_a'] += 1
+            elif ok[1]:
+                self.link['from_b'] += 1
+            else:
+                self.link['neither_ok'] += 1
+            if ok[0] and ok[1]:
+                self.link['both_ok'] += 1
+        if self.tick % 2 == 0:
+            for ch in (0, 1):
+                present = slot < len(self.rom) and not self._lost(ch, slot)
+                model = DEMO_DBFS[p.CHANNELS[ch]]
+                noise = model['noise'] + self.rng.gauss(0, 0.4)
+                rssi = (model['rssi'] if present else model['noise']) + self.rng.gauss(0, 0.5)
+                out.append(self._dbfs_msg(p.CHAN_METRICS, dict(
+                    channel=ch, rssi_dbm_x10=int(round(rssi * 10)), noise_dbm_x10=int(round(noise * 10)),
+                    snr_db_x10=int(round((rssi - noise) * 10)), freq_offset_hz=0,
+                    sync_hits=self.frames[ch], crc_good=self.good[ch], crc_bad=self.bad[ch])))
+                out.append(self._spectrum(ch, t_us, s, sig, present))
+        if self.tick % 4 == 0:
+            for ch in (0, 1):
+                out.append(self._iq(ch, t_us, slot < len(self.rom) and not self._lost(ch, slot)))
+        if self.tick % 20 == 0:
+            out.append(self._msg(p.STATUS, dict(version=p.PROTOCOL_VERSION, channels=3,
+                                                uptime_ms=int(self.tick * TICK_S * 1000), build_id=DEMO_BUILD_ID,
+                                                dropped=0)))
+            out.append(self._msg(p.LINK_STATS, dict(self.link)))
+        self.tick += 1
+        return b''.join(out)
+
+
 def from_args(config, kind, file=None, speed=1.0, loop=False):
     """Validate the choice now; return a factory taking get_tuning() and building a fresh source."""
     if kind == 'sim':
         return lambda get_tuning: SimSource(get_tuning)
+    if kind == 'demo':
+        return lambda get_tuning: DemoSource(get_tuning)
     if kind == 'replay':
         if not file:
             raise ToolError('--source replay needs --file CAPTURE.bin')
@@ -294,4 +389,4 @@ def from_args(config, kind, file=None, speed=1.0, loop=False):
         return lambda get_tuning: ReplaySource(file, speed=speed, loop=loop)
     if kind == 'serial':
         return lambda get_tuning: SerialSource(config, get_tuning=get_tuning)
-    raise ToolError('Unknown source {!r}: use serial, replay or sim.'.format(kind))
+    raise ToolError('Unknown source {!r}: use serial, replay, sim or demo.'.format(kind))

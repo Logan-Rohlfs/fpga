@@ -14,12 +14,16 @@ export interface Derived {
 }
 export interface AdminInfo { label: string; since: number }
 export interface RfReference { lo_hz: number; injection: Injection; inferred?: boolean; confirmed_by?: 'ack' | 'report' }
-export interface ReceiverProfile { id: string; label: string; rf_label?: string }
+export interface ReceiverProfile {
+  id: string; label: string; rf_label?: string;
+  /** Demo profile: flight-schema keys the demo ROM generator emulates (absent from the flight log). */
+  emulated_fields?: string[]; emulated_note?: string; replay_note?: string;
+}
 export interface SourceState {
   profile?: ReceiverProfile;
   control_state?: string; control_error?: string; applied?: RfReference | null;
   /** Serial: running, waiting, busy, reconnecting, down or stopped. Others: running, down, ended, stopped, starting. */
-  kind: 'serial' | 'replay' | 'sim' | 'none'; state: string; detail: string; responds_to_tuning: boolean;
+  kind: 'serial' | 'replay' | 'sim' | 'demo' | 'none'; state: string; detail: string; responds_to_tuning: boolean;
   /** Serial only: the port device, and seconds until the supervisor's next open attempt (spec 18). */
   port?: string; retry_in_s?: number;
 }

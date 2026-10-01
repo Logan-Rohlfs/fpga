@@ -19,6 +19,9 @@
   {:else if source?.kind === 'sim'}
     <strong>Host UI simulator</strong>
     <p class="note">These controls change the legacy GUI demonstration. No FPGA processing is involved.</p>
+  {:else if source?.kind === 'demo'}
+    <strong>Host flight demo (no FPGA)</strong>
+    <p class="note">The replay ROM is sent as the demo bitstream would send it. Signal, noise, spectrum and I/Q are modelled; tuning is not applied.</p>
   {:else}
     <strong>View only · receiver control unavailable</strong>
     <p class="note">Tuning changes the requested plan only. The IF spectrum remains visible; RF projection needs a confirmed acquisition reference.</p>

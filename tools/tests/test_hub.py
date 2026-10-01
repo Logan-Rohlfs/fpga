@@ -33,6 +33,22 @@ class HubTest(unittest.TestCase):
             version=p.PROTOCOL_VERSION, channels=3, uptime_ms=1, build_id=0x53445246, dropped=0)), seq=0))
         self.assertEqual(hub.stats_message()['source']['profile']['id'], 'apex_demo')
 
+    def test_host_demo_source_feeds_flight_rows_with_the_demo_profile(self):
+        from sdr_cli import freqplan, sources
+        hub, now = fake_hub()
+        demo = sources.DemoSource(lambda: freqplan.TuningState(), seed=2)
+        outs = []
+        for _ in range(60):
+            now[0] += 0.05
+            outs += hub.feed(demo.step())
+        profile = hub.stats_message()['source']['profile']
+        self.assertEqual(profile['id'], 'apex_demo')
+        self.assertIn('lat_deg', profile['emulated_fields'])
+        channels = {o.channel for o in outs}
+        self.assertTrue({'flight', 'flight.A', 'flight.B', 'events', 'link', 'spectrum.A', 'iq.B'} <= channels)
+        rows = [o for o in outs if o.channel == 'flight']
+        self.assertEqual(len(rows), 60)
+
     def test_feed_turns_records_into_client_messages(self):
         hub = Hub()
         seen = []
