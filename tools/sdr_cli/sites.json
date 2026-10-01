@@ -1,0 +1,8 @@
+{"version": 1, "sites": [
+  {"id": "seymour", "name": "Seymour, TX (Tripoli)", "center": [33.4986975, -99.3329862],
+   "pad": [33.4986975, -99.3329862], "outer_radius_km": 20, "inner_radius_km": 5},
+  {"id": "irec-pecos", "name": "IREC 2026, Pecos, TX", "center": [31.0427222, -103.5316389],
+   "pad": [31.0427222, -103.5316389], "outer_radius_km": 20, "inner_radius_km": 5},
+  {"id": "ttu", "name": "Texas Tech campus, Lubbock (demo)", "center": [33.584, -101.875],
+   "pad": [33.584, -101.875], "outer_radius_km": 20, "inner_radius_km": 5}
+]}
