@@ -183,8 +183,10 @@ For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
 - **Tune:** drag/scroll the RF plan or edit the LO digits; drag the waterfall or
   edit the NCO field. All tuning is validated and quantized in Python. Receiver,
   synthesizer and filter values are a host model with placeholder hardware
-  settings. Only the host simulator reacts to them. **Send to FPGA is disabled:**
-  there is no UART RX command protocol or acknowledgement yet.
+  settings. With the UART source, LO and NCO changes are sent automatically and
+  count as applied only on a matching CONFIG acknowledgement (see the Send panel
+  status); otherwise they change the requested plan only. The sim source models
+  them and the demo source ignores them. No physical PLL is controlled.
 - **Display:** auto waterfall scaling is the default. Manual floor/peak, A/B
   selection and Freeze are per viewer. Space toggles Freeze outside inputs.
   The header cycles System/Dark/Light themes. Synthetic content is labelled
@@ -237,8 +239,8 @@ override, and the header offers a global unit system.
   presets live in the ignored `.sdr/gui/presets/`, and the live/default
   choice and Auto-switch flag in `.sdr/gui/preset_state.json`. The Operator
   enters edit mode to drag, resize, add and remove cards, then Saves, Saves as a
-  new preset, Discards, or Makes default. "Show to viewers" makes a preset live for
-  everyone. Each browser has a Follow toggle: following shows the live preset,
+  new preset, Discards, or Makes default. "Show to viewers" (available after saving) makes a preset live for
+  everyone. Each browser has a "Follow operator" toggle: when on it shows the live preset,
   and unticking it lets that viewer pick another preset without changing the live one.
 - **`segment`:** the plot, map and trajectory cards take `segment: current | all`
   (default `current`). `current` shows only data since the newest flight-reset
@@ -297,7 +299,7 @@ With no tiles the map card draws a plain coordinate grid and still plots the tra
 
 Each viewer subscribes only to the data channels its cards use, and the
 server coalesces frequent updates (a new message replaces an unsent one of the same kind). With
-the Flight preset a viewer receives about 10 kB/s or less before compression:
+the Flight preset a viewer receives an estimated 10 kB/s or less before compression (design estimate, not a measurement of every card mix):
 flight rows at 20 Hz, link statistics at 5 Hz and two spectrum rows at 5 Hz. Ten
 viewers are therefore about 100 kB/s, which a phone hotspot carries. Camera
 streams are not included because browsers fetch them directly.

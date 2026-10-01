@@ -851,8 +851,11 @@ the latitude and longitude are finite with `|lat| ≤ 90` and `|lon| ≤ 180`, a
 they are not both zero. **Refinement:** DR (1) counts as not a position fix.
 
 Invalid positions are never plotted as a location. The track includes only
-valid rows. The demo has `gps_fix` 0 (SEARCHING) with 0 satellites for all 293
-frames, so demo positions are always invalid. A valid position far from the
+valid rows. The earlier recorded-log demo had `gps_fix` 0 (SEARCHING) with 0 satellites for all
+293 frames, so its positions were always invalid. The current RocketPy-simulated
+demo ROM (1381 frames) carries a position on every row, but `gps_fix` is the logged
+value (0 during its fix-loss spans, where the last position is held); validity still
+follows `gpsValid`, so rows with fix 0 are not plotted. A valid position far from the
 selected site is still plotted. The footer shows "Position is N km from <site>"
 when that is over 50 km, and never "fixes" it.
 

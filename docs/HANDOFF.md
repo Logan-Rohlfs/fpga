@@ -100,7 +100,7 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: plan Tasks 1-25 are complete on `gui-prep` except Task 26 (FPGA DFT length), which is in progress on a separate branch; Task 23 (docs) is this commit. Next: Task 26's result, then the final whole-branch review.** The integration pass, the host `--source demo`, the RocketPy demo ROM, the plot/card sizing work and per-loop segment clearing all landed after the last checkpoint; see [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md) for status and what remains.
+**Current task: plan Tasks 1-25 are complete on `gui-prep` except Task 26 (FPGA DFT length), which is in progress on a separate branch; Task 23 (docs) is done. Next: Task 26's result, then the final whole-branch review.** The integration pass, the host `--source demo`, the RocketPy demo ROM, the plot/card sizing work and per-loop segment clearing all landed after the last checkpoint; see [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md) for status and what remains.
 
 **Verified checkpoint (GUI cards).**
 - Newly run for this docs commit: host suite (322 tests, OK, 3 skipped), vitest 270 pass, svelte-check 0 errors and 0 warnings, production build, and `./sdr sim` (all PASS).
