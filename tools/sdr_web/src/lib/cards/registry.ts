@@ -283,6 +283,8 @@ const specs: Spec[] = [
 
 export const REGISTRY: Record<string, CardMeta> = Object.fromEntries(specs.map((s) => [s.type, meta(s)]));
 
+REGISTRY.camera.component = () => import('../../cards/CameraCard.svelte');
+
 /** Per-type config defaults and clean-up; an unknown type's config passes through untouched. */
 export function sanitizeConfig(type: string, config: unknown): Config {
   const m = REGISTRY[type];
