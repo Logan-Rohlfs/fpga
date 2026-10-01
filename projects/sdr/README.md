@@ -161,14 +161,13 @@ a small synthetic log. On hardware, the same checker runs with
 - Spectrum is an actual rectangular-window complex DFT at 100 kS/s, centered
   on the applied NCO. There is no walking test tone. Every bin is computed;
   none is interpolated. `sdr_top` parameter `SPECTRUM_BINS` sets the length:
-  64 (default, 1562.5 Hz bins), 128 (781.25 Hz) or 256 (390.625 Hz). Other
+  64 (1562.5 Hz bins), 128 (default, 781.25 Hz) or 256 (390.625 Hz). Other
   values fail elaboration. `check_receiver.py` reads the default from
   `rtl/sdr_top.sv`; `--spectrum-bins` checks a non-default build.
-- 64 is the default: it keeps the bitstreams' previous spectrum size. No
-  Vivado build of this parameterized observer has run yet at any length, so
-  its timing, resources and DRC are unmeasured. 128 and 256 are verified in
-  simulation only: `rx_observer_tb`
-  checks all three against a floating-point DFT. The top-level tests use 10 ms
+- 128 is the default (2026-10-01; 64 looked blocky). Both bitstream variants
+  close timing at 100 MHz at 128 bins (default WNS +0.305 ns, demo +0.614 ns,
+  DRC clean); see `docs/HANDOFF.md`. 256 has not been built on the current RTL.
+  `rx_observer_tb` checks all three lengths against a floating-point DFT. The top-level tests use 10 ms
   ticks, so the full `./sdr sim` also passed with 256 as the default during
   Task 26. The
   observer captures N samples (2.56 ms at 256), then computes every bin at
@@ -188,7 +187,8 @@ a small synthetic log. On hardware, the same checker runs with
   and DRC is clean for both variants before programming. First decide the GUI
   viewer spectrum rate: at 256 bins a viewer on the Flight preset receives
   about 12.3 kB/s, above the 10 kB/s viewer budget in the GUI cards spec (§2.4).
-  At 64 bins it is about 8.5 kB/s.
+  At 128 bins (the default) `test_fanout` measures 9.75 kB/s; at 64 it was about
+  8.5 kB/s.
   An earlier WIP of this RTL with 256 as the default failed timing in Vivado
   (default WNS −0.063 ns, demo −0.550 ns), so 256 likely needs pipelining
   in the DFT LOAD/MULTIPLY path first.

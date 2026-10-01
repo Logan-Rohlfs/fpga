@@ -29,23 +29,30 @@ Plan: [gui-cards](2026-09-30-gui-cards.md). Preflight rulings:
   the 3D card rebuilds only from the scheduled draw; Freeze holds Raw frames and Events;
   a display segment starts only on a reset after LANDED, via the new `prev_phase` event
   field; multi-series plot merge survives duplicate/out-of-order timestamps; serial
-  permission errors are no longer reported as busy; the host demo source emits 64 spectrum
-  bins; `read_rom_frames` raises `ValueError`; singular/plural viewer count).
-- Not run: hardware replay of the new demo ROM; any Vivado build on the current RTL
-  (Task 26's restructured `rx_observer` changes even the default netlist; the build host
-  was offline); phone/LAN viewers; a real-browser smoke pass.
+  permission errors are no longer reported as busy; the host demo source matches the
+  bitstream's spectrum bin count; `read_rom_frames` raises `ValueError`; singular/plural viewer count).
+- Newly run 2026-10-01: `./sdr build --all` at 128 bins (both variants timing-clean, DRC 0
+  errors), `./sdr sim` (all PASS), host suite (326 tests, OK). The 128-bin RocketPy demo is
+  flashed; the agent saw 128-bin SPECTRUM rows through `./sdr gui` with 0 link errors.
+  The Flight-preset viewer load at 128 bins measures 97,536 B per 10 s (`test_fanout`),
+  just under the 100,000 B budget. Frontend unchanged (bin-count agnostic), so vitest,
+  svelte-check and the build were not re-run.
+- Not run: a watched full flight in a real browser; phone/LAN viewers; the Task 3 acceptance run.
 
 ## What remains
 
-1. **Vivado build (`./sdr build --all`) of the default and demo variants on the current
-   RTL**, with timing and DRC inspected, then UART-load measurement on the board. All earlier
-   timing numbers predate Task 26 and the RocketPy ROM. Then a **board run of the RocketPy
-   demo ROM** (about 15 RAMB36 tiles, unmeasured). Only after that can the replay be called hardware-verified.
+1. **Done 2026-10-01:** both variants build timing-clean at 128 bins (after a
+   `source_combiner` timing fix), and the RocketPy demo is flashed and streaming
+   on the board (18 BRAM tiles). Still open: UART-load measurement on the board,
+   and a watched full flight before calling the replay hardware-verified.
 2. **Real-browser smoke pass** of the GUI (`./sdr gui --source demo`), including a phone/LAN viewer.
 3. **Future work, not built:** camera capture on the host and a server-side relay;
    a trigger editor in the UI (triggers are edited in preset JSON); regenerating the
    ROM needs the sibling apex repo's simulation CSV (the checked-in `.mem` is enough
    for everything else).
+4. **Requested GUI additions (planning only):** 3D camera follow/orbit modes, ground
+   beyond the map tiles (fade or globe), event-marker readability and a launch-synced
+   demo video. See [gui-backlog](2026-10-01-gui-backlog.md).
 
 ## Standing rulings worth remembering
 

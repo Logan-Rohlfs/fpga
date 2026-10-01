@@ -16,7 +16,7 @@ module receiver_top_tb;
     // Checks run against sdr_top's default SPECTRUM_BINS; BINS must equal it
     // (checked at time 0). 10 ms ticks: the 10-tick SPECTRUM period (400k
     // clocks here) also covers a 256-point capture plus DFT (~210k clocks).
-    localparam integer BINS = 64;
+    localparam integer BINS = 128;
     localparam integer BIN_MHZ = 100_000_000 / BINS;
     initial if (dut.SPECTRUM_BINS != BINS) $fatal(1, "TB BINS %0d != sdr_top SPECTRUM_BINS %0d", BINS, dut.SPECTRUM_BINS);
     sdr_top #(.CLK_HZ(CLK_HZ), .BAUD_RATE(1_000_000), .TICK_CYCLES(40_000), .STATUS_TICKS(10)) dut (

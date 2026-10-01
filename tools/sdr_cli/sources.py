@@ -297,7 +297,7 @@ DEMO_LOSS = {'A': (60, 69), 'B': (505, 514)}
 DEMO_BUILD_ID = 0x53445246
 # rx_observer DFT of the demo bitstream: sdr_top's default SPECTRUM_BINS over the 100 kHz I/Q rate
 # (tools/tests/test_sources.py checks the bin count against the RTL).
-DEMO_SPEC_BINS, DEMO_SPEC_BIN_HZ = 64, 100000 / 64
+DEMO_SPEC_BINS, DEMO_SPEC_BIN_HZ = 128, 100000 / 128
 DEMO_DBFS = dict(A=dict(rssi=-21.0, noise=-58.0), B=dict(rssi=-24.0, noise=-58.0))
 
 

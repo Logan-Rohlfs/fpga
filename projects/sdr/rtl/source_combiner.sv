@@ -68,6 +68,7 @@ module source_combiner #(
     reg [2:0] duplicate_increment;
     reg [1:0] reject_increment;
     reg [23:0] incoming_key [0:1];
+    reg [1:0] incoming_matches_slot [0:1];
     integer c, h;
 
     // Deliberately no fall-through into a retiring slot. This makes the
@@ -86,6 +87,10 @@ module source_combiner #(
         reject_increment = 0;
         for (c = 0; c < 2; c = c + 1) begin
             incoming_key[c] = {in_type[c*8 +: 8], in_seq[c*16 +: 16]};
+            // Compare against both slots before selection is known, so the
+            // late select only drives a 2:1 mux rather than a key compare.
+            incoming_matches_slot[c] = {incoming_key[c] == frame_key[1],
+                                        incoming_key[c] == frame_key[0]};
             // The existing output remains a duplicate guard on its handshake
             // edge, including when its finite history entry has expired.
             buffered_duplicate[c] = occupied[c] && out_valid && frame_key[c] == output_key;
@@ -127,7 +132,7 @@ module source_combiner #(
         for (c = 0; c < 2; c = c + 1) begin
             if (buffered_duplicate[c]) duplicate_increment = duplicate_increment + 1'b1;
             // Includes a counterpart first presented on the retirement edge.
-            if (select_valid && incoming_key[c] == frame_key[selected]) intake_duplicate[c] = 1;
+            if (select_valid && incoming_matches_slot[c][selected]) intake_duplicate[c] = 1;
             if (in_valid[c] && in_ready[c]) begin
                 if (in_len[c*8 +: 8] == 0 || in_len[c*8 +: 8] > MAX_FRAME_BYTES)
                     reject_increment = reject_increment + 1'b1;

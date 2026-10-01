@@ -211,7 +211,7 @@ VIEWER_BYTES_10S = 100000   # spec 2.4: <= 10 kB/s per viewer before compression
 def viewer_load_bytes(seconds=10):
     """Bytes a viewer on the Flight preset channels receives from a replay at source rates.
 
-    BEST FLIGHT 20 Hz, CHAN_METRICS 2 x 10 Hz, SPECTRUM (64 bins) 2 x 10 Hz, LINK_STATS
+    BEST FLIGHT 20 Hz, CHAN_METRICS 2 x 10 Hz, SPECTRUM (128 bins, the RTL default) 2 x 10 Hz, LINK_STATS
     and STATUS 1 Hz, drained every 10 ms. Snapshots and stats are not counted.
     """
     from link_samples import rom_flight_frames
@@ -239,8 +239,8 @@ def viewer_load_bytes(seconds=10):
                                                  snr_db_x10=284, freq_offset_hz=10300, sync_hits=step,
                                                  crc_good=step, crc_bad=0), seq)
                 data += enc(p.SPECTRUM, dict(channel=ch, averages=1, row=step // 10, t_us=step * 10000,
-                                             center_hz=100000, bin_mhz=1562500, db_ref_x10=-1200,
-                                             db_step_x100=50, power=[(k * 7 + step) % 40 for k in range(64)]), seq)
+                                             center_hz=100000, bin_mhz=781250, db_ref_x10=-1200,
+                                             db_step_x100=50, power=[(k * 7 + step) % 40 for k in range(128)]), seq)
         if step % 100 == 0:
             data += enc(p.LINK_STATS, dict(from_a=step, from_b=step, both_ok=step, neither_ok=0, best_sent=step), seq)
             data += enc(p.STATUS, dict(version=2, channels=3, uptime_ms=step * 10, build_id=0x1234, dropped=0), seq)

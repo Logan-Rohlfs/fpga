@@ -166,7 +166,8 @@ latest state is authoritative. Role and preset messages are never coalesced.
 
 Estimated viewer load with the Flight preset: flight rows 20 Hz × about 92 B,
 link slots at 5 Hz, and two 64-bin waterfalls at 5 Hz. That is **≤ 10 kB/s per
-viewer before compression**. Task 6 measures it with a replay source. With 10
+viewer before compression**. (Amended 2026-10-01: the default is now 128 bins;
+`test_fanout` measures 9.75 kB/s, so the budget has little headroom.) Task 6 measures it with a replay source. With 10
 viewers this is about 100 kB/s, well within a Pi hotspot.
 
 ### 2.5 Encode once

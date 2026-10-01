@@ -171,11 +171,12 @@ class FactoryTest(unittest.TestCase):
             sources.from_args(config, 'radio')
 
 
+SDR_TOP = Path(__file__).resolve().parents[2] / 'projects/sdr/rtl/sdr_top.sv'
 RTL = Path(__file__).resolve().parents[2] / 'projects/sdr/rtl/receiver_link_sources.sv'
 
 
-def rtl_constant(name):
-    return int(re.search(r'\b' + name + r'=(\d+)', RTL.read_text()).group(1))
+def rtl_constant(name, rtl=None):
+    return int(re.search(r'\b' + name + r'=(\d+)', (rtl or RTL).read_text()).group(1))
 
 
 class DemoSourceTest(unittest.TestCase):
@@ -196,7 +197,7 @@ class DemoSourceTest(unittest.TestCase):
         self.assertEqual(sources.DEMO_LOSS['B'], (rtl_constant('FLIGHT_LOSS_B_FIRST'), rtl_constant('FLIGHT_LOSS_B_LAST')))
 
     def test_spectrum_uses_the_demo_bitstream_dft_length(self):
-        bins = rtl_constant('SPECTRUM_BINS')   # the receiver_link_sources default that sdr_top passes through
+        bins = rtl_constant('SPECTRUM_BINS', SDR_TOP)   # sdr_top sets the bitstream's DFT length
         self.assertEqual(sources.DEMO_SPEC_BINS, bins)
         rows = [r for r in self.slots(0, 4) if r.type == p.SPECTRUM]
         self.assertTrue(rows)
