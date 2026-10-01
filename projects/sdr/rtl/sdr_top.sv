@@ -22,7 +22,7 @@ module sdr_top #(
     // (390.625 Hz bins). 64 is the default; no Vivado build of the restructured
     // observer exists at any length yet, so all three are simulation-verified
     // only. host/check_receiver.py reads this default.
-    parameter integer SPECTRUM_BINS=64
+    parameter integer SPECTRUM_BINS=128
 ) (
     input  wire clk,
     input  wire btnC,
