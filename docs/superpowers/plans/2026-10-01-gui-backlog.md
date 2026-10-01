@@ -1,10 +1,11 @@
 # GUI backlog: requested, not designed or built
 
-Planning notes from user requests on 2026-10-01. Nothing here is implemented.
-Each item needs a short design pass (and spec amendment where noted) before
-code. Keep within the dependency list in `AGENTS.md`.
+Planning notes from user requests on 2026-10-01. **All four items were
+implemented on 2026-10-01** (see the spec amendments in §7, §8, §12, §13.6,
+§13.7 and §15). The notes below are kept as the design record; where the build
+differs, the spec wins. Not built: Option B (globe view) of the ground item.
 
-## 3D trajectory card: camera modes
+## 3D trajectory card: camera modes (implemented 2026-10-01)
 
 Today the card (`tools/sdr_web/src/cards/Trajectory3dCard.svelte`) has a fixed
 start pose (`camera.position (-2500, 1800, 3500)`, target `(0, 400, 0)`) and
@@ -28,7 +29,7 @@ free `OrbitControls`. Requested additions:
    rate. It needs a card-types/spec amendment and loader validation like the
    other card fields.
 
-## 3D trajectory card: ground beyond the map tiles
+## 3D trajectory card: ground beyond the map tiles (Option A implemented 2026-10-01)
 
 Today the ground is one plane of z15 tiles covering ±4 km around the pad
 (`groundTiles(pad, 15, 4)` in `lib/cards/traj.ts`). Zooming out shows its
@@ -56,7 +57,7 @@ edge against a blank background.
     data.
   - Suggest A first, B later only as an optional intro.
 
-## Plot event markers: readability
+## Plot event markers: readability (implemented 2026-10-01)
 
 User report: event marker labels overlap when two events are close in time,
 and markers default to the same colour as the line they mark, so they are hard
@@ -64,17 +65,23 @@ to see. Fix ideas: stagger or collision-avoid labels (or collapse close events
 into one label with a count), and draw markers in a contrasting colour or
 with an outline/halo rather than the series colour.
 
-## Camera card: demo flight video, synced to launch
+## Camera card: demo flight video, synced to launch (implemented 2026-10-01)
 
-Wanted: a demo video that plays in the camera card, roughly synced so liftoff
-in the video lines up with the LAUNCH event. The real camera (analog FPV) is
-later work and does not go through the FPGA.
+Built as camera `mode: demo`; see spec §15 and `tools/README.md`.
 
-- Candidate footage: NASA "Riding on a Sounding Rocket" (public domain,
+- **Default clip:** `.sdr/media/l3_flight_onboard.mp4`, "L3 Flight" by kjmath
+  (YouTube `tfCgWSBuRZg`, embedded on
+  [the flyer's L3 write-up](https://kjmath.github.io/portfolio/projects/L3-rocket/)):
+  an amateur NAR Level 3 certification flight, expected apogee about 8,090 ft,
+  aft-looking camera in a 3D-printed aeroshell. 163 s, 640×360 H.264, about
+  0.7 Mb/s. Liftoff (first motor plume) is at 9.0 s; the igniter flickers at
+  8.4 s. Fetched with `yt-dlp` (YouTube's `mweb` client, format 18); it is under
+  standard YouTube terms, so it is for in-group proof-of-concept demos only and
+  is never committed. Chosen over the first clip because IREC rockets fly to
+  about 10,000 ft, not 178 miles.
+- **Earlier clip:** NASA "Riding on a Sounding Rocket" (public domain,
   [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Riding_on_a_Sounding_Rocket.webm)),
-  liftoff about 20.5 s into the file. A local H.264 copy lives in the ignored
-  `.sdr/media/` directory, not in the repository.
-- Needed: an aiohttp route serving files from `.sdr/media/`, a card setting
-  for the launch offset, and card logic that holds the pad frame until LAUNCH,
-  then plays from offset + time since launch. This changes the camera card's
-  spec (it currently only embeds an http(s) URL and plays immediately).
+  liftoff at about 30.6 s in the local `sounding_rocket_onboard.mp4`. It still
+  works by setting the card's clip and liftoff fields.
+- **Loop length:** the demo replay gives about 68 s from LAUNCH to
+  `flight_reset`, so each loop shows liftoff and the first minute of the clip.

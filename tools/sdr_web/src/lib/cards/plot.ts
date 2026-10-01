@@ -128,10 +128,11 @@ const Y_PAD = 0.06;   // fraction of the span added above and below
 /**
  * Y range per quantity that tightly frames the plotted (visible-window) data with a small pad. `data` is the
  * uPlot AlignedData from buildData; `quantities[i]` is the quantity of series i (data column i + 1). A quantity
- * with no finite value gets [0, 1]. `fixed` (the config's manual y) applies to the first quantity only.
+ * with no finite value gets [0, 1]. `fixed` (the config's manual y, in display units) applies to the first quantity
+ * only; a null end stays auto-scaled, so `{min: 0, max: null}` is a positive-only axis.
  */
 export function yRanges(
-  data: PlotData, quantities: string[], fixed: { min: number; max: number } | null,
+  data: PlotData, quantities: string[], fixed: { min: number | null; max: number | null } | null,
 ): Record<string, [number, number]> {
   const lo: Record<string, number> = {};
   const hi: Record<string, number> = {};
@@ -145,10 +146,20 @@ export function yRanges(
   const out: Record<string, [number, number]> = {};
   quantities.forEach((q, i) => {
     if (q in out) return;
-    if (i === 0 && fixed) { out[q] = [fixed.min, fixed.max]; return; }
-    if (!(q in lo)) { out[q] = [0, 1]; return; }
-    const pad = (hi[q] - lo[q]) * Y_PAD || Math.abs(hi[q]) * Y_PAD || 1;
-    out[q] = [lo[q] - pad, hi[q] + pad];
+    let r: [number, number];
+    if (!(q in lo)) r = [0, 1];
+    else {
+      const pad = (hi[q] - lo[q]) * Y_PAD || Math.abs(hi[q]) * Y_PAD || 1;
+      r = [lo[q] - pad, hi[q] + pad];
+    }
+    if (i === 0 && fixed) {
+      const a = fixed.min ?? r[0];
+      const b = fixed.max ?? r[1];
+      // Data entirely beyond a fixed end would leave an empty span: keep a usable one on the open side.
+      r = a < b ? [a, b] : fixed.min !== null && fixed.max === null ? [a, a + Math.max(1, Math.abs(a))]
+        : fixed.max !== null && fixed.min === null ? [b - Math.max(1, Math.abs(b)), b] : [a, b];
+    }
+    out[q] = r;
   });
   return out;
 }
@@ -156,4 +167,50 @@ export function yRanges(
 /** Canvas size for a plot host, leaving room for the legend below it (one formula for build and resize). */
 export function plotSize(hostW: number, hostH: number, legendH: number): { width: number; height: number } {
   return { width: Math.max(Math.floor(hostW), 50), height: Math.max(Math.floor(hostH - legendH - 6), 50) };
+}
+
+const MARKER_NAMES: Record<string, string> = {
+  launch: 'Launch', burnout: 'Burnout', apogee: 'Apogee', landing: 'Landing', flight_reset: 'Reset',
+};
+
+/** Display name of a marker kind. */
+export function markerLabel(kind: string): string {
+  return MARKER_NAMES[kind] ?? kind.replace(/_/g, ' ');
+}
+
+export interface MarkerSlot { lane: number | null; side: 'left' | 'right' }
+
+/**
+ * Lanes for marker labels so close events do not draw over each other. Each label is `w` px wide and sits beside its
+ * line at `x` (to the right, or to the left when it would run past `right`). Labels are placed left to right in the
+ * first lane where they fit; one that fits in none of `maxLanes` gets lane null (its line is still drawn).
+ * The result is in input order.
+ */
+export function layoutMarkerLabels(
+  items: readonly { x: number; w: number }[], left: number, right: number, maxLanes: number, gap = 4,
+): MarkerSlot[] {
+  const laneEnd: number[] = Array(maxLanes).fill(-Infinity);
+  const out: MarkerSlot[] = items.map(() => ({ lane: null, side: 'right' }));
+  const order = items.map((it, i) => ({ ...it, i })).sort((a, b) => a.x - b.x);
+  for (const it of order) {
+    const side: 'left' | 'right' = it.x + gap + it.w > right && it.x - gap - it.w >= left ? 'left' : 'right';
+    const x0 = side === 'right' ? it.x + gap : it.x - gap - it.w;
+    const x1 = x0 + it.w;
+    for (let lane = 0; lane < maxLanes; lane++) {
+      if (x0 >= laneEnd[lane] + gap) {
+        laneEnd[lane] = x1;
+        out[it.i] = { lane, side };
+        break;
+      }
+    }
+    if (out[it.i].lane === null) out[it.i] = { lane: null, side };
+  }
+  return out;
+}
+
+/** Time-axis tick label: local wall clock as HH:MM:SS (one compact line, so neighbouring ticks never overprint). */
+export function clockLabel(t: number): string {
+  const d = new Date(t * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }

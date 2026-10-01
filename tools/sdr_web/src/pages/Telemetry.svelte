@@ -11,6 +11,7 @@
     toWire, uniqueId,
   } from '../lib/presets';
   import { telemetryChannels } from '../lib/view';
+  import { enterFullscreen, fullscreen } from '../lib/fullscreen';
 
   const operator = $derived($role?.role === 'admin');
   const displayed = $derived(displayedPreset($presets, $followStore, $chosenStore));
@@ -86,6 +87,9 @@
     telemetryChannels.set(cardChannels(cards));
   });
 
+  // Full screen is for watching: leave edit mode on the way in.
+  $effect(() => { if ($fullscreen) edit = false; });
+
   /** True when it is fine to move away from the current working copy. Confirms before discarding real edits. */
   function leave(): boolean {
     if (working && status.dirty && !confirm('Discard your unsaved layout changes?')) return false;
@@ -137,12 +141,12 @@
 {:else if !shown}
   <p class="note">The server has no preset to show.</p>
 {:else}
-  <PresetBar entries={$presets.items} autoSwitch={$presets.auto_switch} shownId={shown.id} liveId={$presets.live} defaultId={$presets.default}
+  {#if !$fullscreen}<PresetBar entries={$presets.items} autoSwitch={$presets.auto_switch} shownId={shown.id} liveId={$presets.live} defaultId={$presets.default}
     follow={$followStore} {operator} {edit} dirty={status.dirty} stale={status.stale}
     saved={server.saved} builtin={server.builtin} canDelete={server.canDelete}
     saveAsPending={!!pendingAs}
     onselect={select} onfollow={follow} onedit={(on) => (edit = on)} onsave={save} onsaveas={saveAs} ondiscard={discard}
     ondelete={remove} onsetlive={() => setLivePreset(shown.id)} onsetdefault={() => setDefaultPreset(shown.id)}
-    onautoswitch={setAutoSwitch} />
-  <CardGrid {cards} editable={operator} {edit} onchange={edited} />
+    onautoswitch={setAutoSwitch} onfullscreen={enterFullscreen} />{/if}
+  <CardGrid {cards} editable={operator && !$fullscreen} {edit} fill={$fullscreen} onchange={edited} />
 {/if}

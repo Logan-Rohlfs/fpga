@@ -9,7 +9,7 @@ describe('default Flight preset', () => {
   it('identifies itself and has no triggers', () => {
     expect(preset.id).toBe('flight');
     expect(preset.name).toBe('Flight');
-    expect(preset.grid.cols).toBe(12);
+    expect(preset.grid.cols).toBe(24);
     expect(preset.triggers).toEqual([]);
   });
 

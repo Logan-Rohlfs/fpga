@@ -90,33 +90,38 @@
     <p class="note">Waiting for FLIGHT frames ({sourceLabel(config.source)})</p>
     {#if notice}<p class="note">{notice}</p>{/if}
   {:else}
-    <div class="row">
+    <div class="row" class:mm-on={config.track_minmax} style:--n={cols.length}
+      style:--chars={Math.max(5, ...cols.map((c) => c.text.length + (c.unit ? 1.2 : 0)))}>
       {#each cols as c}
         <div class="col {c.level ?? ''}" class:dim={c.age !== null}>
           {#if c.name}<span class="who">{c.name}</span>{/if}
-          <span class="lbl">{c.label}</span>
           <span class="val mono">{c.text}</span><span class="u">{c.unit}</span>
           {#if c.level}<span class="chip {c.level}">{LEVEL_TEXT[c.level]}</span>{/if}
-          {#if config.track_minmax && c.min !== null}<span class="mm mono">min {c.min} … max {c.max}</span>{/if}
+          {#if config.track_minmax && c.min !== null}<span class="mm mono">min {c.min} … max {c.max}{#if c === cols[cols.length - 1]}<button
+            class="reset" title="Reset min and max" aria-label="Reset min and max"
+            onclick={() => { resetMinMax(); scheduler.markDirty(id); }}>↺</button>{/if}</span>{/if}
         </div>
       {/each}
     </div>
-    {#if config.track_minmax}<button class="btn" onclick={() => { resetMinMax(); scheduler.markDirty(id); }}>Reset min/max</button>{/if}
   {/if}
 </div>
 
 <style>
-  .num { padding: 10px 12px; height: 100%; display: flex; flex-direction: column; gap: 6px; justify-content: center; container-type: size; }
+  .num { padding: 2px 12px 8px; height: 100%; display: flex; flex-direction: column; gap: 6px; justify-content: center; container-type: size; }
   .row { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
   .col { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
-  .val { font-size: clamp(24px, 22cqmin, 72px); font-weight: 500; line-height: 1; }
+  /* The card's label line is its header (compact frame), so the number gets the rest of the height. */
+  /* Sized to fill the width for the text's length (at least 5 characters, so small values do not jump in size). */
+  .val { --fit: calc((100cqw - 24px) / var(--n, 1) / (var(--chars, 6) * 0.64));
+    font-size: clamp(18px, min(60cqh, var(--fit)), 132px); font-weight: 500; line-height: 1; }
+  .mm-on .val { font-size: clamp(18px, min(44cqh, var(--fit)), 120px); }
   .u { color: var(--muted); font-size: 14px; }
   .who { color: var(--muted); font: 600 12px var(--f-ui); }
-  .lbl { color: var(--muted); font-size: 12.5px; flex-basis: 100%; }
   .mm { color: var(--muted); font-size: 12px; flex-basis: 100%; }
   .good .val { color: var(--good); }
   .warn .val { color: var(--warn); }
   .bad .val { color: var(--bad); }
   .dim { opacity: 0.6; }
-  .btn { align-self: flex-start; padding: 2px 8px; font-size: 12px; }
+  .reset { margin-left: 6px; padding: 0 4px; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 13px; }
+  .reset:hover { color: var(--fg); }
 </style>

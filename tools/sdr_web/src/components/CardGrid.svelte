@@ -11,11 +11,17 @@
   } from '../lib/grid';
   import CardFrame from './CardFrame.svelte';
   import CardSettings from './CardSettings.svelte';
+  import { fitRowPx } from '../lib/fullscreen';
+  import { flightSchema } from '../lib/link';
 
   // `edit` is owned by the caller (the preset bar's Edit/Done); editing also needs a desktop-width window.
-  let { cards, editable, edit = false, onchange }: { cards: GridCard[]; editable: boolean; edit?: boolean; onchange: (cards: GridCard[]) => void } = $props();
+  // `fill` (full-screen mode) stretches the rows so the layout fills the window height.
+  let { cards, editable, edit = false, fill = false, onchange }:
+    { cards: GridCard[]; editable: boolean; edit?: boolean; fill?: boolean; onchange: (cards: GridCard[]) => void } = $props();
 
   let innerWidth = $state(typeof window === 'undefined' ? 1200 : window.innerWidth);
+  let innerHeight = $state(typeof window === 'undefined' ? 800 : window.innerHeight);
+  let gridTop = $state(0);
   let preview = $state<GridCard[] | null>(null);
   let drag = $state<{ id: string; px: number; py: number } | null>(null);
   let settingsId = $state<string | null>(null);
@@ -34,11 +40,18 @@
   });
 
   const mode = $derived(modeForWidth(innerWidth));
-  const cols = $derived(mode === 'desktop' ? COLS : mode === 'tablet' ? 6 : 1);
+  const cols = $derived(mode === 'desktop' ? COLS : mode === 'tablet' ? 12 : 1);
   const editing = $derived(editable && edit && mode === 'desktop');
   const shown = $derived(
-    preview ?? (mode === 'desktop' ? cards : reflow(cards, mode === 'tablet' ? 6 : 1, minOfType)),
+    preview ?? (mode === 'desktop' ? cards : reflow(cards, mode === 'tablet' ? 12 : 1, minOfType)),
   );
+  // Measured after layout: the grid's distance from the top of the page (only the main padding in full screen).
+  $effect(() => {
+    void [fill, innerWidth, innerHeight];
+    if (grid) gridTop = grid.getBoundingClientRect().top + window.scrollY;
+  });
+  const rowPx = $derived(fill && mode === 'desktop'
+    ? fitRowPx(innerHeight - gridTop - 8, Math.max(0, ...shown.map((c) => c.y + c.h)), GAP_PX) : ROW_PX);
   const placeholder = $derived(drag && preview ? preview.find((c) => c.id === drag!.id) : undefined);
   const settingsCard = $derived(cards.find((c) => c.id === settingsId));
 
@@ -138,9 +151,9 @@
   }
 </script>
 
-<svelte:window bind:innerWidth onkeydown={onWindowKey} />
+<svelte:window bind:innerWidth bind:innerHeight onkeydown={onWindowKey} />
 
-{#if editable}
+{#if editable && edit}
   <div class="bar">
     {#if mode === 'desktop'}
       {#if editing}
@@ -159,7 +172,7 @@
 {/if}
 
 <div class="cards" class:editing bind:this={grid}
-  style="grid-template-columns: repeat({cols}, minmax(0, 1fr)); grid-auto-rows: {ROW_PX}px; gap: {GAP_PX}px">
+  style="grid-template-columns: repeat({cols}, minmax(0, 1fr)); grid-auto-rows: {rowPx}px; gap: {GAP_PX}px">
   {#if placeholder}<div class="slot" style={cell(placeholder)} aria-hidden="true"></div>{/if}
   {#each shown as card (card.id)}
     {@const meta = REGISTRY[card.type]}
@@ -169,9 +182,9 @@
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div class="cell" class:dragging style="{cell(at)}{dragging ? `; transform: translate(${drag!.px}px, ${drag!.py}px)` : ''}"
       role={editing ? 'group' : undefined} tabindex={editing ? 0 : undefined}
-      aria-label={editing ? `${cardTitle(card)}: arrow keys move, Shift and arrows resize` : undefined}
+      aria-label={editing ? `${cardTitle(card, $flightSchema)}: arrow keys move, Shift and arrows resize` : undefined}
       onkeydown={editing ? (e) => onKey(e, card) : undefined}>
-      <CardFrame id={card.id} title={cardTitle(card)} {editing} showSettings={!editable && !!meta}
+      <CardFrame id={card.id} title={cardTitle(card, $flightSchema)} compact={!!meta?.compact} {editing} showSettings={!editable && !!meta}
         onsettings={meta ? () => (settingsId = card.id) : undefined} onremove={() => remove(card.id)}
         onheaderdown={(e) => startDrag(e, card)}>
         {#if meta?.component}
@@ -182,7 +195,7 @@
         {/if}
       </CardFrame>
       {#if editing}
-        <div class="rs" role="button" tabindex="0" aria-label="Resize {cardTitle(card)} by dragging"
+        <div class="rs" role="button" tabindex="0" aria-label="Resize {cardTitle(card, $flightSchema)} by dragging"
           onpointerdown={(e) => startResize(e, card)}></div>
       {/if}
     </div>
@@ -190,9 +203,9 @@
 </div>
 
 {#if settingsCard}
-  <div class="settings panel" role="dialog" aria-label="Settings for {cardTitle(settingsCard)}">
+  <div class="settings panel" role="dialog" aria-label="Settings for {cardTitle(settingsCard, $flightSchema)}">
     <header class="ph">
-      <h2>{cardTitle(settingsCard)}</h2>
+      <h2>{cardTitle(settingsCard, $flightSchema)}</h2>
       <div class="right"><button class="btn" onclick={() => (settingsId = null)}>Close</button></div>
     </header>
     <div class="pb">

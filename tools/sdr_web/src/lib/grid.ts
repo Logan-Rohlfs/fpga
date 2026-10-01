@@ -1,13 +1,14 @@
-/** 12-column card grid model (spec section 8). Pure functions: every one returns new arrays and never mutates its input. */
+/** 24-column card grid model (spec section 8; twice as fine as the original 12 columns, see presets.py LEGACY_COLS). Pure functions: every one returns new arrays and never mutates its input. */
 export interface GridCard {
   id: string; type: string; x: number; y: number; w: number; h: number; title: string | null; config: Record<string, unknown>;
 }
 
-export const COLS = 12;
-export const ROW_PX = 40;
+export const COLS = 24;
+/** 16 px rows with the 8 px gap: two rows (48 px pitch) are exactly one row of the old 12-column grid. */
+export const ROW_PX = 16;
 export const GAP_PX = 8;
-export const MAX_Y = 500;
-export const MAX_H = 24;
+export const MAX_Y = 1000;
+export const MAX_H = 48;
 export const DESKTOP_MIN_PX = 1100;
 export const TABLET_MIN_PX = 600;
 
@@ -108,8 +109,8 @@ export function newCardId(cards: readonly GridCard[], type: string): string {
   }
 }
 
-/** Narrow-screen layouts (spec section 8): 6 columns by first-fit packing, or one column in reading order. */
-export function reflow(cards: readonly GridCard[], cols: 6 | 1, minOf: MinOf): GridCard[] {
+/** Narrow-screen layouts (spec section 8): 12 columns by first-fit packing, or one column in reading order. */
+export function reflow(cards: readonly GridCard[], cols: 12 | 1, minOf: MinOf): GridCard[] {
   const ordered = readingOrder(cards);
   if (cols === 1) {
     let y = 0;
@@ -123,9 +124,9 @@ export function reflow(cards: readonly GridCard[], cols: 6 | 1, minOf: MinOf): G
   }
   const placed: GridCard[] = [];
   for (const c of ordered) {
-    const w = Math.min(6, Math.max(c.w >= 7 ? 6 : 3, Math.ceil(minOf(c.type).w / 2)));
+    const w = Math.min(12, Math.max(c.w >= 14 ? 12 : 6, Math.ceil(minOf(c.type).w / 2)));
     search: for (let y = 0; ; y++) {
-      for (let x = 0; x + w <= 6; x++) {
+      for (let x = 0; x + w <= 12; x++) {
         const trial = { ...c, x, y, w };
         if (!placed.some((p) => collides(trial, p))) {
           placed.push(trial);

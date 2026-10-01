@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import logoLight from './assets/space-raiders-logo.png';
   import logoDark from './assets/space-raiders-logo-on-dark.png';
   import Notices from './components/Notices.svelte';
@@ -11,6 +12,7 @@
   import { channelsFor } from './lib/subscriptions';
   import { type ThemeChoice, applyTheme, loadTheme, nextTheme, refreshAppearance } from './lib/theme';
   import { telemetryChannels, tuneChannel } from './lib/view';
+  import { enterFullscreen, exitFullscreen, fullscreen } from './lib/fullscreen';
   import Telemetry from './pages/Telemetry.svelte';
   import Tune from './pages/Tune.svelte';
 
@@ -22,6 +24,9 @@
   let theme = $state<ThemeChoice>(loadTheme());
   let hidden = $state(document.hidden);
   const banner = $derived(connectionBanner($connection, $stats?.source ?? $hello?.source));
+  // Full screen is a Telemetry-only view: the header goes, the cards take the whole window.
+  const full = $derived(page === 'telemetry' && $fullscreen);
+  $effect(() => { if (page !== 'telemetry' && $fullscreen) exitFullscreen(); });
 
   $effect(() => {
     link.setSubscriptions(channelsFor(page, { tuneChannel: $tuneChannel, cardChannels: $telemetryChannels, hidden }));
@@ -37,16 +42,30 @@
     const onVisibility = () => (hidden = document.hidden);
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (e.code === 'Space' && !t.closest('input, select, textarea, button, [role="spinbutton"]')) {
+      const typing = !!t.closest('input, select, textarea, [contenteditable], [role="spinbutton"]');
+      if (e.code === 'Space' && !typing && !t.closest('button')) {
         e.preventDefault();
         frozen.update((f) => !f);
+      } else if (e.key.toLowerCase() === 'f' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && page === 'telemetry') {
+        e.preventDefault();
+        if (get(fullscreen)) exitFullscreen(); else enterFullscreen();
+      } else if (e.key === 'Escape' && get(fullscreen) && !document.fullscreenElement && !t.closest('[role="dialog"]')) {
+        exitFullscreen();
       }
     };
+    // Leaving the browser's full screen (Esc, or its own UI) leaves the mode too.
+    let browserFull = false;
+    const onFullChange = () => {
+      if (document.fullscreenElement) browserFull = true;
+      else if (browserFull) { browserFull = false; fullscreen.set(false); }
+    };
+    document.addEventListener('fullscreenchange', onFullChange);
     addEventListener('hashchange', onHash);
     addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('fullscreenchange', onFullChange);
       removeEventListener('hashchange', onHash);
       removeEventListener('keydown', onKey);
       media.removeEventListener('change', refreshAppearance);
@@ -65,6 +84,7 @@
   }
 </script>
 
+{#if !full}
 <header class="top">
   <a class="brand" href="#tune" onclick={() => go('tune')} aria-label="Space Raiders SDR home">
     <img class="logo light" src={logoLight} alt="Space Raiders" />
@@ -86,9 +106,12 @@
     <RoleMenu />
   </div>
 </header>
+{:else}
+  <button class="exit-full" onclick={exitFullscreen} title="Exit full screen (F or Esc)">Exit full screen</button>
+{/if}
 
 {#if banner}<p class="connection-note {banner.level}" role="status">{banner.text}</p>{/if}
-<main class:stale={!!banner}>
+<main class:stale={!!banner} class:full>
   {#if page === 'tune'}<Tune />{:else}<Telemetry />{/if}
 </main>
 <Notices />
@@ -111,5 +134,12 @@
   .connection-note.warn { color: var(--warn); }
   .connection-note.bad { color: var(--bad); }
   main { padding: 14px 16px 24px; }
+  main.full { padding: 8px; }
+  .exit-full { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 20; padding: 4px 12px; font: 600 11px var(--f-ui);
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent);
+    border: 1px solid var(--line-2); border-radius: 999px; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+  .exit-full:hover, .exit-full:focus-visible { opacity: 1; color: var(--fg); }
+  /* Touch screens have no hover, so the button stays faintly visible there. */
+  @media (hover: none) { .exit-full { opacity: 0.6; } }
   @media (max-width: 700px) { .status { margin-left: 0; } }
 </style>

@@ -227,10 +227,11 @@ For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
 
 ### Cards and presets
 
-The Telemetry page is a 12-column grid of cards. Card types: `plot` (uPlot
+The Telemetry page is a 24-column grid of cards (16 px rows; presets saved on
+the older 12-column grid are converted on read, keeping their look). Card types: `plot` (uPlot
 time series, up to 6 series), `number`, `state` (flight phase), `events`
 (flight or link category), `map` (Leaflet over local tiles), `trajectory3d`
-(three.js, loaded only when such a card exists), `camera` (a stream URL),
+(three.js, loaded only when such a card exists), `camera` (a stream URL or a launch-synced demo clip),
 `waterfall`, `spectrum`, `constellation`, `link` (link and channel quality),
 `health`, `gps` and `frames`. Every card has a settings popover; the Operator
 edits it, and Viewers see the settings read-only. Quantities have a unit
@@ -256,12 +257,40 @@ override, and the header offers a global unit system.
   `landing`. They act only while the Operator's Auto-switch is on and only from
   the live preset. The target preset need not exist; a missing target is ignored.
   Triggers are edited in the preset JSON (there is no trigger editor in the UI).
-- **Labels:** cards driven by SYNTHETIC data say so in their header (SIMULATED),
-  alongside data age. The demo source and bitstream use `SIM FLIGHT · SIMULATED
-  ADC`. Values appear exactly as decoded; nothing is corrected.
+- **Labels:** cards driven by SYNTHETIC data say so with a `SIM` header badge,
+  alongside data age; its tooltip gives the full label (`SIMULATED`, or `SIM
+  FLIGHT · SIMULATED ADC` for the demo source and bitstream). Values appear
+  exactly as decoded; nothing is corrected.
+- **Full screen:** the layout bar's "Full screen" button (or F) hides the page
+  header and layout bar and stretches the rows to fill the window. F, Esc or the
+  faint "Exit full screen" button at the top leave it. Telemetry page only.
+- **Value cards** have no header bar: the field name (or the card title, if set)
+  sits in a slim label line, so the number gets the height.
+- **Site auto-detection:** map and 3D cards with no site set (the default) pick
+  the registered site nearest the vehicle's GPS fix (Seymour, Pecos and the
+  others in `tools/sdr_cli/sites.json`), within that site's map radius. The map's
+  site selector shows "Auto: <site>" and can pin a site instead.
+- **Map Follow** keeps the whole flight path, the pad and the vehicle framed and
+  centred; panning or zooming turns it off. The map opens close on the pad.
+- **3D trajectory camera:** Follow (default) is a side-on view that keeps the
+  whole flight in frame, starting close on the pad and widening as the track
+  grows; Orbit circles it; Free is mouse control (any drag switches to it). The
+  ground imagery fades into its average edge colour and runs to the horizon.
+- **Plot event markers** are neutral dashed lines with label chips that stack
+  into lanes when events are close together.
 - **Camera:** the card embeds a viewer-fetched stream URL (`http`/`https`). Each
   viewer pulls the stream directly, so on a shared hotspot use a low-rate stream.
   Capture from a host USB/HDMI device and a server-side relay are future work.
+- **Camera demo clip:** with `mode: demo` the card plays a recorded clip from the
+  ignored `.sdr/media/` directory (served at `/media/<name>`; plain `.mp4`,
+  `.m4v` or `.webm` names only). It holds the pad frame until the LAUNCH event,
+  then plays from `launch_offset_s` (where liftoff is in the clip) plus the time
+  since LAUNCH. A flight reset returns it to the pad frame, so it loops with each
+  replayed flight. Drift over 0.5 s is re-seeked. The card is badged "Demo clip ·
+  not live"; it is not this vehicle and not a camera. Defaults suit
+  `l3_flight_onboard.mp4` (an amateur L3 certification flight, about 8,000 ft,
+  aft-looking onboard camera; liftoff at 9.0 s), which is not tracked: see
+  `docs/superpowers/plans/2026-10-01-gui-backlog.md` for its source.
 
 ### Demo data
 
@@ -304,7 +333,8 @@ server coalesces frequent updates (a new message replaces an unsent one of the s
 the Flight preset a viewer receives an estimated 10 kB/s or less before compression (design estimate, not a measurement of every card mix):
 flight rows at 20 Hz, link statistics at 5 Hz and two spectrum rows at 5 Hz. Ten
 viewers are therefore about 100 kB/s, which a phone hotspot carries. Camera
-streams are not included because browsers fetch them directly.
+streams and the demo clip (about 0.7 Mb/s for the default clip) are not included
+because browsers fetch them over HTTP, outside the WebSocket.
 
 Verification:
 

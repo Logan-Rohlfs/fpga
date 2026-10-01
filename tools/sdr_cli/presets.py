@@ -9,17 +9,21 @@ import os
 from pathlib import Path
 import re
 
-from . import apex, units
+from . import apex, media, units
 from .events import FLIGHT_KINDS
 
 CARD_TYPES = ('plot', 'number', 'state', 'events', 'map', 'trajectory3d', 'camera', 'waterfall',
               'spectrum', 'constellation', 'link', 'health', 'gps', 'frames')
 BUILTIN_DIR = Path(__file__).resolve().parent / 'presets'
 FALLBACK = 'flight'
-COLS = 12
+COLS = 24
+LEGACY_COLS = 12   # presets saved before the grid was made twice as fine; scaled by 2 on read
+MAX_Y = 1000
+MAX_H = 48
 MAX_CARDS = 40
 MAX_TRIGGERS = 20
 MAX_BYTES = 64 * 1024
+MAX_LAUNCH_OFFSET_S = 600
 ID_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 CARD_ID_RE = re.compile(r'^[a-z0-9-]{1,24}$')
 
@@ -54,10 +58,10 @@ def _card(card, index):
         raise PresetError('preset_bad_card', '{} needs integer x, y, w and h.'.format(where))
     if not (x >= 0 and w >= 1 and x + w <= COLS):
         raise PresetError('preset_bad_card', '{} must fit inside the {} columns.'.format(where, COLS))
-    if not 0 <= y <= 500:
-        raise PresetError('preset_bad_card', '{} y must be 0-500.'.format(where))
-    if not 1 <= h <= 24:
-        raise PresetError('preset_bad_card', '{} h must be 1-24.'.format(where))
+    if not 0 <= y <= MAX_Y:
+        raise PresetError('preset_bad_card', '{} y must be 0-{}.'.format(where, MAX_Y))
+    if not 1 <= h <= MAX_H:
+        raise PresetError('preset_bad_card', '{} h must be 1-{}.'.format(where, MAX_H))
     title = card.get('title')
     if title is not None and not _text(title, 1, 40):
         raise PresetError('preset_bad_card', '{} title must be null or 1-40 printable characters.'.format(where))
@@ -70,12 +74,33 @@ def _card(card, index):
                                     and re.match(r'^https?://', url, re.IGNORECASE)):
             raise PresetError('preset_bad_url', '{} camera url must be null or an http(s) URL of up to '
                                                 '500 characters.'.format(where))
+        clip = config.get('media')
+        if clip is not None and not media.name_ok(clip):
+            raise PresetError('preset_bad_media', '{} media must be null or a .mp4, .m4v or .webm file name in '
+                                                  '.sdr/media of up to 100 characters.'.format(where))
+        offset = config.get('launch_offset_s')
+        if offset is not None and not (isinstance(offset, (int, float)) and not isinstance(offset, bool)
+                                       and 0 <= offset <= MAX_LAUNCH_OFFSET_S):
+            raise PresetError('preset_bad_media', '{} launch offset must be 0-{} seconds.'.format(
+                where, MAX_LAUNCH_OFFSET_S))
     card_units = config.get('units')
     if card_units is not None:
         if not isinstance(card_units, dict) or not all(
                 isinstance(q, str) and isinstance(u, str) and units.is_unit(q, u) for q, u in card_units.items()):
             raise PresetError('preset_bad_unit', '{} has an unknown unit.'.format(where))
     return dict(id=cid, type=card['type'], x=x, y=y, w=w, h=h, title=title, config=config)
+
+
+def _upgrade(card):
+    """A 12-column card on the 24-column grid: every position and size doubles, which keeps its pixel geometry
+    exactly (rows are half as tall and the gap is unchanged)."""
+    if not isinstance(card, dict):
+        return card
+    out = dict(card)
+    for k in 'xywh':
+        if _int(out.get(k)):
+            out[k] = out[k] * 2
+    return out
 
 
 def _trigger(trigger):
@@ -114,9 +139,11 @@ def validate(obj):
     if not _text(obj.get('name'), 1, 40):
         raise PresetError('preset_bad_name', 'Preset name must be 1-40 printable characters.')
     grid = obj.get('grid')
-    if not isinstance(grid, dict) or grid.get('cols') != COLS or not _int(grid.get('cols')):
+    if not isinstance(grid, dict) or grid.get('cols') not in (COLS, LEGACY_COLS) or not _int(grid.get('cols')):
         raise PresetError('preset_bad_grid', 'grid.cols must be {}.'.format(COLS))
     cards = obj.get('cards')
+    if grid['cols'] == LEGACY_COLS and isinstance(cards, list):
+        cards = [_upgrade(c) for c in cards]
     if not isinstance(cards, list):
         raise PresetError('preset_bad_card', 'cards must be a list.')
     if len(cards) > MAX_CARDS:

@@ -28,7 +28,7 @@ packages in `tools/sdr_web/package.json`). The GUI overhaul added `leaflet`,
 - **GUI layout:**
   - Logic lives in toolkit-free modules: `freqplan.py`, `roles.py`,
     `sources.py`, `hub.py`, `apex.py`, `units.py`, `gui_wire.py`, `events.py`,
-    `history.py`, `fanout.py`, `presets.py` and `maps.py`.
+    `history.py`, `fanout.py`, `presets.py`, `maps.py` and `media.py`.
   - `web/server.py` is thin aiohttp glue.
   - The Svelte frontend lives in `tools/sdr_web/` and builds into the ignored
     `tools/sdr_cli/web/static/`.

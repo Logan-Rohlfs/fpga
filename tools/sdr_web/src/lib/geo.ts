@@ -112,9 +112,42 @@ export interface SiteInfo {
   outer_max_z?: number | null;
 }
 
-/** The configured site if known, else the first site, else null (spec: null resolves to the first hello.sites entry). */
-export function resolveSite(sites: readonly SiteInfo[], id: string | null | undefined): SiteInfo | null {
-  return sites.find((s) => s.id === id) ?? sites[0] ?? null;
+/** The registered site whose pad is nearest `pos`, if `pos` is inside that site's map radius (at least 20 km); else null. */
+export function nearestSite(sites: readonly SiteInfo[], pos: LatLon): SiteInfo | null {
+  let best: SiteInfo | null = null;
+  let bestKm = Infinity;
+  for (const s of sites) {
+    const km = distanceKm(pos, s.pad);
+    if (km <= Math.max(20, s.outer_radius_km) && km < bestKm) {
+      best = s;
+      bestKm = km;
+    }
+  }
+  return best;
+}
+
+/**
+ * The site a card shows. An explicit, known id wins. Otherwise (null: Auto) it is the site nearest the GPS fix `pos`,
+ * else the last auto-detected site `lastAutoId` (so a GPS dropout does not jump the map away), else the first site.
+ */
+export function resolveSite(
+  sites: readonly SiteInfo[], id: string | null | undefined, pos: LatLon | null = null, lastAutoId: string | null = null,
+): SiteInfo | null {
+  const chosen = sites.find((s) => s.id === id);
+  if (chosen) return chosen;
+  return (pos && nearestSite(sites, pos)) ?? sites.find((s) => s.id === lastAutoId) ?? sites[0] ?? null;
+}
+
+/** [lat, lon] of the newest row with a valid fix, or null. */
+export function lastFix(store: Rows, schema: FlightSchema | null): LatLon | null {
+  const ix = indices(schema);
+  if (ix.fix < 0 || ix.lat < 0 || ix.lon < 0) return null;
+  for (let i = store.length - 1; i >= 0; i--) {
+    const lat = store.valueAt(i, ix.lat);
+    const lon = store.valueAt(i, ix.lon);
+    if (gpsValid(store.valueAt(i, ix.fix), lat, lon)) return [lat, lon];
+  }
+  return null;
 }
 
 export interface LayerPlan {
@@ -196,4 +229,33 @@ export function makeSeeder<T>(): (value: T) => boolean {
     last = value;
     return true;
   };
+}
+
+/**
+ * Bounds that frame the whole path and the pad, centred on them, at least `minRadiusKm` from the centre each way, so
+ * the view starts close on the pad and widens as the flight drifts.
+ */
+export function framingBounds(path: readonly LatLon[], pad: LatLon, minRadiusKm: number): Bounds {
+  let s = pad[0], n = pad[0], w = pad[1], e = pad[1];
+  for (const [lat, lon] of path) {
+    if (lat < s) s = lat;
+    if (lat > n) n = lat;
+    if (lon < w) w = lon;
+    if (lon > e) e = lon;
+  }
+  const c: LatLon = [(s + n) / 2, (w + e) / 2];
+  const min = boundsFor(c, minRadiusKm);
+  return [[Math.min(s, min[0][0]), Math.min(w, min[0][1])], [Math.max(n, min[1][0]), Math.max(e, min[1][1])]];
+}
+
+/** True when `want` runs into the outer 8 % of `view`, or `view` is over 2.2 times larger than needed each way. */
+export function needsRefit(view: Bounds, want: Bounds): boolean {
+  const vh = view[1][0] - view[0][0];
+  const vw = view[1][1] - view[0][1];
+  const wh = want[1][0] - want[0][0];
+  const ww = want[1][1] - want[0][1];
+  const m = 0.08;
+  const inside = want[0][0] >= view[0][0] + vh * m && want[1][0] <= view[1][0] - vh * m
+    && want[0][1] >= view[0][1] + vw * m && want[1][1] <= view[1][1] - vw * m;
+  return !inside || (vh > wh * 2.2 && vw > ww * 2.2);
 }

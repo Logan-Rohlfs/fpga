@@ -7,7 +7,7 @@
   import { startLive } from '../lib/cards/live';
   import { cardStatus } from '../lib/cards/status';
   import {
-    decodeBits, fieldIndex, flightKey, formatMmSs, noFlightNotice, otherFramesPerS, sourceLabel, staleAge, timeInPhase,
+    decodeBits, fieldIndex, flagLabel, flightKey, formatMmSs, noFlightNotice, otherFramesPerS, sourceLabel, staleAge, timeInPhase,
   } from '../lib/cards/value';
 
   let { id, config }: { id: string; config: Record<string, any> } = $props(); // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -55,21 +55,29 @@
     <p class="note">Waiting for FLIGHT frames ({sourceLabel(config.source)})</p>
     {#if notice}<p class="note">{notice}</p>{/if}
   {:else}
-    <div class="phase mono {PHASE_CLASS[phase] ?? ''}" class:dim={age !== null}>{phase}</div>
-    <div class="note mono">
-      {#if inPhase !== null}{formatMmSs(inPhase)} in phase{/if}{#if inPhase !== null && seq !== null} · {/if}{#if seq !== null}seq {seq}{/if}
+    <div class="main">
+      <div class="phase mono {PHASE_CLASS[phase] ?? ''}" class:dim={age !== null}>{phase}</div>
+      <div class="note mono">
+        {[inPhase !== null ? `${formatMmSs(inPhase)} in phase` : null, seq !== null ? `seq ${seq}` : null].filter(Boolean).join(' · ')}
+      </div>
     </div>
-    <ul class="bits">
-      {#each bits as b}
-        <li class="chip" class:good={b.on} class:off={!b.on}>{b.name.replace(/_/g, ' ')}: {b.on ? 'on' : 'off'}</li>
-      {/each}
-    </ul>
+    {#if bits.length}
+      <!-- On/off is shown by a filled or hollow dot as well as colour; the full name and state are in the tooltip. -->
+      <ul class="bits" aria-label="Interlocks">
+        {#each bits as b}
+          <li class="flag" class:on={b.on} title="{b.name.replace(/_/g, ' ')}: {b.on ? 'on' : 'off'}"
+            aria-label="{b.name.replace(/_/g, ' ')}: {b.on ? 'on' : 'off'}">{flagLabel(b.name)}</li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 </div>
 
 <style>
-  .state { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-  .phase { align-self: flex-start; font-size: clamp(20px, 4vw, 34px); font-weight: 600; letter-spacing: 0.04em; padding: 2px 12px; border-radius: 6px;
+  /* Phase and flags side by side when the card is wide enough, stacked when it is narrow. */
+  .state { padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; container-type: inline-size; }
+  .main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .phase { align-self: flex-start; font-size: clamp(20px, 9cqw, 34px); font-weight: 600; letter-spacing: 0.04em; padding: 2px 12px; border-radius: 6px;
     color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
   .phase.idle { color: var(--muted); }
   .phase.good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
@@ -78,7 +86,10 @@
   .phase.accent { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .phase.synth { color: var(--synth); background: color-mix(in srgb, var(--synth) 16%, transparent); }
   .dim { opacity: 0.6; }
-  .bits { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-  .bits .chip { text-transform: none; letter-spacing: 0.02em; font-weight: 500; }
-  .chip.off { color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
+  .bits { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 150px; align-content: flex-start; }
+  .flag { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 6px; border-radius: 4px; font: 500 12px var(--f-ui);
+    white-space: nowrap; color: var(--muted); background: color-mix(in srgb, var(--muted) 10%, transparent); }
+  .flag::before { content: ''; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid currentColor; }
+  .flag.on { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
+  .flag.on::before { background: currentColor; }
 </style>

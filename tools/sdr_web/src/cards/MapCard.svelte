@@ -5,7 +5,8 @@
   import { onMount } from 'svelte';
   import { scheduler } from '../lib/frame';
   import {
-    boundsFor, footerText, gpsStatus, graticule, layerPlan, makeSeeder, resolveSite, validTrack, type GpsStatus, type SiteInfo,
+    footerText, framingBounds, gpsStatus, graticule, lastFix, layerPlan, makeSeeder, nearestSite, needsRefit, resolveSite, validTrack, type Bounds, type GpsStatus,
+    type LatLon, type SiteInfo,
   } from '../lib/geo';
   import { cardStatus } from '../lib/cards/status';
   import { staleAge } from '../lib/cards/value';
@@ -17,6 +18,9 @@
   const ATTRIBUTION = 'Basemap: USGS The National Map';
   const TILE_URL = '/tiles/{layer}/{z}/{x}/{y}';
   const MAX_TRACK_POINTS = 4000;
+  const FRAME_MIN_KM = 0.8;       // the pad-only view (before and at launch); the frame widens as the path drifts
+  const FRAME_PAD_PX = 28;
+  const FRAME_MAX_ZOOM = 17;
   const ERROR_TILE = 'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" fill="#2a2a2e"/>'
     + '<text x="128" y="132" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#8a8a92">tile not downloaded</text></svg>');
@@ -34,7 +38,9 @@
   $effect(() => { const v = (config.site as string | null) ?? null; if (seedSite(v)) siteId = v; });
   $effect(() => { const v = config.follow !== false; if (seedFollow(v)) follow = v; });
 
-  const site = $derived(resolveSite(sites, siteId));
+  // Auto (no site chosen): the registered site nearest the newest GPS fix, kept through dropouts.
+  let autoId = $state<string | null>(null);
+  const site = $derived(resolveSite(sites, siteId, null, autoId));
   const plan = $derived(site ? layerPlan(site, layer) : null);
 
   let el: HTMLDivElement;
@@ -48,6 +54,8 @@
   let trackLine: L.Polyline | null = null;
   let here: L.CircleMarker | null = null;
   let trackKey = '';
+  let path: LatLon[] = [];
+  let moving = false;
   const report = cardStatus();
   let fittedSite = '';
 
@@ -105,7 +113,7 @@
       pad = L.circleMarker(site.pad, { radius: 6, className: 'map-pad', interactive: false }).addTo(map);
       if (fittedSite !== site.id) {
         fittedSite = site.id;
-        map.fitBounds(boundsFor(site.center, site.outer_radius_km));
+        map.fitBounds(framingBounds([], site.pad, FRAME_MIN_KM), { padding: [FRAME_PAD_PX, FRAME_PAD_PX], animate: false });
       }
     } else if (fittedSite !== '-') {
       fittedSite = '-';
@@ -118,6 +126,9 @@
     if (!hasView(map)) return;
     const store = storeNow();
     const latest = store.latest();
+    const fix = lastFix(store, $flightSchema);
+    const found = fix ? nearestSite(sites, fix) : null;
+    if (found && found.id !== autoId) autoId = found.id;
     gps = gpsStatus(latest ? latest.values : null, $flightSchema);
     report(latest
       ? { synthetic: !!(latest.flags & 1), flight: true, age: staleAge(latest.t, serverNow(), 1), fields: ['lat_deg', 'lon_deg', 'gps_fix'] }
@@ -126,7 +137,8 @@
     const key = `${sourceKey}:${store.version}:${store.length}:${$flightSchema ? 1 : 0}:${config.show_track !== false}:${from}`;
     if (key !== trackKey) {
       trackKey = key;
-      const pts = config.show_track === false ? [] : validTrack(store, $flightSchema, MAX_TRACK_POINTS, from);
+      path = validTrack(store, $flightSchema, MAX_TRACK_POINTS, from) as LatLon[];
+      const pts = config.show_track === false ? [] : path;
       // Leaflet cannot clip an empty polyline, so the line exists only while it has points.
       if (!pts.length) { trackLine?.remove(); trackLine = null; }
       else if (!trackLine) trackLine = L.polyline(pts, { className: 'map-track', interactive: false, weight: 2 }).addTo(map);
@@ -135,16 +147,28 @@
     if (gps.position) {
       if (!here) here = L.circleMarker(gps.position, { radius: 6, className: 'map-here', interactive: false }).addTo(map);
       else here.setLatLng(gps.position);
-      if (follow && !map.getBounds().contains(gps.position)) map.panTo(gps.position);
     } else if (here) {
       here.remove();
       here = null;
     }
+    if (follow) frame();
     footer = footerText({ site, layerAvailable: !!plan?.available, position: gps.position });
   }
 
+  /** Follow: keep the whole path (and the pad and vehicle) in view, centred, refitting only when it is needed. */
+  function frame() {
+    if (!hasView(map) || moving) return;
+    const anchor: LatLon | null = site?.pad ?? gps.position;
+    if (!anchor) return;
+    const want = framingBounds(gps.position ? [...path, gps.position] : path, anchor, FRAME_MIN_KM);
+    const b = map.getBounds();
+    const view: Bounds = [[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]];
+    if (needsRefit(view, want)) map.fitBounds(want, { padding: [FRAME_PAD_PX, FRAME_PAD_PX], maxZoom: FRAME_MAX_ZOOM });
+  }
+
   onMount(() => {
-    map = L.map(el, { zoomControl: true, attributionControl: true, maxZoom: 19 });
+    // Fractional zoom lets Follow fit the path tightly instead of jumping a whole zoom level.
+    map = L.map(el, { zoomControl: true, attributionControl: true, maxZoom: 19, zoomSnap: 0.25, zoomDelta: 0.5 });
     // Give the map a view at once: layers added to a map that is not loaded yet never get a working renderer.
     map.setView([0, 0], 2);
     fittedSite = '-';
@@ -152,6 +176,16 @@
     tileGroup = L.layerGroup().addTo(map);
     gratGroup = L.layerGroup().addTo(map);
     map.on('moveend', drawGraticule);
+    map.on('movestart', () => { moving = true; });
+    map.on('moveend', () => { moving = false; if (follow) scheduler.markDirty(id); });
+    // Any pan or zoom by the user hands the view over to them until Follow is ticked again.
+    const manual = () => { follow = false; };
+    map.on('dragstart', manual);
+    const box = map.getContainer();
+    box.addEventListener('wheel', manual, { passive: true });
+    box.addEventListener('dblclick', manual);
+    box.addEventListener('touchstart', (e) => { if (e.touches.length > 1) manual(); }, { passive: true });
+    box.querySelector('.leaflet-control-zoom')?.addEventListener('pointerdown', manual);
     const unregister = scheduler.register(id, draw);
     const unsub = dataVersion.subscribe(() => scheduler.markDirty(id));
     const ro = new ResizeObserver(() => { map?.invalidateSize(); drawGraticule(); });
@@ -183,12 +217,14 @@
 
 <div class="mapcard">
   <div class="bar">
-    <select aria-label="Site" value={site?.id ?? ''} disabled={!sites.length}
-      onchange={(e) => (siteId = e.currentTarget.value)}>
-      {#if !sites.length}<option value="">No sites</option>{/if}
+    <select aria-label="Site" value={sites.some((s) => s.id === siteId) ? siteId : ''} disabled={!sites.length}
+      title="Auto picks the registered site nearest the vehicle's GPS fix"
+      onchange={(e) => (siteId = e.currentTarget.value || null)}>
+      {#if !sites.length}<option value="">No sites</option>{:else}<option value="">Auto: {site?.name ?? '—'}</option>{/if}
       {#each sites as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
     </select>
-    <label class="follow"><input type="checkbox" bind:checked={follow} /> Follow</label>
+    <label class="follow" title="Keep the whole flight path in view, centred. Panning or zooming turns it off.">
+      <input type="checkbox" bind:checked={follow} /> Follow</label>
     <span class="gps" class:bad={!gps.valid}>{gps.text}</span>
   </div>
   <div class="view">

@@ -782,3 +782,50 @@ class TileRouteTest(unittest.IsolatedAsyncioTestCase):
         for key in ('name', 'center', 'pad', 'outer_radius_km', 'inner_radius_km'):
             self.assertIn(key, sites['seymour'])
         await ws.close()
+
+
+@unittest.skipIf(GuiServer is None, 'aiohttp not installed: pip install -e ".[gui]"')
+class MediaRouteTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        (root / 'static').mkdir()
+        (root / 'static/index.html').write_text('<!doctype html><title>t</title>')
+        (root / '.sdr/media').mkdir(parents=True)
+        (root / '.sdr/media/clip.mp4').write_bytes(bytes(range(256)) * 4)
+        (root / '.sdr/media/clip.webm').write_bytes(b'webm')
+        (root / '.sdr/secret.mp4').write_bytes(b'secret')
+        server = GuiServer(lambda get_tuning: Idle(), r.RoleManager(''), root / 'state.json',
+                           static_dir=root / 'static', root=root)
+        self.client = TestClient(TestServer(server.app()))
+        await self.client.start_server()
+        self.addAsyncCleanup(self.client.close)
+
+    async def test_clip_served_with_video_type(self):
+        resp = await self.client.get('/media/clip.mp4')
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers['Content-Type'], 'video/mp4')
+        self.assertEqual(len(await resp.read()), 1024)
+        resp = await self.client.get('/media/clip.webm')
+        self.assertEqual(resp.headers['Content-Type'], 'video/webm')
+
+    async def test_range_request_for_seeking(self):
+        resp = await self.client.get('/media/clip.mp4', headers={'Range': 'bytes=256-511'})
+        self.assertEqual(resp.status, 206)
+        self.assertEqual(await resp.read(), bytes(range(256)))
+
+    async def test_missing_and_bad_names_are_never_served(self):
+        self.assertEqual((await self.client.get('/media/missing.mp4')).status, 404)
+        for path in ('/media/%2e%2e%2fsecret.mp4', '/media/..%2fsecret.mp4', '/media/clip.txt', '/media/.mp4',
+                     '/media/clip.mp4%00', '/media/a/clip.mp4', '/media/'):
+            resp = await self.client.get(path)
+            self.assertIn(resp.status, (400, 404), path)
+
+    async def test_no_root_disables_media(self):
+        server = GuiServer(lambda get_tuning: Idle(), r.RoleManager(''), Path(self.tmp.name) / 'state.json',
+                           static_dir=Path(self.tmp.name) / 'static')
+        client = TestClient(TestServer(server.app()))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        self.assertEqual((await client.get('/media/clip.mp4')).status, 404)

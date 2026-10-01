@@ -27,6 +27,16 @@
     const o = f.options?.find((x) => String(x.value) === raw);
     set(f.key, o ? o.value : raw);
   }
+  // Y range: two optional ends; both blank is auto.
+  function rangeEnd(f: SettingField, end: 'min' | 'max'): string {
+    const v = config[f.key];
+    return v && typeof v === 'object' && typeof (v as Record<string, unknown>)[end] === 'number' ? String((v as Record<string, number>)[end]) : '';
+  }
+  function setRangeEnd(f: SettingField, end: 'min' | 'max', raw: string) {
+    const cur = config[f.key] && typeof config[f.key] === 'object' ? (config[f.key] as Record<string, number | null>) : { min: null, max: null };
+    const next = { min: cur.min ?? null, max: cur.max ?? null, [end]: raw.trim() === '' ? null : Number(raw) };
+    set(f.key, next.min === null && next.max === null ? 'auto' : next);
+  }
   function series(): { field: string; source: string }[] {
     return (config.series as { field: string; source: string }[]) ?? [];
   }
@@ -64,9 +74,19 @@
       {:else if f.kind === 'number'}
         <div class="field">
           <label for={id(f.key)}>{f.label}</label>
-          <input id={id(f.key)} type="number" min={f.min} max={f.max} disabled={readonly}
+          <input id={id(f.key)} type="number" min={f.min} max={f.max} step={f.step} disabled={readonly}
             value={config[f.key] ?? ''}
             onchange={(e) => set(f.key, e.currentTarget.value === '' ? null : e.currentTarget.valueAsNumber)} />
+        </div>
+      {:else if f.kind === 'range'}
+        <div class="field range">
+          <span class="lbl" id={id(f.key)}>{f.label}</span>
+          <span class="ends" role="group" aria-labelledby={id(f.key)}>
+            <input type="number" step="any" placeholder="min" aria-label="Minimum" disabled={readonly}
+              value={rangeEnd(f, 'min')} onchange={(e) => setRangeEnd(f, 'min', e.currentTarget.value)} />
+            <input type="number" step="any" placeholder="max" aria-label="Maximum" disabled={readonly}
+              value={rangeEnd(f, 'max')} onchange={(e) => setRangeEnd(f, 'max', e.currentTarget.value)} />
+          </span>
         </div>
       {:else if f.kind === 'bool'}
         <div class="field">
@@ -131,6 +151,9 @@
 {/if}
 
 <style>
+  .field.range { grid-template-columns: 1fr 170px; }
+  .range .lbl { color: var(--muted); font-size: 13.5px; }
+  .range .ends { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
   .field input[type='checkbox'] { width: auto; justify-self: end; }
   .series { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; display: grid; gap: 6px; margin: 0; }
   .series legend { font-size: 13px; color: var(--muted); padding: 0 4px; }

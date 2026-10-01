@@ -124,3 +124,15 @@ export function pushNewRows(store: SeriesStore, field: number, seqField: number,
   cursor.t = lastT;
   if (Number.isFinite(lastSeq)) cursor.seq = lastSeq;
 }
+
+const FLAG_SHORT: Record<string, string> = {
+  airbrakes_authorized: 'Airbrakes', servo_powered: 'Servo', arm_switches_closed: 'Arm sw', logging_ready: 'Logging',
+  gps_time_valid: 'GPS time',
+};
+
+/** Short chip text for a status bit: a fixed short name for the known interlocks, else the name in words, capitalised. */
+export function flagLabel(name: string): string {
+  if (FLAG_SHORT[name]) return FLAG_SHORT[name];
+  const words = name.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}

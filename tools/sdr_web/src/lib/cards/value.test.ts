@@ -3,7 +3,7 @@ import { SeriesStore } from '../series';
 import type { FlightSchema } from '../types';
 import {
   NO_FLIGHT_TEXT, flightKey, formatMmSs, gpsFixLevel, newCursor, otherFramesPerS, pushNewRows, sourceLabel, staleText,
-  MinMax, decodeBits, fieldIndex, gpsFixLabel, noFlightNotice, staleAge, thresholdLevel, timeInPhase } from './value';
+  MinMax, decodeBits, fieldIndex, flagLabel, gpsFixLabel, noFlightNotice, staleAge, thresholdLevel, timeInPhase } from './value';
 
 const HEALTH = { '0': 'imu', '1': 'highg', '2': 'baro', '3': 'mag', '4': 'gps', '5': 'radio', '6': 'qspi', '7': 'sd' };
 const schema: FlightSchema = {
@@ -114,5 +114,14 @@ describe('value helpers, fix round 1', () => {
     expect(gpsFixLevel(schema, 9)).toBeNull();
     expect(gpsFixLevel(schema, 3)).toBe('good');
     expect(gpsFixLevel(schema, 0)).toBe('bad');
+  });
+});
+
+describe('flagLabel', () => {
+  it('shortens the known interlocks and words the rest', () => {
+    expect(flagLabel('airbrakes_authorized')).toBe('Airbrakes');
+    expect(flagLabel('arm_switches_closed')).toBe('Arm sw');
+    expect(flagLabel('gps_time_valid')).toBe('GPS time');
+    expect(flagLabel('new_bit')).toBe('New bit');
   });
 });

@@ -6,7 +6,7 @@ import type { PresetItem, PresetsMsg } from './types';
 
 export type Trigger = Record<string, unknown>;
 export interface Preset {
-  schema: 1; id: string; name: string; revision: number; grid: { cols: 12 }; cards: GridCard[]; triggers: Trigger[];
+  schema: 1; id: string; name: string; revision: number; grid: { cols: 24 }; cards: GridCard[]; triggers: Trigger[];
 }
 
 const FOLLOW_KEY = 'sdr.presets.follow';
@@ -48,7 +48,7 @@ export function choose(id: string): void {
 /** Server item -> sanitized preset. Cards are untrusted until sanitizeGrid and sanitizeConfig. */
 export function toPreset(item: PresetItem): Preset {
   return {
-    schema: 1, id: item.id, name: item.name, revision: item.revision, grid: { cols: 12 },
+    schema: 1, id: item.id, name: item.name, revision: item.revision, grid: { cols: 24 },
     cards: sanitizeGrid(item.cards, minOfType).map((c) => ({ ...c, config: sanitizeConfig(c.type, c.config) })),
     triggers: Array.isArray(item.triggers) ? (JSON.parse(JSON.stringify(item.triggers)) as Trigger[]) : [],
   };
@@ -120,7 +120,7 @@ export function uniqueId(base: string, taken: Iterable<string>): string {
 
 /** The body sent with preset_save. The server assigns the revision, so it is left out. */
 export function toWire(p: Preset, name: string = p.name, id: string = p.id): Omit<Preset, 'revision'> {
-  return { schema: 1, id, name, grid: { cols: 12 }, cards: p.cards, triggers: p.triggers };
+  return { schema: 1, id, name, grid: { cols: 24 }, cards: p.cards, triggers: p.triggers };
 }
 
 /** What the server holds for `id`: whether it exists, whether it is builtin, and whether Delete may be offered. */

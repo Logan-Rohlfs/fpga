@@ -78,11 +78,11 @@ describe('grid model', () => {
   });
 
   it('addCard uses the first free row, leftmost', () => {
-    const start = [card('a', 0, 0, 6, 3), card('b', 6, 0, 6, 2)];
+    const start = [card('a', 0, 0, 12, 3), card('b', 12, 0, 12, 2)];
     const out = addCard(start, card('c', 0, 0, 4, 2), 2, 2);
-    expect(byId(out, 'c')).toMatchObject({ x: 6, y: 2 });
+    expect(byId(out, 'c')).toMatchObject({ x: 12, y: 2 });
     assertNoOverlap(out);
-    const next = addCard(out, card('d', 0, 0, 12, 2), 2, 2);
+    const next = addCard(out, card('d', 0, 0, 24, 2), 2, 2);
     expect(byId(next, 'd')).toMatchObject({ x: 0, y: 4 });
     assertNoOverlap(next);
   });
@@ -110,28 +110,28 @@ describe('grid model', () => {
 });
 
 describe('responsive reflow', () => {
-  const authored = [card('a', 0, 0, 8, 3), card('b', 8, 0, 4, 3), card('c', 0, 3, 2, 2)];
+  const authored = [card('a', 0, 0, 16, 3), card('b', 16, 0, 8, 3), card('c', 0, 3, 4, 2)];
 
-  it('maps 12 -> 6 columns: w 8 -> 6 and w 4 -> 3, heights unchanged, no overlaps', () => {
-    const out = reflow(authored, 6, minOf);
-    expect(byId(out, 'a').w).toBe(6);
-    expect(byId(out, 'b').w).toBe(3);
+  it('maps 24 -> 12 columns: w 16 -> 12 and w 8 -> 6, heights unchanged, no overlaps', () => {
+    const out = reflow(authored, 12, minOf);
+    expect(byId(out, 'a').w).toBe(12);
+    expect(byId(out, 'b').w).toBe(6);
     expect(byId(out, 'a').h).toBe(3);
     assertNoOverlap(out);
-    for (const c of out) expect(c.x + c.w).toBeLessThanOrEqual(6);
+    for (const c of out) expect(c.x + c.w).toBeLessThanOrEqual(12);
   });
 
   it('respects ceil(minW / 2) when narrowing', () => {
-    const wide = (type: string) => ({ w: 8, h: 2, phoneMinH: 3 });
-    const out = reflow([card('a', 0, 0, 4, 3)], 6, wide);
-    expect(out[0].w).toBe(4);
+    const wide = (type: string) => ({ w: 16, h: 2, phoneMinH: 3 });
+    const out = reflow([card('a', 0, 0, 8, 3)], 12, wide);
+    expect(out[0].w).toBe(8);
   });
 
   it('packs first-fit in reading order', () => {
-    const out = reflow([card('a', 0, 0, 3, 4), card('b', 3, 0, 3, 2), card('c', 6, 0, 3, 2)], 6, minOf);
+    const out = reflow([card('a', 0, 0, 6, 4), card('b', 6, 0, 6, 2), card('c', 12, 0, 6, 2)], 12, minOf);
     expect(byId(out, 'a')).toMatchObject({ x: 0, y: 0 });
-    expect(byId(out, 'b')).toMatchObject({ x: 3, y: 0 });
-    expect(byId(out, 'c')).toMatchObject({ x: 3, y: 2 });
+    expect(byId(out, 'b')).toMatchObject({ x: 6, y: 0 });
+    expect(byId(out, 'c')).toMatchObject({ x: 6, y: 2 });
   });
 
   it('single column orders by (y, x) and respects phoneMinH', () => {
@@ -153,7 +153,7 @@ describe('responsive reflow', () => {
 
 describe('pixel conversion', () => {
   it('computes the column width from the container', () => {
-    expect(colWidth(12 * 100 + 11 * GAP_PX)).toBe(100);
+    expect(colWidth(24 * 100 + 23 * GAP_PX)).toBe(100);
   });
   it('rounds pixel deltas to whole cells', () => {
     const cw = 100;

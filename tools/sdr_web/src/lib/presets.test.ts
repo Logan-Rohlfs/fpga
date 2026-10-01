@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import type { PresetItem, PresetsMsg } from './types';
 
 const item = (id: string, over: Partial<PresetItem> = {}): PresetItem => ({
-  schema: 1, id, name: id, revision: 1, builtin: false, grid: { cols: 12 }, triggers: [],
+  schema: 1, id, name: id, revision: 1, builtin: false, grid: { cols: 24 }, triggers: [],
   cards: [{ id: 'n1', type: 'number', x: 0, y: 0, w: 3, h: 2, title: null, config: {} }], ...over,
 });
 const msg = (live = 'a', items = [item('a'), item('b'), item('flight', { builtin: true })]): PresetsMsg =>
@@ -123,7 +123,7 @@ describe('toWire', () => {
     const { toPreset, toWire } = await load();
     const w = toWire(toPreset(item('a', { revision: 4 })), 'Copy', 'copy');
     expect(w).not.toHaveProperty('revision');
-    expect(w).toMatchObject({ schema: 1, id: 'copy', name: 'Copy', grid: { cols: 12 } });
+    expect(w).toMatchObject({ schema: 1, id: 'copy', name: 'Copy', grid: { cols: 24 } });
   });
 });
 

@@ -11,7 +11,8 @@
   import { appearanceVersion } from '../lib/theme';
   import { unitFor, unitLabel, unitPrefs } from '../lib/units';
   import {
-    type PlotInput, type PlotSeries, type ViewState, axesFor, buildData, columnOf, eventMarkers, expandSeries, plotSize, quantityOf, scaleKeyOf,
+    type PlotInput, type PlotSeries, type ViewState, axesFor, buildData, clockLabel, columnOf, eventMarkers, expandSeries, layoutMarkerLabels, markerLabel,
+    plotSize, quantityOf, scaleKeyOf,
     storeFor, viewRange, yRanges,
   } from '../lib/cards/plot';
   import { cardStatus } from '../lib/cards/status';
@@ -52,7 +53,7 @@
   const cardUnits = $derived(config.units as Record<string, string>);
   const axes = $derived(axesFor(series, $flightSchema));
   const showEvents = $derived(config.show_events === true);
-  const yFixed = $derived(config.y !== 'auto' ? (config.y as { min: number; max: number }) : null);
+  const yFixed = $derived(config.y !== 'auto' ? (config.y as { min: number | null; max: number | null }) : null);
   // Anything that needs a new uPlot instance (series, axes, labels, colours), not just new data.
   const buildKey = $derived(JSON.stringify([series, windowS, cardUnits, config.y, $unitPrefs, $flightSchema?.version, $appearanceVersion]));
 
@@ -95,7 +96,7 @@
         ...Object.fromEntries(qs.map((q) => [q, { range: (): [number, number] => ranges[q] ?? [0, 1] }])),
       },
       axes: [
-        { stroke: muted, grid, ticks: grid, font: axisFont },
+        { stroke: muted, grid, ticks: grid, font: axisFont, space: 70, values: (_u: uPlot, splits: number[]) => splits.map(clockLabel) },
         ...qs.map((q, i) => ({
           scale: q, side: i === 0 ? 3 : 1, stroke: muted, font: axisFont, label: unitOf(q), labelFont: axisFont,
           grid: i === 0 ? grid : { show: false }, ticks: grid, size: 60,
@@ -120,24 +121,57 @@
     scheduler.markDirty(id);
   }
 
+  /**
+   * Event markers: a dashed neutral line per event and a small label chip beside it. Chips stack in up to three lanes
+   * so close events stay readable; a label with no free lane is dropped (its line stays). Neutral (--fg) lines and a
+   * panel-coloured chip keep the markers distinct from every series colour.
+   */
   function drawMarkers(u: uPlot) {
     if (!showEvents || !markers.length) return;
     const { ctx, bbox } = u;
+    const dpr = devicePixelRatio || 1;
+    const fontPx = Math.round(10.5 * dpr);
+    const padX = Math.round(4 * dpr);
+    const laneH = Math.round(15 * dpr);
     ctx.save();
-    ctx.strokeStyle = cssVar('--warn');
-    ctx.fillStyle = cssVar('--warn');
-    ctx.font = `11px ${cssVar('--f-mono') || 'monospace'}`;
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1;
-    for (const m of markers) {
-      const x = Math.round(u.valToPos(m.t, 'x', true));
-      if (x < bbox.left || x > bbox.left + bbox.width) continue;
+    ctx.font = `600 ${fontPx}px ${cssVar('--f-ui') || 'sans-serif'}`;
+    const items = markers.map((m) => {
+      const text = markerLabel(m.label);
+      return { x: Math.round(u.valToPos(m.t, 'x', true)), w: ctx.measureText(text).width + padX * 2, text };
+    });
+    const slots = layoutMarkerLabels(items, bbox.left, bbox.left + bbox.width, 3, Math.round(3 * dpr));
+    const fg = cssVar('--fg');
+    ctx.strokeStyle = fg;
+    ctx.globalAlpha = 0.45;
+    ctx.setLineDash([3 * dpr, 3 * dpr]);
+    ctx.lineWidth = dpr;
+    for (const it of items) {
+      if (it.x < bbox.left || it.x > bbox.left + bbox.width) continue;
       ctx.beginPath();
-      ctx.moveTo(x, bbox.top);
-      ctx.lineTo(x, bbox.top + bbox.height);
+      ctx.moveTo(it.x + 0.5, bbox.top);
+      ctx.lineTo(it.x + 0.5, bbox.top + bbox.height);
       ctx.stroke();
-      ctx.fillText(m.label, x + 3, bbox.top + 12);
     }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';   // uPlot leaves the axis alignment set
+    items.forEach((it, i) => {
+      const slot = slots[i];
+      if (slot.lane === null || it.x < bbox.left || it.x > bbox.left + bbox.width) return;
+      const gap = Math.round(3 * dpr);
+      const x0 = slot.side === 'right' ? it.x + gap : it.x - gap - it.w;
+      const y0 = bbox.top + Math.round(4 * dpr) + slot.lane * (laneH + Math.round(2 * dpr));
+      ctx.fillStyle = cssVar('--panel');
+      ctx.strokeStyle = cssVar('--muted');
+      ctx.lineWidth = dpr;
+      ctx.beginPath();
+      ctx.roundRect(x0, y0, it.w, laneH, 3 * dpr);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = fg;
+      ctx.fillText(it.text, x0 + padX, y0 + laneH / 2 + dpr * 0.5);
+    });
     ctx.restore();
   }
 
@@ -227,9 +261,11 @@
 
 <div class="plotcard">
   <div class="bar">
-    <button class="btn" aria-pressed={view.paused} onclick={pause} disabled={view.paused}>Pause</button>
-    <button class="btn" aria-pressed={!view.paused} onclick={live} disabled={!view.paused}>Live</button>
-    <span class="note">{view.paused ? 'Paused: drag the plot to scrub' : 'Live'}</span>
+    <div class="seg" role="group" aria-label="Plot view">
+      <button aria-pressed={!view.paused} onclick={live}>Live</button>
+      <button aria-pressed={view.paused} onclick={pause}>Pause</button>
+    </div>
+    {#if view.paused}<span class="note">Drag the plot to scrub</span>{/if}
   </div>
   {#if !axes.ok}
     <p class="note err">{axes.error}</p>
@@ -240,7 +276,7 @@
 <style>
   .plotcard { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; flex: none; }
-  .bar .btn { padding: 2px 9px; font-size: 13px; }
+  .bar .seg button { padding: 2px 10px; font-size: 12px; }
   .host { flex: 1; min-height: 0; padding: 0 6px 6px; }
   .host.scrub :global(.u-over) { cursor: grab; }
   .hide { display: none; }

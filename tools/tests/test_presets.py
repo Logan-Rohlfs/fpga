@@ -79,6 +79,12 @@ class ValidateTest(unittest.TestCase):
             ('preset_overlap', lambda o: o['cards'][1].update(x=2)),
             ('preset_bad_url', lambda o: o['cards'][2]['config'].update(url='javascript:alert(1)')),
             ('preset_bad_url', lambda o: o['cards'][2]['config'].update(url='https://x/' + 'a' * 500)),
+            ('preset_bad_media', lambda o: o['cards'][2]['config'].update(media='../secret.mp4')),
+            ('preset_bad_media', lambda o: o['cards'][2]['config'].update(media='clip.mov')),
+            ('preset_bad_media', lambda o: o['cards'][2]['config'].update(launch_offset_s=-1)),
+            ('preset_bad_media', lambda o: o['cards'][2]['config'].update(launch_offset_s=601)),
+            ('preset_bad_media', lambda o: o['cards'][2]['config'].update(launch_offset_s='30')),
+            ('preset_bad_media', lambda o: o['cards'][2]['config'].update(launch_offset_s=True)),
             ('preset_bad_unit', lambda o: o['cards'][1]['config'].update(units={'length': 'furlong'})),
             ('preset_bad_trigger', lambda o: o['triggers'][0].update(value='FLYING')),
             ('preset_bad_trigger', lambda o: o['triggers'][1].update(value='phase')),
@@ -90,6 +96,29 @@ class ValidateTest(unittest.TestCase):
         for code, mutate in cases:
             with self.subTest(code=code):
                 self.reject(code, mutate)
+
+    def test_camera_demo_mode_fields(self):
+        obj = good()
+        obj['cards'][2]['config'].update(mode='demo', url=None, media='l3_flight_onboard.mp4', launch_offset_s=9.0)
+        self.assertEqual(presets.validate(obj)['cards'][2]['config']['launch_offset_s'], 9.0)
+        obj['cards'][2]['config'].update(media=None, launch_offset_s=0)
+        presets.validate(obj)
+
+    def test_legacy_twelve_column_preset_is_doubled(self):
+        out = presets.validate(good())
+        self.assertEqual(out['grid'], {'cols': 24})
+        cam = out['cards'][2]
+        self.assertEqual((cam['x'], cam['y'], cam['w'], cam['h']), (12, 6, 12, 14))
+
+    def test_twenty_four_column_preset_is_kept(self):
+        obj = good()
+        obj['grid']['cols'] = 24
+        obj['cards'][2].update(x=13, w=11, h=5)
+        cam = presets.validate(obj)['cards'][2]
+        self.assertEqual((cam['x'], cam['w'], cam['h']), (13, 11, 5))
+        obj['cards'][2].update(x=14)
+        with self.assertRaises(PresetError):
+            presets.validate(obj)
 
     def test_forty_cards_is_allowed(self):
         obj = good()

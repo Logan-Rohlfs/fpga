@@ -109,7 +109,7 @@ lib/series.ts          SeriesStore: columnar ring (Float64 time, Float32 values)
 lib/link.ts            socket, subscribe(), control/data dispatch, stores
 lib/subscriptions.ts   channels needed by (page, layout, card configs, visibility)
 lib/units.ts           conversion + formatting from units.catalogue.json
-lib/grid.ts            12-column grid model (replaces layout.ts)
+lib/grid.ts            24-column grid model (replaces layout.ts)
 lib/virtual.ts         fixed-row list windowing
 lib/frame.ts           single rAF scheduler with dirty + visibility flags
 lib/presets.ts         preset selection, follow-operator, local convenience storage
@@ -451,13 +451,19 @@ Validation (`presets.validate(obj) -> dict`, which raises `PresetError(code, tex
 
 - `schema == 1`. `id` matches `^[a-z0-9][a-z0-9-]{0,39}$`. `name` is 1–40
   printable characters. The server assigns `revision`.
-- `grid.cols == 12`. `cards` has 0–40 entries. Each card `id` matches
+- `grid.cols == 24`. A preset with `grid.cols == 12` (saved before the grid was
+  made twice as fine, 2026-10-01) is accepted and converted on read: every `x`,
+  `y`, `w` and `h` doubles, which keeps its pixel geometry exactly. `cards` has 0–40 entries. Each card `id` matches
   `^[a-z0-9-]{1,24}$` and is unique. `type` is in `presets.CARD_TYPES`, which
   must equal `card-types.json`. `x, y, w, h` are integers with `0 ≤ x`,
-  `1 ≤ w`, `x + w ≤ 12`, `0 ≤ y ≤ 500` and `1 ≤ h ≤ 24`. Cards must not
+  `1 ≤ w`, `x + w ≤ 24`, `0 ≤ y ≤ 1000` and `1 ≤ h ≤ 48`. Cards must not
   overlap. `title` is null or 1–40 characters. `config` is a JSON object.
 - A camera card's `config.url` is null or a string of ≤ 500 characters whose
   scheme is `http` or `https`.
+- A camera card's `config.media`, when present, is null or a plain file name of
+  ≤ 100 characters ending in `.mp4`, `.m4v` or `.webm` (`media.name_ok`), and
+  `config.launch_offset_s`, when present, is a number from 0 to 600
+  (`preset_bad_media` otherwise).
 - `config.units`, when present, maps quantity names to unit ids that exist in
   `units.CATALOGUE`.
 - `triggers` has 0–20 entries, each `{on: 'phase'|'event', value, preset}`. A
@@ -512,27 +518,27 @@ Every card has a title (the preset `title` or the type default), a settings
 popover (operator in edit mode; viewers see settings read-only), remove and
 resize (edit mode), a unit override (`config.units`, quantity → unit id) where it
 shows quantities, and a header badge for **SIMULATED** and data age (§12).
-Config fields list their defaults. Min size is w×h in grid units.
+Config fields list their defaults. Min size is w×h in grid units (24 columns, 16 px rows; lowered 2026-10-01).
 
 Common `source` values for flight-fed cards are `best` (BEST_TELEM rows, the
 default), `A`, `B`, and, where noted, `both` (A and B overlaid).
 
 | Type | Config (defaults) | Channels | Min size |
 | --- | --- | --- | --- |
-| `plot` | `series: [{field, source}]` 1–6 (`[{alt_agl_m, best}]`); `window_s`: 10/30/60/120/300/0 = all (60); `y: 'auto' \| {min, max}` in display units ('auto'); `show_events` (true); `segment` current/all (current: only rows since the newest `flight_reset`; ring data is kept); `units` ({}) | `flight` / `flight.A` / `flight.B` per series source; `events` if `show_events` or `segment` is current; `link` for metric series | 3×4 |
-| `number` | `field` (alt_agl_m); `source` best/A/B/both (best); `digits` 0–3 (field default); `thresholds: [{above, level}]` with `above` in SI and level good/warn/bad ([]); `track_minmax` (false); `units` | flight channel of the source | 2×2 |
-| `state` | `source` (best); `show_time_in_phase` (true) | flight channel | 2×2 |
-| `events` | `category` flight/link (flight); `kinds` (all kinds of that category); `newest_first` (true) | `events` | 3×4 |
-| `map` | `site` (first registry site); `layer` imagery/topo (imagery); `follow` (true); `show_track` (true); `segment` current/all (current: only track rows since the newest `flight_reset`; ring data is kept); `source` (best) | flight channel; `events` if `segment` is current | 3×5 |
-| `trajectory3d` | `site`; `layer` (imagery); `exaggeration` 1–5 (1); `segment` current/all (current: only track rows since the newest `flight_reset`; ring data is kept); `source` (best) | flight channel; `events` if `segment` is current | 4×6 |
-| `camera` | `url` (null); `mode` mjpeg/video (mjpeg); `fit` contain/cover (contain) | none | 3×4 |
-| `waterfall` | `channel` A/B (A); `scale: 'auto' \| {low, high}` ('auto') | `spectrum.<ch>` | 3×3 |
-| `spectrum` | `channel` A/B/both (both); `peak_hold` (false); `peak_decay_s` 0–60, 0 = hold forever (10) | `spectrum.A`/`.B` | 3×3 |
-| `constellation` | `channel` A/B (A); `mode` iq/inst_freq (iq); `persistence` 1–4 snapshots (4) | `iq.<ch>` | 2×3 |
-| `link` | `channels` (['A','B']); `window_s` for rates and shares, 5/10/30 (10) | `link` | 3×3 |
-| `health` | `source` (best) | flight channel | 3×3 |
-| `gps` | `source` (best) | flight channel | 2×3 |
-| `frames` | `filter` all/A/B/best (all); `view` text/hex (text) | `frames` | 3×4 |
+| `plot` | `series: [{field, source}]` 1–6 (`[{alt_agl_m, best}]`); `window_s`: 10/30/60/120/300/0 = all (60); `y: 'auto' \| {min, max}` in display units, either end null for auto (e.g. `{min: 0, max: null}` is positive only), applied to the left axis and set in the card's settings ('auto'); `show_events` (true); `segment` current/all (current: only rows since the newest `flight_reset`; ring data is kept); `units` ({}) | `flight` / `flight.A` / `flight.B` per series source; `events` if `show_events` or `segment` is current; `link` for metric series | 5×8 |
+| `number` | `field` (alt_agl_m); `source` best/A/B/both (best); `digits` 0–3 (field default); `thresholds: [{above, level}]` with `above` in SI and level good/warn/bad ([]); `track_minmax` (false); `units` | flight channel of the source | 2×3 |
+| `state` | `source` (best); `show_time_in_phase` (true) | flight channel | 3×4 |
+| `events` | `category` flight/link (flight); `kinds` (all kinds of that category); `newest_first` (true) | `events` | 5×6 |
+| `map` | `site` (null: auto, see §13.6); `layer` imagery/topo (imagery); `follow` (true); `show_track` (true); `segment` current/all (current: only track rows since the newest `flight_reset`; ring data is kept); `source` (best) | flight channel; `events` if `segment` is current | 4×6 |
+| `trajectory3d` | `site`; `layer` (imagery); `exaggeration` 1–5 (1); `segment` current/all (current: only track rows since the newest `flight_reset`; ring data is kept); `source` (best); `camera` follow/orbit/free (follow); `orbit_dps` 1–30 (6) | flight channel; `events` if `segment` is current | 4×6 |
+| `camera` | `url` (null); `mode` mjpeg/video/demo (mjpeg); `fit` contain/cover (contain); `media` (`l3_flight_onboard.mp4`); `launch_offset_s` 0–600 (9) | none; `events` in demo mode | 4×5 |
+| `waterfall` | `channel` A/B (A); `scale: 'auto' \| {low, high}` ('auto') | `spectrum.<ch>` | 4×4 |
+| `spectrum` | `channel` A/B/both (both); `peak_hold` (false); `peak_decay_s` 0–60, 0 = hold forever (10) | `spectrum.A`/`.B` | 4×4 |
+| `constellation` | `channel` A/B (A); `mode` iq/inst_freq (iq); `persistence` 1–4 snapshots (4) | `iq.<ch>` | 3×5 |
+| `link` | `channels` (['A','B']); `window_s` for rates and shares, 5/10/30 (10) | `link` | 5×6 |
+| `health` | `source` (best) | flight channel | 5×5 |
+| `gps` | `source` (best) | flight channel | 3×5 |
+| `frames` | `filter` all/A/B/best (all); `view` text/hex (text) | `frames` | 5×6 |
 
 Behaviour per card:
 
@@ -544,9 +550,18 @@ Behaviour per card:
   x range; drag or wheel then scrubs within the stored history. **Live**
   resumes. Incoming data keeps accumulating while paused. With `show_events`,
   flight events (launch, burnout, apogee, landing, flight_reset) are drawn as
-  vertical markers with labels. Redraws are driven by the rAF scheduler, at
+  dashed vertical markers in a neutral colour (never a series colour), each with
+  a small label chip (Launch, Burnout, Apogee, Landing, Reset). Chips that would
+  overlap stack into up to three lanes (`plot.layoutMarkerLabels`); a chip with
+  no free lane is dropped while its line stays, and a chip near the right edge
+  sits left of its line. Time ticks read `HH:MM:SS` (local). Redraws are driven by the rAF scheduler, at
   most once per frame and only while the card is visible.
-- **Number**: a large value with its unit and the field label. A threshold level
+- **Number** (the "Value" card): a large value with its unit. It has no header
+  bar (amendment, 2026-10-01): a slim label line carries the title, the SIM
+  badge and the settings button. The title defaults to the field's schema label
+  (`titleOf`), and a preset `title` overrides it. The value is sized to fill the
+  card's width for its text length (at least five characters, so it does not
+  jump as digits change), capped by the height. A threshold level
   colours the value *and* adds a text chip (GOOD/WARN/BAD), so status is never
   shown by colour alone. Min/max tracking shows `min … max` since the last flight
   reset or card mount, with a reset button. For `both` it shows A and B side by
@@ -554,7 +569,11 @@ Behaviour per card:
 - **State**: the phase name in a badge coloured per phase (Horizon
   `PHASE_COLORS` hues adapted to the theme tokens), the time in phase (mm:ss,
   since the last phase change on that source), and seq. An unknown phase value
-  shows `UNKNOWN (n)`.
+  shows `UNKNOWN (n)`. The interlock flags sit beside the phase when the card is
+  wide enough (stacked below otherwise) as short chips (Airbrakes, Servo, Arm sw,
+  Logging, GPS time; `value.flagLabel`). On or off is a filled or hollow dot plus
+  colour, with the full name and state in the tooltip and accessible label
+  (amendment, 2026-10-01).
 - **Event log**: titled "Flight events" or "Link events" by its `category`;
   the kind filter chips list only that category's kinds. Virtualized list (§11.2), timestamps
   (local time and T+ from the last launch when one exists), and value with
@@ -593,8 +612,10 @@ Behaviour per card:
 `lib/grid.ts` holds pure functions only. The Svelte component does DOM
 measurement and pointer handling.
 
-- **Model:** `GridCard {id, type, x, y, w, h, title, config}` on 12 columns.
-  The row unit is 40 px and the gap 8 px at desktop width.
+- **Model:** `GridCard {id, type, x, y, w, h, title, config}` on 24 columns.
+  The row unit is 16 px and the gap 8 px at desktop width (amendment,
+  2026-10-01: twice as fine as the original 12 columns and 40 px rows; two new
+  rows or columns are exactly one old one, so converted layouts look the same).
 - **Operations:**
   - `collides(a, b)`;
   - `compact(cards)` (vertical gravity: each card, in (y, x) order, moves up
@@ -614,15 +635,23 @@ measurement and pointer handling.
   Keyboard in edit mode: arrows move the focused card, and Shift+arrows resize
   it.
 - **Responsive:**
-  - ≥ 1100 px uses the authored 12-column layout.
-  - 600–1099 px uses a 6-column reflow: reading order,
-    `w6 = max(w ≥ 7 ? 6 : 3, ceil(minW / 2))` capped at 6, heights unchanged,
+  - ≥ 1100 px uses the authored 24-column layout.
+  - 600–1099 px uses a 12-column reflow: reading order,
+    `w12 = max(w ≥ 14 ? 12 : 6, ceil(minW / 2))` capped at 12, heights unchanged,
     then first-fit packing (each card at the lowest y where it fits, then the
     leftmost x).
   - < 600 px is a single column in reading order. Each card's height is its
-    authored height in 40 px rows, but at least the type's phone minimum.
+    authored height in 16 px rows, but at least the type's phone minimum.
   - Editing is only available at ≥ 1100 px. Narrower screens show "Widen the
     window to edit the layout."
+- **Full screen** (Telemetry only, amendment 2026-10-01): a "Full screen"
+  button in the layout bar, or the F key, hides the app header and the layout
+  bar, leaves edit mode, and asks the browser for full screen where it is
+  allowed. Rows stretch so the layout fills the window height
+  (`fullscreen.fitRowPx`: 12–80 px rows; a layout too tall squeezes to 12 px rows
+  at most and then scrolls). F, Esc, leaving the browser's full screen, or a
+  faint "Exit full screen" button at the top centre (shown on hover) leave it.
+  It is per viewer and never sent to the server.
 - **Pause off-screen:** `CardFrame` uses an IntersectionObserver to set a
   `visible` flag. Hidden cards skip drawing (§11.1). When the document is hidden,
   every card is treated as not visible.
@@ -757,7 +786,7 @@ fixed 22 px high. Only rows in the window are in the DOM.
 | The source sends no FLIGHT frames (the default bitstream sends TEST frames) | Flight cards show "No FLIGHT frames from this source. The default bitstream sends TEST frames; build with --demo for the flight replay." after 5 s with other frames arriving. |
 | Stale data | A header chip `stale 3.2 s` when the newest row is older than 1 s (flight), 3 s (link) or 2 s (spectrum). The value stays visible and is muted. |
 | GPS invalid | See §13.5. Map and 3D say "GPS position invalid: fix SEARCHING, 0 sats. Horizontal position unknown." |
-| SYNTHETIC data | A card header badge `SIMULATED` when the newest row or record it shows has the SYNTHETIC flag. With profile `apex_demo`, flight-fed cards instead show `SIM FLIGHT · SIMULATED ADC` with the tooltip "RocketPy simulation of the IREC 2026 competition flight (Pecos TX) through the real receiver; the ADC input is simulated" (host demo source: "... replayed by the host demo source (no FPGA); signal metrics are modelled"). The global header pill is unchanged. |
+| SYNTHETIC data | A card header badge `SIM` (shortened 2026-10-01 to leave room for titles) when the newest row or record it shows has the SYNTHETIC flag; an emulated-field badge reads `EMU`. The tooltip starts with the full label: `SIMULATED`, or with profile `apex_demo` on flight-fed cards `SIM FLIGHT · SIMULATED ADC`, followed by "RocketPy simulation of the IREC 2026 competition flight (Pecos TX) through the real receiver; the ADC input is simulated" (host demo source: "... replayed by the host demo source (no FPGA); signal metrics are modelled"). The global header pill is unchanged. |
 | Disconnected or source down | v1 banner and dimming. Cards keep the last data. |
 | Tiles missing | Leaflet shows a neutral "tile not downloaded" tile. The map footer says "Run ./sdr maps fetch --site <id> on the server". |
 | No sites downloaded | The Map card shows the track on a blank grid with a lat/lon graticule and the same hint. |
@@ -869,6 +898,20 @@ when that is over 50 km, and never "fixes" it.
   bounding box).
 - It shows a site selector, a pad `circleMarker`, a track polyline, a
   current-position marker, and a follow toggle.
+- **Site auto-detection** (amendment, 2026-10-01; map and 3D cards): a null or
+  unknown `site` means Auto. Auto picks the registered site whose pad is nearest
+  the newest valid GPS fix on the card's source, if that fix is within the
+  site's `outer_radius_km` (at least 20 km) (`geo.nearestSite`). With no fix it
+  keeps the last detected site, so a dropout does not move the view, and before
+  any detection it uses the first registry site. A known `site` id always wins.
+  The map's site selector lists "Auto: <detected site>" first. The built-in
+  Flight preset uses Auto.
+- **View framing** (amendment, 2026-10-01): the map opens on the pad, at least
+  0.8 km each way. With Follow on, it keeps the whole current-segment path, the
+  pad and the vehicle in view and centred (`geo.framingBounds`), refitting only
+  when the path nears the edge or the view is over 2.2 times larger than needed
+  (`geo.needsRefit`), with fractional zoom (0.25 steps) for a tight fit. Any pan
+  or zoom by the user turns Follow off.
 - A GPS validity line is always shown. With invalid GPS it adds the text overlay
   "GPS position invalid: horizontal position unknown" and draws no marker.
 - Leaflet markers use `circleMarker`, so no image assets are needed.
@@ -878,7 +921,27 @@ when that is over 50 km, and never "fixes" it.
 - It uses three.js, lazy-loaded, with OrbitControls from
   `three/examples/jsm/controls/OrbitControls.js`.
 - The ground plane is a canvas texture composed from local z15 tiles covering
-  about ±4 km around the pad. Missing tiles are drawn neutral grey.
+  about ±4 km around the pad (amendment, 2026-10-01): missing tiles and the
+  outer 14 % of each side fade into the average colour of the loaded tiles'
+  edge. Beyond it, a 1000 km plane in that colour and fog in the same colour
+  run to the horizon, so the imagery never ends at a hard edge.
+- **Camera** (amendment, 2026-10-01; `config.camera` seeds a per-viewer
+  control in the card):
+  - `follow` (default): a side-on view perpendicular to the pad-to-vehicle
+    ground drift, on the side nearer the current view so it does not flip;
+    below 60 m of drift the azimuth holds. 15° elevation.
+  - `orbit`: circles the track at `orbit_dps` (default 6°/s), 22° elevation.
+  - Both frame the bounding sphere of the track and the pad (at least 40 m, so
+    the view starts close on the pad and widens as the flight grows),
+    distance = r / sin(half the narrower field of view) × 1.25, eased each
+    frame (0.5 s, or 0.12 s while the track outgrows the view).
+  - `free`: OrbitControls. Any drag or zoom switches to free.
+- **Track rendering** (amendment, 2026-10-01): a 3 px altitude-coloured line
+  (three.js `Line2`, part of `three`) over a 7 px dark outline, with a dot at the
+  newest point. Under it, the ground trace (the track's 2D projection) in a dark
+  line, a dot under the vehicle and a dashed drop line from the vehicle to it.
+  The ground beyond the tiles and the fog use the tiles' edge colour darkened by
+  45 %, so the track and trace stand out from the sand-coloured ground.
 - Local ENU metres use `geo.enu(lat, lon, lat0, lon0)`:
   `east = (lon − lon0) · 111320 · cos lat0` and
   `north = (lat − lat0) · 110540`. Altitude is `alt_agl_m × exaggeration`.
@@ -931,6 +994,16 @@ when that is over 50 km, and never "fixes" it.
   camera URL, so the card footer warns "Each viewer pulls this stream
   directly". On a Pi hotspot the operator should use a low-rate stream.
 - The empty and error states are in §12.
+- **Demo mode** (amendment, 2026-10-01): `mode: demo` plays a recorded clip
+  from the server's ignored `.sdr/media/` directory, served by `GET /media/<name>`
+  (names validated by `media.py`; Range requests are answered so the browser
+  can seek). The card subscribes to `events`. The newest of `launch` and
+  `flight_reset` decides the position: after `launch` the clip plays at
+  `launch_offset_s + (serverNow() - launch.t)`; after `flight_reset`, or before
+  any launch, it holds the pad frame 1 s before liftoff. Past the clip's end it
+  holds the last frame. Drift over 0.5 s is corrected by seeking. The view is
+  badged "Demo clip · not live" with a T+ readout, and the footer says it is
+  recorded footage. It is never presented as a live or vehicle camera.
 - **Future work** (documented, not built): host USB/HDMI capture on the Pi, a
   server-side relay so each stream is fetched once, and switching camera by
   trigger (via presets, task 24).

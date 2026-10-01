@@ -93,3 +93,82 @@ export function altitudeColor(t: number): [number, number, number] {
   const [a, b, k] = u < 0.5 ? [lo, mid, u * 2] : [mid, hi, (u - 0.5) * 2];
   return [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k)];
 }
+
+// ---- camera framing for the follow and orbit modes (x east, y up, z south, as trackPoints)
+
+export interface Sphere { center: [number, number, number]; r: number }
+
+/** Sphere around the track's bounding box and the pad (the origin), never smaller than `minR` metres. */
+export function trackSphere(points: Float32Array, minR: number): Sphere {
+  const lo = [0, 0, 0];
+  const hi = [0, 0, 0];
+  for (let i = 0; i + 2 < points.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      const v = points[i + k];
+      if (v < lo[k]) lo[k] = v;
+      if (v > hi[k]) hi[k] = v;
+    }
+  }
+  const center: [number, number, number] = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  const r = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
+  return { center, r: Math.max(minR, r) };
+}
+
+/** Camera distance that fits a sphere of radius r in a perspective view (vertical fov in degrees), times `margin`. */
+export function fitDistance(r: number, vfovDeg: number, aspect: number, margin: number): number {
+  const halfV = (vfovDeg * Math.PI) / 360;
+  const halfH = Math.atan(Math.tan(halfV) * aspect);
+  return (r / Math.sin(Math.min(halfV, halfH))) * margin;
+}
+
+/** Camera position relative to its target for an azimuth (0 looks from +z, i.e. from the south) and an elevation. */
+export function cameraOffset(az: number, el: number, dist: number): [number, number, number] {
+  return [Math.sin(az) * Math.cos(el) * dist, Math.sin(el) * dist, Math.cos(az) * Math.cos(el) * dist];
+}
+
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/**
+ * Azimuth for a side-on ("tangential") view of the flight: perpendicular to the pad-to-latest ground drift, on the
+ * side closer to `prevAz` so the camera does not flip sides as the track bends. With less than `minDrift` metres of
+ * drift there is no meaningful direction, so `prevAz` is kept. The result is the nearest equivalent angle to `prevAz`.
+ */
+export function followAzimuth(points: Float32Array, prevAz: number, minDrift: number): number {
+  const n = points.length;
+  if (n < 3) return prevAz;
+  const x = points[n - 3];
+  const z = points[n - 1];
+  if (Math.hypot(x, z) < minDrift) return prevAz;
+  const dir = Math.atan2(x, z);
+  const a = wrapAngle(dir + Math.PI / 2 - prevAz);
+  const b = wrapAngle(dir - Math.PI / 2 - prevAz);
+  return prevAz + (Math.abs(a) <= Math.abs(b) ? a : b);
+}
+
+/** Mean RGB of the opaque pixels within `band` px of the image edge (transparent pixels are tiles not loaded); null if none. */
+export function edgeAverage(data: Uint8ClampedArray, w: number, h: number, band: number): [number, number, number] | null {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let y = 0; y < h; y++) {
+    const edgeRow = y < band || y >= h - band;
+    for (let x = 0; x < w; x++) {
+      if (!edgeRow && x >= band && x < w - band) { x = w - band - 1; continue; }
+      const i = (y * w + x) * 4;
+      if (data[i + 3] < 128) continue;
+      r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+    }
+  }
+  return n ? [Math.round(r / n), Math.round(g / n), Math.round(b / n)] : null;
+}
+
+/** The track flattened onto the ground (every point's height set to `y`): its 2D ground projection. */
+export function groundProjection(points: Float32Array, y: number): Float32Array {
+  const out = Float32Array.from(points);
+  for (let i = 1; i < out.length; i += 3) out[i] = y;
+  return out;
+}
+
+/** An RGB colour scaled toward black by `k` (0 = unchanged, 1 = black), rounded. */
+export function darken(rgb: [number, number, number], k: number): [number, number, number] {
+  const f = 1 - Math.max(0, Math.min(1, k));
+  return [Math.round(rgb[0] * f), Math.round(rgb[1] * f), Math.round(rgb[2] * f)];
+}

@@ -26,23 +26,53 @@ State on 2026-10-01: the GUI cards plan is complete, and the board runs the
 128-bin RocketPy demo bitstream from flash. `./sdr gui` (serial) shows it live;
 `./sdr gui --source demo` replays the same flight without a board.
 
-- **Backlog:** user-requested work, each needing a short design pass first, is in
-  [gui-backlog](superpowers/plans/2026-10-01-gui-backlog.md):
-  - 3D card follow/orbit camera modes.
-  - Ground beyond the map tiles (fade, recommended, or globe).
-  - Plot event-marker readability: labels overlap, and markers share the line colour.
-  - A launch-synced demo video in the camera card.
+- **Backlog:** every item in [gui-backlog](superpowers/plans/2026-10-01-gui-backlog.md)
+  was implemented on 2026-10-01: 3D Follow/Orbit/Free camera with auto-fit,
+  ground faded into its edge colour to the horizon (the globe option was not
+  built), laned and neutral plot event markers, and the launch-synced camera
+  demo clip (`mode: demo`).
+- **GUI pass (2026-10-01):**
+  - Telemetry full-screen mode (button or F).
+  - The grid is twice as fine: 24 columns and 16 px rows. 12-column presets are
+    converted on read (×2, the same pixels); the built-in Flight preset was
+    rewritten in 24 columns. **A GUI server started before this change rejects
+    the new Flight preset file: restart any running `./sdr gui`.**
+  - Lower minimum card sizes (spec §7 table).
+  - Headerless Value cards titled by their field.
+  - Short `SIM` / `EMU` badges and gear-icon settings buttons.
+  - Map Follow frames the whole path.
+  - 3D track drawn thick with a dark outline, plus a ground trace (2D
+    projection), a drop line and dots; the extended ground is darker.
+  - Compact Flight State card: short interlock chips beside the phase.
+  - Plot settings: a custom Y range for the left axis, each end optional (blank = auto).
+  - Map and 3D cards auto-detect the site from the GPS fix (nearest registered
+    pad within its map radius); the built-in Flight preset now uses Auto.
+  - Fixes: the waterfall scale labels (raw floats were clipped to "835938"), the
+    State card's "phase·seq" spacing, and the plot time axis (now `HH:MM:SS`).
+  - Checked with headless-Chrome screenshots of the `--source demo` GUI (desktop
+    dark and light, phone width, full screen) plus the unit tests. Not checked:
+    operator edit mode (no operator login in those screenshots), touch, Safari.
 - **Status and open checks:** see [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md).
 - **Spec:** [GUI cards design](superpowers/specs/2026-09-30-gui-cards-design.md).
   Camera-card and 3D-card changes amend it.
-- **Demo video:** a public-domain NASA onboard clip is downloaded locally to the
-  ignored `.sdr/media/sounding_rocket_onboard.mp4` (liftoff about 20.5 s in). It is
-  not tracked; re-download from the Commons link in the backlog if it is missing.
+- **Demo video:** an amateur L3 onboard clip (about 8,000 ft) is downloaded
+  locally to the ignored `.sdr/media/l3_flight_onboard.mp4` (liftoff at 9.0 s).
+  It is under YouTube terms, for in-group demos only, and never committed; the
+  backlog records its source and the `yt-dlp` fetch. The earlier NASA sounding
+  rocket clip (`sounding_rocket_onboard.mp4`, liftoff 30.6 s) is still there
+  but read as wrong for a 10k ft IREC rocket. A camera card with
+  `mode: demo` plays it synced to LAUNCH and loops on each flight reset (no
+  builtin preset includes one; add a Camera card in edit mode and pick
+  "Demo clip"). Checked on 2026-10-01: unit tests, svelte-check, the build, a live
+  `--source demo` server answering `/media` Range requests, and the event cadence
+  (LAUNCH, then `flight_reset` 68.0 s later, then LAUNCH 2.0 s after that). The
+  playback in a browser was **not** watched in that session.
 - **Viewer bandwidth:** at 128 bins the Flight-preset viewer load is 9.75 kB/s
   against the 10 kB/s budget (`test_fanout`). New streamed content needs that
   budget revisited.
-- **Frontend checks:** the frontend was not changed in the 2026-10-01 session. Run
-  the frontend checks from `AGENTS.md` before and after GUI work.
+- **Frontend checks:** after the GUI pass (2026-10-01), `npm test` (303),
+  `npm run check` (0 errors) and `npm run build` pass, as does the Python suite
+  (337). Run the frontend checks from `AGENTS.md` before and after GUI work.
 - **Stale CLI help:** `./sdr send` help still says the FPGA "has no command receiver".
   UART tuning (`SR` commands) is received and acknowledged with CONFIG; raw sends
   are not. Reword it when touching `cli.py`.

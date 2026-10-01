@@ -25,10 +25,12 @@ describe('registry', () => {
   });
 
   it('uses the spec minimum sizes', () => {
-    expect(REGISTRY.plot.min).toEqual({ w: 3, h: 4 });
-    expect(REGISTRY.number.min).toEqual({ w: 2, h: 2 });
+    // 24-column grid, 16 px rows (spec section 7)
+    expect(REGISTRY.plot.min).toEqual({ w: 5, h: 8 });
+    expect(REGISTRY.number.min).toEqual({ w: 2, h: 3 });
+    expect(REGISTRY.map.min).toEqual({ w: 4, h: 6 });
     expect(REGISTRY.trajectory3d.min).toEqual({ w: 4, h: 6 });
-    expect(REGISTRY.constellation.min).toEqual({ w: 2, h: 3 });
+    expect(REGISTRY.constellation.min).toEqual({ w: 3, h: 5 });
   });
 
   it('sanitize({}) equals the defaults for every type', () => {
@@ -58,6 +60,11 @@ describe('registry', () => {
     expect(REGISTRY.number.sanitize({ digits: 2 }).digits).toBe(2);
     expect(REGISTRY.camera.sanitize({ url: 'ftp://x' }).url).toBe(null);
     expect(REGISTRY.camera.sanitize({ url: 'http://x/y' }).url).toBe('http://x/y');
+    expect(REGISTRY.camera.sanitize({ mode: 'demo', media: 'a.webm', launch_offset_s: 12.5 }))
+      .toMatchObject({ mode: 'demo', media: 'a.webm', launch_offset_s: 12.5 });
+    expect(REGISTRY.camera.sanitize({ media: '../x.mp4', launch_offset_s: 601 }))
+      .toMatchObject({ media: 'l3_flight_onboard.mp4', launch_offset_s: 9 });
+    expect(REGISTRY.camera.sanitize({ media: null }).media).toBe(null);
     expect(REGISTRY.link.sanitize({ channels: ['B', 'Z'] }).channels).toEqual(['B']);
     expect(REGISTRY.link.sanitize({ channels: [] }).channels).toEqual(['A', 'B']);
   });
@@ -83,6 +90,9 @@ describe('registry', () => {
     expect(REGISTRY.map.channels({ source: 'A' })).toEqual(['flight.A', 'events']);
     expect(REGISTRY.map.channels({ source: 'A', segment: 'all' })).toEqual(['flight.A']);
     expect(REGISTRY.trajectory3d.channels({})).toEqual(['flight', 'events']);
+    expect(REGISTRY.trajectory3d.sanitize({})).toMatchObject({ camera: 'follow', orbit_dps: 6 });
+    expect(REGISTRY.trajectory3d.sanitize({ camera: 'orbit', orbit_dps: 12 })).toMatchObject({ camera: 'orbit', orbit_dps: 12 });
+    expect(REGISTRY.trajectory3d.sanitize({ camera: 'spin', orbit_dps: 99 })).toMatchObject({ camera: 'follow', orbit_dps: 6 });
     for (const t of ['plot', 'map', 'trajectory3d'] as const) {
       expect(REGISTRY[t].sanitize({}).segment, t).toBe('current');
       expect(REGISTRY[t].sanitize({ segment: 'all' }).segment, t).toBe('all');
@@ -95,6 +105,7 @@ describe('registry', () => {
       .toEqual(['flight.A', 'flight.B']);
     expect(REGISTRY.waterfall.channels({ channel: 'B' })).toEqual(['spectrum.B']);
     expect(REGISTRY.camera.channels({})).toEqual([]);
+    expect(REGISTRY.camera.channels({ mode: 'demo' })).toEqual(['events']);
     expect(REGISTRY.number.channels({ source: 'both' })).toEqual(['flight.A', 'flight.B']);
     expect(REGISTRY.spectrum.channels({})).toEqual(['spectrum.A', 'spectrum.B']);
     expect(REGISTRY.constellation.channels({ channel: 'B' })).toEqual(['iq.B']);
@@ -113,7 +124,22 @@ describe('registry', () => {
   });
 
   it('minOfType falls back for unknown types', () => {
-    expect(minOfType('plot')).toEqual({ w: 3, h: 4, phoneMinH: REGISTRY.plot.phoneMinH });
+    expect(minOfType('plot')).toEqual({ w: 5, h: 8, phoneMinH: REGISTRY.plot.phoneMinH });
     expect(minOfType('from-the-future').w).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('plot y range', () => {
+  const y = (v: unknown) => REGISTRY.plot.sanitize({ y: v }).y;
+  it('accepts auto, a full range, or one fixed end', () => {
+    expect(y('auto')).toBe('auto');
+    expect(y({ min: 0, max: 100 })).toEqual({ min: 0, max: 100 });
+    expect(y({ min: 0, max: null })).toEqual({ min: 0, max: null });
+    expect(y({ min: 0 })).toEqual({ min: 0, max: null });
+  });
+  it('falls back to auto for an empty or inverted range', () => {
+    expect(y({ min: null, max: null })).toBe('auto');
+    expect(y({ min: 5, max: 1 })).toBe('auto');
+    expect(y({ min: 'x', max: 1 })).toBe('auto');
   });
 });

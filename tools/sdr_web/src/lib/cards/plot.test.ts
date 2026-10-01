@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SeriesStore } from '../series';
 import type { FlightSchema, GuiEvent } from '../types';
 import type { UnitPrefs } from '../units';
-import { axesFor, buildData, eventMarkers, expandSeries, plotSize, quantityOf, scaleKeyOf, storeFor, viewRange, yRanges } from './plot';
+import { axesFor, buildData, eventMarkers, expandSeries, plotSize, quantityOf, scaleKeyOf, storeFor, viewRange, yRanges , clockLabel, layoutMarkerLabels, markerLabel } from './plot';
 
 const schema: FlightSchema = {
   version: 1,
@@ -193,5 +193,59 @@ describe('plotSize with a tall legend (old formula regression)', () => {
     expect(oldBuild + legendH).toBeGreaterThan(hostH);
     const { height } = plotSize(400, hostH, legendH);
     expect(height + legendH).toBeLessThanOrEqual(hostH);
+  });
+});
+
+describe('marker labels', () => {
+  it('names the milestones for people', () => {
+    expect(markerLabel('launch')).toBe('Launch');
+    expect(markerLabel('flight_reset')).toBe('Reset');
+    expect(markerLabel('something_new')).toBe('something new');
+  });
+
+  it('stacks labels that would overlap into lanes, nearest first', () => {
+    const out = layoutMarkerLabels([{ x: 100, w: 40 }, { x: 110, w: 50 }, { x: 300, w: 40 }], 0, 1000, 3);
+    expect(out.map((o) => o.lane)).toEqual([0, 1, 0]);
+    expect(out.every((o) => o.side === 'right')).toBe(true);
+  });
+
+  it('puts a label left of its line near the right edge', () => {
+    const [o] = layoutMarkerLabels([{ x: 990, w: 40 }], 0, 1000, 3);
+    expect(o.side).toBe('left');
+    expect(o.lane).toBe(0);
+  });
+
+  it('drops a label (keeping its line) when every lane is taken', () => {
+    const out = layoutMarkerLabels([{ x: 100, w: 60 }, { x: 105, w: 60 }, { x: 110, w: 60 }], 0, 1000, 2);
+    expect(out.map((o) => o.lane)).toEqual([0, 1, null]);
+  });
+
+  it('keeps the input order in its result', () => {
+    const out = layoutMarkerLabels([{ x: 300, w: 40 }, { x: 100, w: 40 }], 0, 1000, 3);
+    expect(out.map((o) => o.lane)).toEqual([0, 0]);
+  });
+});
+
+describe('clockLabel', () => {
+  it('formats local time as HH:MM:SS', () => {
+    const t = new Date(2026, 9, 1, 9, 5, 7).getTime() / 1000;
+    expect(clockLabel(t)).toBe('09:05:07');
+  });
+});
+
+describe('yRanges with a partly fixed range', () => {
+  const data = [[1, 2, 3], [10, 40, 70]];
+  it('fixes one end and auto-scales the other', () => {
+    const lo = yRanges(data, ['ratio'], { min: 0, max: null }).ratio;
+    expect(lo[0]).toBe(0);
+    expect(lo[1]).toBeGreaterThan(70);
+    const hi = yRanges(data, ['ratio'], { min: null, max: 100 }).ratio;
+    expect(hi[1]).toBe(100);
+    expect(hi[0]).toBeLessThan(10);
+  });
+  it('keeps a usable span when the data sits beyond the fixed end', () => {
+    const r = yRanges([[1, 2], [-5, -2]], ['ratio'], { min: 0, max: null }).ratio;
+    expect(r[0]).toBe(0);
+    expect(r[1]).toBeGreaterThan(0);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   boundsFor, distanceKm, enu, footerText, gpsStatus, gpsValid, graticule, layerPlan, makeSeeder, niceStep, resolveSite, rowValid,
-  tileXY, validTrack, type SiteInfo,
+  tileXY, validTrack, framingBounds, needsRefit, nearestSite, lastFix, type Bounds, type LatLon, type SiteInfo,
 } from './geo';
 import { SeriesStore } from './series';
 import type { FlightSchema } from './types';
@@ -142,5 +142,65 @@ describe('makeSeeder', () => {
     expect(seed('ttu')).toBe(true);
     expect(seed('ttu')).toBe(false);
     expect(seed(null)).toBe(true);
+  });
+});
+
+describe('map framing', () => {
+  const PAD: LatLon = [31.0, -103.5];
+
+  it('frames the pad alone at the minimum radius', () => {
+    const b = framingBounds([], PAD, 0.6);
+    expect(distanceKm(PAD, [b[1][0], PAD[1]])).toBeCloseTo(0.6, 2);
+    expect(distanceKm(PAD, [PAD[0], b[1][1]])).toBeCloseTo(0.6, 2);
+  });
+
+  it('frames the whole path and the pad, centred, with the minimum as a floor', () => {
+    const far: LatLon = [31.02, -103.48];   // about 2.9 km north-east
+    const b = framingBounds([[31.005, -103.495], far], PAD, 0.6);
+    expect(b[0][0]).toBeLessThanOrEqual(PAD[0]);
+    expect(b[0][1]).toBeLessThanOrEqual(PAD[1]);
+    expect(b[1][0]).toBeGreaterThanOrEqual(far[0]);
+    expect(b[1][1]).toBeGreaterThanOrEqual(far[1]);
+  });
+
+  it('refits when the path leaves the inner view or the view is much larger than needed', () => {
+    const view: Bounds = [[30.9, -103.6], [31.1, -103.4]];
+    expect(needsRefit(view, [[30.99, -103.51], [31.01, -103.49]])).toBe(true);    // view far too large
+    expect(needsRefit(view, [[30.95, -103.55], [31.05, -103.45]])).toBe(false);   // fits well
+    expect(needsRefit(view, [[30.95, -103.55], [31.11, -103.45]])).toBe(true);    // runs off the top
+  });
+});
+
+describe('site auto-detection', () => {
+  const mk = (id: string, pad: LatLon, r = 20): SiteInfo => ({ id, name: id, center: pad, pad, outer_radius_km: r, inner_radius_km: 5 });
+  const seymour = mk('seymour', [33.4987, -99.333]);
+  const pecos = mk('irec-pecos', [31.0427, -103.5316]);
+  const ttu = mk('ttu', [33.584, -101.875]);
+  const all = [seymour, pecos, ttu];
+
+  it('picks the site nearest the GPS fix, within its map radius', () => {
+    expect(nearestSite(all, [31.06, -103.52])).toBe(pecos);
+    expect(nearestSite(all, [33.52, -99.30])).toBe(seymour);
+    expect(nearestSite(all, [40.0, -105.0])).toBeNull();   // nowhere near a registered site
+    expect(nearestSite([], [31.06, -103.52])).toBeNull();
+  });
+
+  it('auto (null or unknown id) follows the fix, an explicit id wins, and no fix falls back', () => {
+    expect(resolveSite(all, null, [31.06, -103.52])).toBe(pecos);
+    expect(resolveSite(all, 'ttu', [31.06, -103.52])).toBe(ttu);
+    expect(resolveSite(all, null, null)).toBe(seymour);
+    expect(resolveSite(all, null, null, 'irec-pecos')).toBe(pecos);   // last detected site, kept through a GPS dropout
+    expect(resolveSite(all, null, [40, -105], 'irec-pecos')).toBe(pecos);
+  });
+
+  it('finds the newest valid fix', () => {
+    const s = new SeriesStore(4, 16);
+    const sch: FlightSchema = { version: 1, fields: ['gps_fix', 'lat_deg', 'lon_deg', 'x'].map((key) => ({ key, label: key, quantity: 'x' })) };
+    s.append(1, 0, [3, 31.05, -103.53, 0]);
+    s.append(2, 0, [0, 0, 0, 0]);
+    const fix = lastFix(s, sch)!;
+    expect(fix[0]).toBeCloseTo(31.05, 4);
+    expect(fix[1]).toBeCloseTo(-103.53, 4);
+    expect(lastFix(new SeriesStore(4, 16), sch)).toBeNull();
   });
 });

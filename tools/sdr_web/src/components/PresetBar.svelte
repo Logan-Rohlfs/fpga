@@ -6,12 +6,13 @@
   interface Entry { id: string; name: string; builtin: boolean }
   let {
     entries, autoSwitch, shownId, liveId, defaultId, follow, operator, edit, dirty, stale, saved, builtin, canDelete, saveAsPending,
-    onselect, onfollow, onedit, onsave, onsaveas, ondiscard, ondelete, onsetlive, onsetdefault, onautoswitch,
+    onselect, onfollow, onedit, onsave, onsaveas, ondiscard, ondelete, onsetlive, onsetdefault, onautoswitch, onfullscreen,
   }: {
     entries: Entry[]; autoSwitch: boolean; shownId: string | null; liveId: string; defaultId: string; follow: boolean; operator: boolean;
     edit: boolean; dirty: boolean; stale: Stale; saved: boolean; builtin: boolean; canDelete: boolean; saveAsPending: boolean;
     onselect: (id: string) => void; onfollow: (on: boolean) => void; onedit: (on: boolean) => void; onsave: () => void;
     onsaveas: (name: string) => void; ondiscard: () => void; ondelete: () => void; onsetlive: () => void; onsetdefault: () => void; onautoswitch: (on: boolean) => void;
+    onfullscreen: () => void;
   } = $props();
 
   const liveName = $derived(entries.find((e) => e.id === liveId)?.name ?? liveId);
@@ -63,6 +64,9 @@
     <button class="btn" disabled={!canDelete} onclick={ondelete}
       title={shownId === defaultId ? 'Choose another default first' : undefined}>Delete</button>
   {/if}
+  <button class="btn full" onclick={onfullscreen} title="Show only the cards, filling the screen (F). Esc or F exits.">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7.5V3h4.5M12.5 3H17v4.5M17 12.5V17h-4.5M7.5 17H3v-4.5"/></svg>
+    Full screen</button>
 </div>
 {#if stale === 'changed'}
   <p class="warn" role="status">This layout was changed on the server while you were editing. Your edits are kept, but saving
@@ -78,6 +82,8 @@
   .live { font-size: 13px; color: var(--muted); }
   .dirty { font-size: 13px; color: var(--warn); }
   .sep { width: 1px; align-self: stretch; background: var(--line-2); }
+  .full { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+  .full svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
   .name { display: inline-flex; gap: 6px; align-items: center; }
   .warn { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid var(--warn); font-size: 13.5px; background: var(--panel-2); }
 </style>

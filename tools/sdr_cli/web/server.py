@@ -16,7 +16,7 @@ import webbrowser
 
 from aiohttp import WSMsgType, web
 
-from .. import __version__, apex, freqplan, maps
+from .. import __version__, apex, freqplan, maps, media
 from ..core import ToolError
 from ..fanout import CHANNELS, Outbox
 from ..hub import Hub, dumps
@@ -126,6 +126,7 @@ class GuiServer:
         app.router.add_get('/ws', self.websocket)
         app.router.add_get('/', self.index)
         app.router.add_get('/tiles/{layer}/{z}/{x}/{y}', self.tile)
+        app.router.add_get('/media/{name}', self.media)
         assets = self.static_dir / 'assets'
         if assets.is_dir():
             app.router.add_static('/assets', assets)
@@ -156,6 +157,19 @@ class GuiServer:
         if path is None:
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={'Cache-Control': 'max-age=86400'})
+
+    async def media(self, request):
+        """Local demo clips from .sdr/media for the camera card's demo mode. FileResponse answers Range requests."""
+        if self.root is None:
+            raise web.HTTPNotFound()
+        name = request.match_info['name']
+        try:
+            path = media.media_path(self.root, name)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc))
+        if path is None:
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={'Content-Type': media.content_type(name), 'Cache-Control': 'max-age=3600'})
 
     def sites_message(self):
         """hello.sites: each registry site plus the zooms actually downloaded per layer."""

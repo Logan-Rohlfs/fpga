@@ -4,7 +4,7 @@
   "name": "Flight",
   "revision": 1,
   "grid": {
-    "cols": 12
+    "cols": 24
   },
   "cards": [
     {
@@ -12,8 +12,8 @@
       "type": "state",
       "x": 0,
       "y": 0,
-      "w": 3,
-      "h": 6,
+      "w": 6,
+      "h": 12,
       "title": null,
       "config": {
         "source": "best",
@@ -23,11 +23,11 @@
     {
       "id": "alt",
       "type": "number",
-      "x": 3,
+      "x": 6,
       "y": 0,
-      "w": 2,
-      "h": 6,
-      "title": "Altitude",
+      "w": 4,
+      "h": 12,
+      "title": null,
       "config": {
         "field": "alt_agl_m",
         "source": "best",
@@ -40,11 +40,11 @@
     {
       "id": "vel",
       "type": "number",
-      "x": 5,
+      "x": 10,
       "y": 0,
-      "w": 2,
-      "h": 6,
-      "title": "Velocity",
+      "w": 4,
+      "h": 12,
+      "title": null,
       "config": {
         "field": "velocity_mps",
         "source": "best",
@@ -57,11 +57,11 @@
     {
       "id": "accel",
       "type": "number",
-      "x": 7,
+      "x": 14,
       "y": 0,
-      "w": 2,
-      "h": 6,
-      "title": "Vertical acceleration",
+      "w": 4,
+      "h": 12,
+      "title": null,
       "config": {
         "field": "vert_accel_mps2",
         "source": "best",
@@ -74,11 +74,11 @@
     {
       "id": "apogee",
       "type": "number",
-      "x": 9,
+      "x": 18,
       "y": 0,
-      "w": 3,
-      "h": 6,
-      "title": "Predicted apogee",
+      "w": 6,
+      "h": 12,
+      "title": null,
       "config": {
         "field": "pred_apogee_m",
         "source": "best",
@@ -92,9 +92,9 @@
       "id": "altplot",
       "type": "plot",
       "x": 0,
-      "y": 6,
-      "w": 6,
-      "h": 7,
+      "y": 12,
+      "w": 12,
+      "h": 14,
       "title": "Altitude",
       "config": {
         "series": [
@@ -117,10 +117,10 @@
     {
       "id": "velplot",
       "type": "plot",
-      "x": 6,
-      "y": 6,
-      "w": 6,
-      "h": 7,
+      "x": 12,
+      "y": 12,
+      "w": 12,
+      "h": 14,
       "title": "Velocity and acceleration",
       "config": {
         "series": [
@@ -144,12 +144,12 @@
       "id": "map",
       "type": "map",
       "x": 0,
-      "y": 13,
-      "w": 4,
-      "h": 8,
+      "y": 26,
+      "w": 8,
+      "h": 16,
       "title": null,
       "config": {
-        "site": "irec-pecos",
+        "site": null,
         "layer": "imagery",
         "follow": true,
         "show_track": true,
@@ -160,26 +160,28 @@
     {
       "id": "traj",
       "type": "trajectory3d",
-      "x": 4,
-      "y": 13,
-      "w": 4,
-      "h": 8,
+      "x": 8,
+      "y": 26,
+      "w": 8,
+      "h": 16,
       "title": null,
       "config": {
-        "site": "irec-pecos",
+        "site": null,
         "layer": "imagery",
         "exaggeration": 1,
         "source": "best",
-        "segment": "current"
+        "segment": "current",
+        "camera": "follow",
+        "orbit_dps": 6
       }
     },
     {
       "id": "events",
       "type": "events",
-      "x": 8,
-      "y": 13,
-      "w": 4,
-      "h": 8,
+      "x": 16,
+      "y": 26,
+      "w": 8,
+      "h": 16,
       "title": null,
       "config": {
         "category": "flight",
@@ -199,9 +201,9 @@
       "id": "link",
       "type": "link",
       "x": 0,
-      "y": 21,
-      "w": 4,
-      "h": 8,
+      "y": 42,
+      "w": 8,
+      "h": 16,
       "title": null,
       "config": {
         "channels": [
@@ -214,10 +216,10 @@
     {
       "id": "wfa",
       "type": "waterfall",
-      "x": 4,
-      "y": 21,
-      "w": 4,
-      "h": 5,
+      "x": 8,
+      "y": 42,
+      "w": 8,
+      "h": 10,
       "title": "Waterfall A",
       "config": {
         "channel": "A",
@@ -227,10 +229,10 @@
     {
       "id": "wfb",
       "type": "waterfall",
-      "x": 8,
-      "y": 21,
-      "w": 4,
-      "h": 5,
+      "x": 16,
+      "y": 42,
+      "w": 8,
+      "h": 10,
       "title": "Waterfall B",
       "config": {
         "channel": "B",

@@ -2,13 +2,15 @@
 import type { Component } from 'svelte';
 import { FLIGHT_CATEGORY_KINDS, LINK_KINDS } from '../events';
 import type { GridCard, MinSize } from '../grid';
+import type { FlightSchema } from '../types';
 import { unitOptions } from '../units';
+import { DEMO_LAUNCH_OFFSET_S, DEMO_MEDIA, LAUNCH_OFFSET_MAX_S, mediaNameOk } from './camera';
 
-export type SettingKind = 'select' | 'number' | 'bool' | 'text' | 'field' | 'series' | 'units';
+export type SettingKind = 'select' | 'number' | 'bool' | 'text' | 'field' | 'series' | 'units' | 'range';
 export interface SettingField {
   key: string; label: string; kind: SettingKind;
   options?: { value: string | number; label: string }[];
-  min?: number; max?: number;
+  min?: number; max?: number; step?: number;
 }
 
 export type Config = Record<string, unknown>;
@@ -22,8 +24,10 @@ export interface CardMeta {
   settings: SettingField[];
   sanitize(config: unknown): Config;
   channels(config: unknown): string[];
-  /** Title for a card with no preset title, when it depends on the config. */
-  titleOf?(config: Config): string;
+  /** Title for a card with no preset title, when it depends on the config (and, for flight fields, the schema). */
+  titleOf?(config: Config, schema: FlightSchema | null): string;
+  /** No header bar: the title is a slim label line inside the card (Value cards, whose title is the field name). */
+  compact?: boolean;
   /** Lazy card component; undefined until the card's own task lands (PlaceholderCard renders instead). */
   component?: () => Promise<{ default: Component<any> }>;
 }
@@ -42,6 +46,7 @@ const nullableInt = (lo: number, hi: number): Validator => (v, d) => (v === null
 const text = (max: number): Validator => (v, d) => (typeof v === 'string' && v.length >= 1 && v.length <= max ? v : d);
 const nullableText = (max: number): Validator => (v, d) => (v === null ? null : text(max)(v, d));
 const SOURCES = ['best', 'A', 'B'] as const;
+export const CAMERA_MODES = ['follow', 'orbit', 'free'] as const;
 /** Plot series may also overlay A and B (`both`, expanded by plot.ts expandSeries). */
 export const SERIES_SOURCES = [...SOURCES, 'both'] as const;
 
@@ -83,6 +88,17 @@ const autoOr = (lo: string, hi: string): Validator => (v, d) => {
   return d;
 };
 
+/** Plot y range: 'auto', or {min, max} with either end null (auto). Both null, or min >= max, fall back. */
+const yRange: Validator = (v, d) => {
+  if (v === 'auto' || !isObj(v)) return v === 'auto' ? 'auto' : d;
+  const end = (x: unknown) => (x === null || x === undefined ? null : finite(x) ? x : NaN);
+  const min = end(v.min);
+  const max = end(v.max);
+  if (Number.isNaN(min) || Number.isNaN(max) || (min === null && max === null)) return d;
+  if (min !== null && max !== null && min >= max) return d;
+  return { min, max };
+};
+
 const channelSubset: Validator = (v, d) => {
   if (!Array.isArray(v)) return d;
   const picked = (['A', 'B'] as const).filter((c) => v.includes(c));
@@ -95,7 +111,8 @@ interface Spec {
   finish?(out: Config, input: Config): void;
   channels(config: Config): string[];
   settings?: SettingField[];
-  titleOf?(config: Config): string;
+  titleOf?(config: Config, schema: FlightSchema | null): string;
+  compact?: boolean;
   component?: CardMeta['component'];
 }
 
@@ -113,7 +130,7 @@ function meta(spec: Spec): CardMeta {
   };
   return {
     type: spec.type, title: spec.title, min: spec.min, phoneMinH: spec.phoneMinH, defaults: spec.defaults,
-    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf, component: spec.component,
+    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf, compact: spec.compact, component: spec.component,
     channels: (config) => [...new Set(spec.channels(sanitize(config)))],
   };
 }
@@ -135,16 +152,16 @@ const segmentField: SettingField = {
   options: [{ value: 'current', label: 'Current flight only' }, { value: 'all', label: 'All data' }],
 };
 const siteLayer: SettingField[] = [
-  { key: 'site', label: 'Site id', kind: 'text' },
+  { key: 'site', label: 'Site id (blank: auto, nearest to GPS)', kind: 'text' },
   { key: 'layer', label: 'Layer', kind: 'select', options: [{ value: 'imagery', label: 'Imagery' }, { value: 'topo', label: 'Topo' }] },
 ];
 
 const specs: Spec[] = [
   {
-    type: 'plot', title: 'Plot', min: { w: 3, h: 4 }, phoneMinH: 7,
+    type: 'plot', title: 'Plot', min: { w: 5, h: 8 }, phoneMinH: 14,
     defaults: { series: [{ field: 'alt_agl_m', source: 'best' }], window_s: 60, y: 'auto', show_events: true, segment: 'current', units: {} },
     validators: {
-      series: seriesList, window_s: oneOf([10, 30, 60, 120, 300, 0]), y: autoOr('min', 'max'), show_events: bool, segment: oneOf(SEGMENTS), units: unitsMap,
+      series: seriesList, window_s: oneOf([10, 30, 60, 120, 300, 0]), y: yRange, show_events: bool, segment: oneOf(SEGMENTS), units: unitsMap,
     },
     channels: (c) => {
       const series = c.series as { field: string; source: string }[];
@@ -163,6 +180,7 @@ const specs: Spec[] = [
       { key: 'window_s', label: 'Window', kind: 'select', options: [
         { value: 10, label: '10 s' }, { value: 30, label: '30 s' }, { value: 60, label: '60 s' }, { value: 120, label: '2 min' },
         { value: 300, label: '5 min' }, { value: 0, label: 'All' }] },
+      { key: 'y', label: 'Y range (blank: auto)', kind: 'range' },
       { key: 'show_events', label: 'Show events', kind: 'bool' },
       segmentField,
       { key: 'units', label: 'Units', kind: 'units' },
@@ -170,7 +188,8 @@ const specs: Spec[] = [
     component: () => import('../../cards/PlotCard.svelte'),
   },
   {
-    type: 'number', title: 'Value', min: { w: 2, h: 2 }, phoneMinH: 3,
+    type: 'number', title: 'Value', min: { w: 2, h: 3 }, phoneMinH: 6, compact: true,
+    titleOf: (c, schema) => schema?.fields.find((f) => f.key === c.field)?.label ?? String(c.field),
     defaults: { field: 'alt_agl_m', source: 'best', digits: null, thresholds: [], track_minmax: false, units: {} },
     validators: {
       field: text(40), source: oneOf([...SOURCES, 'both']), digits: nullableInt(0, 3), thresholds, track_minmax: bool, units: unitsMap,
@@ -186,7 +205,7 @@ const specs: Spec[] = [
     ],
   },
   {
-    type: 'state', title: 'Flight state', min: { w: 2, h: 2 }, phoneMinH: 3,
+    type: 'state', title: 'Flight state', min: { w: 3, h: 4 }, phoneMinH: 6,
     defaults: { source: 'best', show_time_in_phase: true },
     validators: { source: oneOf(SOURCES), show_time_in_phase: bool },
     channels: (c) => flightChannels(c.source),
@@ -194,7 +213,7 @@ const specs: Spec[] = [
     settings: [sourceField, { key: 'show_time_in_phase', label: 'Show time in phase', kind: 'bool' }],
   },
   {
-    type: 'events', title: 'Events', min: { w: 3, h: 4 }, phoneMinH: 6,
+    type: 'events', title: 'Events', min: { w: 5, h: 6 }, phoneMinH: 12,
     defaults: { category: 'flight', kinds: [...FLIGHT_CATEGORY_KINDS], newest_first: true },
     validators: { category: oneOf(['flight', 'link']), newest_first: bool },
     finish: (out, input) => {
@@ -211,7 +230,7 @@ const specs: Spec[] = [
     ],
   },
   {
-    type: 'map', title: 'Map', min: { w: 3, h: 5 }, phoneMinH: 7,
+    type: 'map', title: 'Map', min: { w: 4, h: 6 }, phoneMinH: 14,
     defaults: { site: null, layer: 'imagery', follow: true, show_track: true, segment: 'current', source: 'best' },
     validators: {
       site: nullableText(40), layer: oneOf(['imagery', 'topo']), follow: bool, show_track: bool, segment: oneOf(SEGMENTS), source: oneOf(SOURCES),
@@ -222,29 +241,40 @@ const specs: Spec[] = [
       { key: 'show_track', label: 'Show track', kind: 'bool' }, segmentField, sourceField],
   },
   {
-    type: 'trajectory3d', title: '3D trajectory', min: { w: 4, h: 6 }, phoneMinH: 8,
-    defaults: { site: null, layer: 'imagery', exaggeration: 1, segment: 'current', source: 'best' },
+    type: 'trajectory3d', title: '3D trajectory', min: { w: 4, h: 6 }, phoneMinH: 16,
+    defaults: { site: null, layer: 'imagery', exaggeration: 1, segment: 'current', source: 'best', camera: 'follow', orbit_dps: 6 },
     validators: {
       site: nullableText(40), layer: oneOf(['imagery', 'topo']), exaggeration: intIn(1, 5), segment: oneOf(SEGMENTS), source: oneOf(SOURCES),
+      camera: oneOf(CAMERA_MODES), orbit_dps: numIn(1, 30),
     },
     channels: (c) => [...flightChannels(c.source), ...(c.segment === 'current' ? ['events'] : [])],
     component: () => import('../../cards/Trajectory3dCard.svelte'),
-    settings: [...siteLayer, { key: 'exaggeration', label: 'Vertical exaggeration', kind: 'number', min: 1, max: 5 }, segmentField, sourceField],
+    settings: [...siteLayer, { key: 'exaggeration', label: 'Vertical exaggeration', kind: 'number', min: 1, max: 5 }, segmentField, sourceField,
+      { key: 'camera', label: 'Camera', kind: 'select', options: [{ value: 'follow', label: 'Follow (side-on, fit)' },
+        { value: 'orbit', label: 'Orbit (fit)' }, { value: 'free', label: 'Free' }] },
+      { key: 'orbit_dps', label: 'Orbit rate (°/s)', kind: 'number', min: 1, max: 30 }],
   },
   {
-    type: 'camera', title: 'Camera', min: { w: 3, h: 4 }, phoneMinH: 6,
-    defaults: { url: null, mode: 'mjpeg', fit: 'contain' },
-    validators: { url: (v, d) => (v === null ? null : url(v, d)), mode: oneOf(['mjpeg', 'video']), fit: oneOf(['contain', 'cover']) },
-    channels: () => [],
+    type: 'camera', title: 'Camera', min: { w: 4, h: 5 }, phoneMinH: 12,
+    defaults: { url: null, mode: 'mjpeg', fit: 'contain', media: DEMO_MEDIA, launch_offset_s: DEMO_LAUNCH_OFFSET_S },
+    validators: {
+      url: (v, d) => (v === null ? null : url(v, d)), mode: oneOf(['mjpeg', 'video', 'demo']), fit: oneOf(['contain', 'cover']),
+      media: (v, d) => (v === null || mediaNameOk(v) ? v : d), launch_offset_s: numIn(0, LAUNCH_OFFSET_MAX_S),
+    },
+    // Demo mode follows LAUNCH and flight_reset; a stream needs no channel.
+    channels: (c) => (isObj(c) && c.mode === 'demo' ? ['events'] : []),
     component: () => import('../../cards/CameraCard.svelte'),
     settings: [
       { key: 'url', label: 'Stream URL (http or https)', kind: 'text' },
-      { key: 'mode', label: 'Mode', kind: 'select', options: [{ value: 'mjpeg', label: 'MJPEG' }, { value: 'video', label: 'Video' }] },
+      { key: 'mode', label: 'Mode', kind: 'select', options: [{ value: 'mjpeg', label: 'MJPEG' }, { value: 'video', label: 'Video' },
+        { value: 'demo', label: 'Demo clip (synced to launch)' }] },
       { key: 'fit', label: 'Fit', kind: 'select', options: [{ value: 'contain', label: 'Contain' }, { value: 'cover', label: 'Cover' }] },
+      { key: 'media', label: 'Demo clip in .sdr/media', kind: 'text' },
+      { key: 'launch_offset_s', label: 'Liftoff in the clip (s)', kind: 'number', min: 0, max: LAUNCH_OFFSET_MAX_S, step: 0.1 },
     ],
   },
   {
-    type: 'waterfall', title: 'Waterfall', min: { w: 3, h: 3 }, phoneMinH: 5,
+    type: 'waterfall', title: 'Waterfall', min: { w: 4, h: 4 }, phoneMinH: 10,
     component: () => import('../../cards/WaterfallCard.svelte'),
     defaults: { channel: 'A', scale: 'auto' },
     validators: { channel: oneOf(['A', 'B']), scale: autoOr('low', 'high') },
@@ -252,7 +282,7 @@ const specs: Spec[] = [
     settings: [channelField()],
   },
   {
-    type: 'spectrum', title: 'Spectrum', min: { w: 3, h: 3 }, phoneMinH: 5,
+    type: 'spectrum', title: 'Spectrum', min: { w: 4, h: 4 }, phoneMinH: 10,
     component: () => import('../../cards/SpectrumCard.svelte'),
     defaults: { channel: 'both', peak_hold: false, peak_decay_s: 10 },
     validators: { channel: oneOf(['A', 'B', 'both']), peak_hold: bool, peak_decay_s: numIn(0, 60) },
@@ -264,7 +294,7 @@ const specs: Spec[] = [
     ],
   },
   {
-    type: 'constellation', title: 'Constellation', min: { w: 2, h: 3 }, phoneMinH: 5,
+    type: 'constellation', title: 'Constellation', min: { w: 3, h: 5 }, phoneMinH: 10,
     component: () => import('../../cards/ConstellationCard.svelte'),
     defaults: { channel: 'A', mode: 'iq', persistence: 4 },
     validators: { channel: oneOf(['A', 'B']), mode: oneOf(['iq', 'inst_freq']), persistence: intIn(1, 4) },
@@ -276,7 +306,7 @@ const specs: Spec[] = [
     ],
   },
   {
-    type: 'link', title: 'Link quality', min: { w: 3, h: 3 }, phoneMinH: 5,
+    type: 'link', title: 'Link quality', min: { w: 5, h: 6 }, phoneMinH: 10,
     defaults: { channels: ['A', 'B'], window_s: 10 },
     validators: { channels: channelSubset, window_s: oneOf([5, 10, 30]) },
     channels: () => ['link'],
@@ -285,19 +315,19 @@ const specs: Spec[] = [
       { value: 5, label: '5 s' }, { value: 10, label: '10 s' }, { value: 30, label: '30 s' }] }],
   },
   {
-    type: 'health', title: 'Health and flags', min: { w: 3, h: 3 }, phoneMinH: 5,
+    type: 'health', title: 'Health and flags', min: { w: 5, h: 5 }, phoneMinH: 10,
     defaults: { source: 'best' }, validators: { source: oneOf(SOURCES) },
     channels: (c) => flightChannels(c.source), settings: [sourceField],
     component: () => import('../../cards/HealthCard.svelte'),
   },
   {
-    type: 'gps', title: 'GPS status', min: { w: 2, h: 3 }, phoneMinH: 4,
+    type: 'gps', title: 'GPS status', min: { w: 3, h: 5 }, phoneMinH: 8,
     defaults: { source: 'best' }, validators: { source: oneOf(SOURCES) },
     channels: (c) => flightChannels(c.source), settings: [sourceField],
     component: () => import('../../cards/GpsCard.svelte'),
   },
   {
-    type: 'frames', title: 'Raw frames', min: { w: 3, h: 4 }, phoneMinH: 6,
+    type: 'frames', title: 'Raw frames', min: { w: 5, h: 6 }, phoneMinH: 12,
     defaults: { filter: 'all', view: 'text' },
     validators: { filter: oneOf(['all', 'A', 'B', 'best']), view: oneOf(['text', 'hex']) },
     channels: () => ['frames'],
@@ -334,8 +364,8 @@ export function minOfType(type: string): Required<MinSize> {
 }
 
 /** The title a card shows: its own, else the type's (which may depend on config), else the raw type. */
-export function cardTitle(card: Pick<GridCard, 'type' | 'title' | 'config'>): string {
+export function cardTitle(card: Pick<GridCard, 'type' | 'title' | 'config'>, schema: FlightSchema | null = null): string {
   if (card.title) return card.title;
   const m = REGISTRY[card.type];
-  return m ? (m.titleOf?.(sanitizeConfig(card.type, card.config)) ?? m.title) : card.type;
+  return m ? (m.titleOf?.(sanitizeConfig(card.type, card.config), schema) ?? m.title) : card.type;
 }

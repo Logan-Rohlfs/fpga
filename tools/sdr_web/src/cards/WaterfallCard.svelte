@@ -52,8 +52,9 @@
     ctx.fillStyle = cssVar('--faint');
     ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
     ctx.textAlign = 'right';
-    ctx.fillText(`${high}`, PAD.left - 6, 12);
-    ctx.fillText(`${low}`, PAD.left - 6, h - axisH - 2);
+    // The auto scale tracks the noise floor continuously, so the limits are fractional: show whole dB.
+    ctx.fillText(high.toFixed(0), PAD.left - 6, 12);
+    ctx.fillText(low.toFixed(0), PAD.left - 6, h - axisH - 2);
     ctx.fillText('dBFS', PAD.left - 6, (h - axisH) / 2);
   }
 
