@@ -9,7 +9,7 @@ import unittest
 
 from link_samples import rom_flight_frames, sample_stream
 from sdr_cli import fanout, gui_wire, protocol as p, roles as r
-from sdr_cli import freqplan, sources
+from sdr_cli import freqplan, presets as presets_mod, sources
 from sdr_cli.core import ToolError
 from sdr_cli.hub import Hub
 
@@ -117,9 +117,12 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         self.server, self.client = await self.start(
             lambda get_tuning: SampleOnce(lambda: self.server is not None and self.server.clients))
 
-    async def start(self, factory, hub=None, sleep=None):
+    async def start(self, factory, hub=None, sleep=None, presets=True):
         roles = r.RoleManager(r.hash_password('pw', iterations=1000))
-        server = GuiServer(factory, roles, self.state_path, static_dir=self.static, hub=hub)
+        if presets is True:
+            presets = presets_mod.PresetStore(presets_mod.BUILTIN_DIR, Path(self.tmp.name) / 'gui/presets',
+                                              Path(self.tmp.name) / 'gui/preset_state.json')
+        server = GuiServer(factory, roles, self.state_path, static_dir=self.static, hub=hub, presets=presets)
         server.BAD_PASSWORD_DELAY_S = 0
         if sleep is not None:
             server.sleep = sleep
@@ -181,6 +184,81 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fixed['carrier_hz'], 441_480_000)
         await viewer.close()
 
+    def preset(self, pid='mine'):
+        obj = json.loads((presets_mod.BUILTIN_DIR / 'flight.json').read_text())
+        obj.update(id=pid, name='Mine')
+        return obj
+
+    async def operator(self):
+        ws, _ = await self.connect()
+        await ws.send_json(dict(type='login', password='pw', label='gs'))
+        await self.recv(ws, self.of('role', role='admin'))
+        return ws
+
+    async def test_hello_is_followed_by_presets(self):
+        ws = await self.client.ws_connect('/ws')
+        first = await self.next_msg(ws)
+        self.assertEqual(first['type'], 'hello')
+        msg = await self.recv(ws, self.of('presets'))
+        self.assertEqual((msg['live'], msg['default'], msg['auto_switch']), ('flight', 'flight', False))
+        self.assertEqual([i['id'] for i in msg['items']], ['flight'])
+        await ws.close()
+
+    async def test_viewer_preset_messages_are_refused_and_change_nothing(self):
+        viewer, _ = await self.connect()
+        for msg in (dict(type='preset_save', preset=self.preset(), base_revision=None),
+                    dict(type='preset_delete', id='flight'),
+                    dict(type='preset_set_live', id='flight'),
+                    dict(type='preset_set_default', id='flight')):
+            await viewer.send_json(msg)
+            self.assertEqual((await self.recv(viewer, self.of('error')))['code'], 'not_admin', msg['type'])
+        self.assertFalse((Path(self.tmp.name) / 'gui').exists())
+        await viewer.close()
+
+    async def test_operator_save_is_broadcast_to_other_clients(self):
+        viewer, _ = await self.connect()
+        await self.recv(viewer, self.of('presets'))
+        operator = await self.operator()
+        await operator.send_json(dict(type='preset_save', preset=self.preset(), base_revision=None))
+        for ws in (viewer, operator):
+            msg = await self.recv(ws, lambda m: m['type'] == 'presets' and len(m['items']) == 2)
+            mine = [i for i in msg['items'] if i['id'] == 'mine'][0]
+            self.assertEqual(mine['revision'], 1)
+        await operator.send_json(dict(type='preset_save', preset=self.preset(), base_revision=1))
+        msg = await self.recv(viewer, lambda m: m['type'] == 'presets'
+                              and [i['revision'] for i in m['items'] if i['id'] == 'mine'] == [2])
+        await operator.send_json(dict(type='preset_set_live', id='mine'))
+        self.assertEqual((await self.recv(viewer, lambda m: m['type'] == 'presets' and m['live'] == 'mine'))['live'],
+                         'mine')
+        await operator.send_json(dict(type='preset_set_default', id='mine'))
+        await self.recv(viewer, lambda m: m['type'] == 'presets' and m['default'] == 'mine')
+        await operator.send_json(dict(type='preset_delete', id='mine'))
+        self.assertEqual((await self.recv(operator, self.of('error')))['code'], 'preset_in_use')
+        await operator.close()
+        await viewer.close()
+
+    async def test_operator_preset_errors_are_replied_with_codes(self):
+        operator = await self.operator()
+        await operator.send_json(dict(type='preset_save', preset=self.preset('flight'), base_revision=None))
+        self.assertEqual((await self.recv(operator, self.of('error')))['code'], 'preset_readonly')
+        await operator.send_json(dict(type='preset_save', preset='nope', base_revision=None))
+        self.assertEqual((await self.recv(operator, self.of('error')))['code'], 'preset_bad_schema')
+        await operator.send_json(dict(type='preset_set_live', id='ghost'))
+        self.assertEqual((await self.recv(operator, self.of('error')))['code'], 'preset_missing')
+        await operator.close()
+
+    async def test_without_a_store_presets_are_disabled(self):
+        server, client = await self.start(lambda get_tuning: Idle(), presets=None)
+        ws = await client.ws_connect('/ws')
+        await self.recv(ws, self.of('hello'))
+        await ws.send_json(dict(type='login', password='pw', label='gs'))
+        await self.recv(ws, self.of('role', role='admin'))
+        await ws.send_json(dict(type='preset_set_live', id='flight'))
+        self.assertEqual((await self.recv(ws, self.of('error')))['code'], 'preset_missing')
+        await ws.send_json(dict(type='ping'))
+        self.assertEqual((await self.next_msg(ws))['type'], 'pong')   # no presets message was queued
+        await ws.close()
+
     async def test_index_and_hello(self):
         resp = await self.client.get('/')
         self.assertEqual(resp.status, 200)
@@ -241,7 +319,7 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         self.assertFalse([m for m in seen if isinstance(m, bytes)])
-        self.assertTrue({m['type'] for m in seen} <= {'stats', 'role', 'tuning'}, {m['type'] for m in seen})
+        self.assertTrue({m['type'] for m in seen} <= {'stats', 'role', 'tuning', 'presets'}, {m['type'] for m in seen})
         self.assertIn('stats', {m['type'] for m in seen})
         await ws.close()
 

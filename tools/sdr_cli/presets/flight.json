@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "id": "flight",
+  "name": "Flight",
+  "revision": 1,
+  "grid": {"cols": 12},
+  "cards": [
+    {"id": "state", "type": "state", "x": 0, "y": 0, "w": 3, "h": 3, "title": null,
+     "config": {"source": "best", "show_time_in_phase": true}},
+    {"id": "alt", "type": "number", "x": 3, "y": 0, "w": 3, "h": 3, "title": "Altitude",
+     "config": {"field": "alt_agl_m", "source": "best", "digits": 0, "track_minmax": true,
+                "thresholds": [], "units": {}}},
+    {"id": "altplot", "type": "plot", "x": 0, "y": 3, "w": 6, "h": 7, "title": "Altitude",
+     "config": {"series": [{"field": "alt_agl_m", "source": "best"}],
+                "window_s": 60, "show_events": true, "units": {}}}
+  ],
+  "triggers": []
+}

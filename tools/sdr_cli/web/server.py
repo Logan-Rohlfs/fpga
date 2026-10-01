@@ -20,6 +20,7 @@ from .. import __version__, apex, freqplan
 from ..core import ToolError
 from ..fanout import CHANNELS, Outbox
 from ..hub import Hub, dumps
+from ..presets import BUILTIN_DIR, PresetError, PresetStore
 from ..protocol import PROTOCOL_VERSION
 from ..roles import ADMIN, RoleManager
 from ..sources import Backoff, classify_open_error, from_args
@@ -31,6 +32,8 @@ LOCAL_ADDRESSES = ('127.0.0.1', '::1')
 BUILD_HINT = 'GUI is not built. Run: cd tools/sdr_web && npm install && npm run build'
 BUSY_DETAIL = '{} is held by another process (another ./sdr gui, ./sdr tui or receive?). Close it; retrying.'
 WSAEADDRINUSE = 10048
+PRESET_ACTIONS = dict(preset_save='save presets', preset_delete='delete presets',
+                      preset_set_live='choose the live preset', preset_set_default='choose the default preset')
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +82,8 @@ class GuiServer:
     RETRY = Backoff
     sleep = staticmethod(asyncio.sleep)   # injectable: the serial supervisor's retry wait
 
-    def __init__(self, source_factory, roles, state_path, static_dir=STATIC_DIR, hub=None, clock=time.monotonic):
+    def __init__(self, source_factory, roles, state_path, static_dir=STATIC_DIR, hub=None, clock=time.monotonic,
+                 presets=None):
         self.source_factory = source_factory
         self.roles = roles
         self.state_path = Path(state_path)
@@ -88,6 +92,7 @@ class GuiServer:
         self.dirty = False
         self.hub = hub or Hub()
         self.clock = clock
+        self.presets = presets   # None disables the preset features
         self.clients = {}
         self.source_task = None
         self.tasks = []
@@ -323,6 +328,8 @@ class GuiServer:
                         source=dict(self.hub.source), role=role, budget=role['budget'],
                         tuning=self.tuning_message(), flight_schema=apex.flight_schema(),
                         channels=list(CHANNELS), sites=[]))
+        if self.presets is not None:
+            client.put(self.presets.message())
         client.outbox.offer(self.hub.stats_outgoing())
         sender = asyncio.ensure_future(self._send_loop(client))
         try:
@@ -406,8 +413,35 @@ class GuiServer:
                 self.wake().set()   # the serial supervisor retries at once, keeping its back-off
             else:
                 await self.start_source()
+        elif kind in PRESET_ACTIONS:
+            self._preset_action(client, kind, data, is_admin)
         else:
             client.put(error('unknown_type', 'Unknown message type: {}'.format(kind)))
+
+    def _preset_action(self, client, kind, data, is_admin):
+        if not is_admin:
+            client.put(error('not_admin', 'Only the Operator can {}.'.format(PRESET_ACTIONS[kind])))
+            return
+        if self.presets is None:
+            client.put(error('preset_missing', 'Presets are not available on this server.'))
+            return
+        try:
+            if kind == 'preset_save':
+                self.presets.save(data.get('preset'), data.get('base_revision'))
+            elif kind == 'preset_delete':
+                self.presets.delete(data.get('id'))
+            elif kind == 'preset_set_live':
+                self.presets.set_live(data.get('id'))
+            else:
+                self.presets.set_default(data.get('id'))
+        except PresetError as exc:
+            client.put(error(exc.code, exc.text))
+            return
+        except OSError as exc:
+            logger.exception('GUI preset write failed')
+            client.put(error('preset_write_failed', 'The preset could not be written: {}'.format(exc)))
+            return
+        self.broadcast(self.presets.message())
 
     def _subscribe(self, client, channels):
         if not isinstance(channels, list) or not all(isinstance(c, str) for c in channels):
@@ -485,7 +519,8 @@ def run_gui(root, config, args):
         raise ToolError(BUILD_HINT)
     factory = from_args(config, args.source, file=args.file, speed=args.speed, loop=args.loop)
     roles = RoleManager(config.get('gui_admin_hash', ''))
-    server = GuiServer(factory, roles, root / '.sdr/gui_state.json')
+    presets = PresetStore(BUILTIN_DIR, root / '.sdr/gui/presets', root / '.sdr/gui/preset_state.json')
+    server = GuiServer(factory, roles, root / '.sdr/gui_state.json', presets=presets)
     host = '0.0.0.0' if args.lan else '127.0.0.1'
     preflight_bind(host, args.http_port)
     url = 'http://127.0.0.1:{}/'.format(args.http_port)

@@ -20,4 +20,4 @@ where = ["tools"]
 include = ["sdr_cli*"]
 
 [tool.setuptools.package-data]
-sdr_cli = ["web/static/**/*", "sites.json"]
+sdr_cli = ["web/static/**/*", "sites.json", "presets/*.json"]
