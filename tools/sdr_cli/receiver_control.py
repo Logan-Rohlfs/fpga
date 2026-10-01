@@ -5,6 +5,22 @@ from .protocol import crc16_ccitt
 CONFIG = 0x02
 SAMPLE_RATE_HZ = 1_000_000
 BUILD_ID = 0x53445231
+APEX_DEMO_BUILD_ID = 0x53445246
+
+PROFILES = {
+    BUILD_ID: {'id': 'default', 'label': 'Default receiver profile (ADC test carrier)'},
+    APEX_DEMO_BUILD_ID: {
+        'id': 'apex_demo', 'label': 'APEX flight replay demo (IREC 2026)',
+        'rf_label': '441.480 MHz \u00b7 2GFSK \u00b125 kHz \u00b7 10 kbit/s (APEX RF4463 settings; ADC input simulated)'},
+}
+
+
+def profile_for(build_id):
+    """Profile description for a STATUS build_id; unknown builds are labelled, never guessed."""
+    profile = PROFILES.get(build_id)
+    if profile is not None:
+        return dict(profile)
+    return {'id': 'unknown', 'label': 'Unknown build 0x%08X' % build_id}
 
 
 def command(sequence, carrier_ftw, nco_ftw, enable=True):

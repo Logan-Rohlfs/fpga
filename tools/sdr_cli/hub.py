@@ -17,6 +17,7 @@ from .display import WaterfallScale
 from .events import EventDeriver
 from .fanout import Outgoing
 from .history import History
+from .receiver_control import profile_for
 from .protocol import CHANNELS, LinkState, StreamDecoder, bin_frequency, format_record, power_db
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,8 @@ class Hub:
 
     def _record(self, r, source):
         f = r.fields
+        if r.type == p.STATUS:
+            self.source['profile'] = profile_for(f['build_id'])
         if r.type == p.SPECTRUM:
             return [self._spectrum(r, source)] if f.get('channel') in CHANNELS else []
         if r.type in (p.BEST_TELEM, p.CHAN_FRAME):

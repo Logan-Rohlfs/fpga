@@ -375,7 +375,7 @@ class GuiServer:
                 self.broadcast_roles('logout')
         elif kind == 'use_compiled_profile':
             if not is_admin:
-                client.put(error('not_admin', 'Only the Admin can change tuning.'))
+                client.put(error('not_admin', 'Only the Operator can change tuning.'))
                 return
             if self.hub.source.get('kind') != 'serial' or not self.hub.source.get('responds_to_tuning'):
                 client.put(error('unsupported', 'No compatible receiver profile has been detected.'))
@@ -391,7 +391,7 @@ class GuiServer:
             self.send_tuning(self.clients.values())
         elif kind == 'tune':
             if not is_admin:
-                client.put(error('not_admin', 'Only the Admin can change tuning.'))
+                client.put(error('not_admin', 'Only the Operator can change tuning.'))
                 return
             try:
                 new = freqplan.update(self.tuning, data.get('changes'))
@@ -407,7 +407,7 @@ class GuiServer:
             self.send_tuning(self.clients.values())
         elif kind == 'reconnect_source':
             if not is_admin:
-                client.put(error('not_admin', 'Only the Admin can reconnect the source.'))
+                client.put(error('not_admin', 'Only the Operator can reconnect the source.'))
                 return
             if self.retrying and self.source_task and not self.source_task.done():
                 self.wake().set()   # the serial supervisor retries at once, keeping its back-off
@@ -470,9 +470,9 @@ class GuiServer:
             client.put(dict(type='takeover_required', held_by=result['held_by'], since=result['since']))
         elif result['code'] == 'bad_password':
             await asyncio.sleep(self.BAD_PASSWORD_DELAY_S)
-            client.put(error('bad_password', 'Wrong Admin password.'))
+            client.put(error('bad_password', 'Wrong Operator password.'))
         else:
-            client.put(error('no_password', 'No Admin password is set. Run ./sdr setup --gui-password on the '
+            client.put(error('no_password', 'No Operator password is set. Run ./sdr setup --gui-password on the '
                                             'server, or log in from the server machine itself.'))
 
 
@@ -529,7 +529,7 @@ def run_gui(root, config, args):
         for address in lan_addresses():
             print('  LAN: http://{}:{}/'.format(address, args.http_port))
         if not roles.password_hash:
-            print('  No Admin password is set: only this machine can become Admin (sdr setup --gui-password).')
+            print('  No Operator password is set: only this machine can become Operator (sdr setup --gui-password).')
     else:
         print('  Local only. Add --lan to let other devices on the network connect.')
     print('  Ctrl-C stops the server.')
