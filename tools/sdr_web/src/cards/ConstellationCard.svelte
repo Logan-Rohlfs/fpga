@@ -1,11 +1,11 @@
 <script lang="ts">
   // I/Q scatter of the last `persistence` snapshots, or instantaneous frequency against sample index.
-  // inst_freq is display math on a received snapshot (fs from the server's tuning state), not frequency planning.
+  // inst_freq is display math on a received snapshot, using that snapshot's own sample_rate_hz; not frequency planning.
   import { onMount } from 'svelte';
   import { instFreq, lastSnaps, niceStep } from '../lib/cards/spectral';
   import { cssVar, drawConstellation, fitCanvas } from '../lib/draw';
   import { scheduler } from '../lib/frame';
-  import { iqSnaps, synthetic, tuning } from '../lib/link';
+  import { iqSnapMeta, iqSnaps } from '../lib/link';
   import { appearanceVersion } from '../lib/theme';
   import type { Channel } from '../lib/types';
 
@@ -13,7 +13,9 @@
   const channel = $derived(config.channel as Channel);
   const mode = $derived(config.mode as string);
   const persistence = $derived(typeof config.persistence === 'number' ? config.persistence : 4);
-  const fs = $derived($tuning?.state.fs_hz ?? 0);
+  const metaList = $derived($iqSnapMeta[channel] ?? []);
+  const newest = $derived(metaList[metaList.length - 1]);
+  const fs = $derived(newest?.sample_rate_hz ?? 0);
   const colorVar = $derived(channel === 'A' ? '--ch-a' : '--ch-b');
   const count = $derived(($iqSnaps[channel] ?? []).length);
 
@@ -70,7 +72,7 @@
     const snaps = lastSnaps($iqSnaps[channel], persistence);
     if (!snaps.length) return message(ctx, w, h, `Waiting for channel ${channel} I/Q…`);
     if (mode === 'inst_freq') {
-      if (!(fs > 0)) return message(ctx, w, h, 'Waiting for the sample rate');
+      if (!(fs > 0)) return message(ctx, w, h, 'sample rate unavailable');
       return drawInstFreq(ctx, w, h, snaps[snaps.length - 1]);
     }
     const size = Math.min(w, h);
@@ -87,6 +89,7 @@
     void mode;
     void persistence;
     void fs;
+    void $iqSnapMeta;
     void $appearanceVersion;
     dirty();
   });
@@ -107,7 +110,7 @@
   <canvas bind:this={cv}
     aria-label={mode === 'inst_freq' ? `Channel ${channel} instantaneous frequency` : `Channel ${channel} I/Q constellation`}></canvas>
   <footer>
-    {#if $synthetic}<span class="pill synth" title="This session includes SYNTHETIC stand-in data, not RF measurements">SIMULATED</span>{/if}
+    {#if newest?.synthetic}<span class="pill synth" title="SYNTHETIC stand-in data, not an RF measurement">SIMULATED</span>{/if}
     <span class="note">Ch {channel}, {mode === 'inst_freq' ? 'inst. frequency' : 'I/Q'}, {Math.min(count, persistence)} of {persistence} snapshots</span>
   </footer>
 </div>

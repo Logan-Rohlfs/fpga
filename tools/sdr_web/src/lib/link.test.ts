@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from './wire.golden.json';
 import {
   FRAMES_MAX, LinkClient, dataVersion, droppedFrames, eventsStore, flightSchema, flightStores, frames,
-  frozen, handleMessage, hello, history, iqSnaps, linkStatsRing, metrics, metricsStores, onSpectrum, onSpectrumReset,
+  frozen, handleMessage, hello, history, iqSnapMeta, iqSnaps, linkStatsRing, metrics, metricsStores, onSpectrum, onSpectrumReset,
   frozenView, presets, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
 } from './link';
 import type { FlightSchema, GuiEvent, HelloMsg, RecordMsg } from './types';
@@ -88,6 +88,9 @@ describe('handleMessage', () => {
     expect(get(metrics).B?.fields.rssi_dbm).toBe(-80);
     expect(history.B.rssi.values()).toEqual([-80]);
     expect(get(iqSnaps).A).toEqual([[[1, 2]]]);
+    expect(get(iqSnapMeta).A).toEqual([{ sample_rate_hz: null, synthetic: true }]);
+    handleMessage(record('IQ_SNAPSHOT', { channel: 'A', iq: [[3, 4]], sample_rate_hz: 100000 }));
+    expect(get(iqSnapMeta).A?.[1].sample_rate_hz).toBe(100000);
     const m = metricsStores.B;
     expect(m.length).toBe(1);
     expect(m.timeAt(0)).toBe(7);

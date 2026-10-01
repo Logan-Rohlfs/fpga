@@ -84,6 +84,8 @@
       if (ch !== channel) return;
       image = null;
       last = null;
+      synth = false;
+      bins = 0;
       dirty();
     });
     const ro = new ResizeObserver(dirty);

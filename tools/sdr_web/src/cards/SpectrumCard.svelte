@@ -97,6 +97,9 @@
       delete rows[ch];
       delete peakRows[ch];
       peaks[ch].reset();
+      const rest = Object.values(rows);
+      synth = rest.some((r) => r.synthetic);
+      bins = rest.length ? rest[0].bins : 0;
       dirty();
     });
     const ro = new ResizeObserver(dirty);
