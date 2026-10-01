@@ -126,3 +126,15 @@ describe('toWire', () => {
     expect(w).toMatchObject({ schema: 1, id: 'copy', name: 'Copy', grid: { cols: 12 } });
   });
 });
+
+describe('serverState', () => {
+  it('works with no working copy, for builtin, default and plain presets', async () => {
+    const { serverState } = await load();
+    const m = msg('a');
+    expect(serverState(m, 'a')).toEqual({ saved: true, builtin: false, canDelete: true });
+    expect(serverState(m, 'flight')).toEqual({ saved: true, builtin: true, canDelete: false });
+    expect(serverState(m, 'gone')).toEqual({ saved: false, builtin: false, canDelete: false });
+    expect(serverState(null, 'a').canDelete).toBe(false);
+    expect(serverState({ ...m, default: 'a' }, 'a').canDelete).toBe(false);
+  });
+});

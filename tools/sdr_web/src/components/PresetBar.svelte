@@ -5,11 +5,11 @@
 
   interface Entry { id: string; name: string; builtin: boolean }
   let {
-    entries, shownId, liveId, defaultId, follow, operator, edit, dirty, stale, saved, builtin, saveAsPending,
+    entries, shownId, liveId, defaultId, follow, operator, edit, dirty, stale, saved, builtin, canDelete, saveAsPending,
     onselect, onfollow, onedit, onsave, onsaveas, ondiscard, ondelete, onsetlive, onsetdefault,
   }: {
     entries: Entry[]; shownId: string | null; liveId: string; defaultId: string; follow: boolean; operator: boolean;
-    edit: boolean; dirty: boolean; stale: Stale; saved: boolean; builtin: boolean; saveAsPending: boolean;
+    edit: boolean; dirty: boolean; stale: Stale; saved: boolean; builtin: boolean; canDelete: boolean; saveAsPending: boolean;
     onselect: (id: string) => void; onfollow: (on: boolean) => void; onedit: (on: boolean) => void; onsave: () => void;
     onsaveas: (name: string) => void; ondiscard: () => void; ondelete: () => void; onsetlive: () => void; onsetdefault: () => void;
   } = $props();
@@ -56,7 +56,7 @@
     <button class="btn" disabled={!saved || dirty || shownId === liveId} onclick={onsetlive}
       title={dirty ? 'Save first' : undefined}>Show to viewers</button>
     <button class="btn" disabled={!saved || dirty || shownId === defaultId} onclick={onsetdefault}>Make default</button>
-    <button class="btn" disabled={!saved || builtin || shownId === defaultId} onclick={ondelete}
+    <button class="btn" disabled={!canDelete} onclick={ondelete}
       title={shownId === defaultId ? 'Choose another default first' : undefined}>Delete</button>
   {/if}
 </div>

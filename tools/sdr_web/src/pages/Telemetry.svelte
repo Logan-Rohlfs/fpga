@@ -7,7 +7,7 @@
   import type { GridCard } from '../lib/grid';
   import { deletePreset, notify, presets, role, savePreset, setDefaultPreset, setLivePreset } from '../lib/link';
   import {
-    type Preset, choose, chosenStore, displayedPreset, editStatus, followStore, makeWorkingCopy, settleWorking, slugify,
+    type Preset, choose, chosenStore, displayedPreset, editStatus, followStore, makeWorkingCopy, serverState, settleWorking, slugify,
     toWire, uniqueId,
   } from '../lib/presets';
   import { telemetryChannels } from '../lib/view';
@@ -21,10 +21,17 @@
   const cards = $derived<GridCard[]>(shown?.cards ?? []);
   // What a write is waiting on: the server's `presets` broadcast is the only confirmation.
   let pendingSave: { id: string; name: string } | null = null;
+  let pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  const server = $derived(serverState($presets, shown?.id ?? null));
   let pendingAs = $state<{ id: string; name: string } | null>(null);
   let pendingAsTimer: ReturnType<typeof setTimeout> | null = null;
   let staleKey = '';
 
+  function clearPendingSave() {
+    pendingSave = null;
+    if (pendingSaveTimer) clearTimeout(pendingSaveTimer);
+    pendingSaveTimer = null;
+  }
   function clearPendingAs() {
     pendingAs = null;
     if (pendingAsTimer) clearTimeout(pendingAsTimer);
@@ -36,7 +43,7 @@
     if (!operator) {
       working = null;
       edit = false;
-      pendingSave = null;
+      clearPendingSave();
       clearPendingAs();
     }
   });
@@ -46,7 +53,7 @@
     const w = working;
     if (w && settleWorking(w, $presets) === null) {
       if (pendingSave?.id === w.id) notify(`Saved "${pendingSave.name}".`);
-      pendingSave = null;
+      clearPendingSave();
       working = null;
     }
   });
@@ -99,7 +106,9 @@
   }
   function save() {
     if (!working || !status.saved || status.builtin) return;
+    clearPendingSave();
     pendingSave = { id: working.id, name: working.name };
+    pendingSaveTimer = setTimeout(clearPendingSave, 8000);   // a refusal arrives as an error notice, not a broadcast
     savePreset(toWire(working), working.revision);
   }
   function saveAs(name: string) {
@@ -112,11 +121,14 @@
     savePreset(toWire(base, name, id), null);
   }
   function discard() {
-    if (confirm('Discard your unsaved layout changes?')) working = null;
+    if (confirm('Discard your unsaved layout changes?')) {
+      clearPendingSave();
+      working = null;
+    }
   }
   function remove() {
     const id = shown?.id;
-    if (id && status.saved && confirm(`Delete the layout "${shown!.name}"?`)) deletePreset(id);
+    if (id && server.canDelete && confirm(`Delete the layout "${shown!.name}"?`)) deletePreset(id);
   }
 </script>
 
@@ -127,7 +139,7 @@
 {:else}
   <PresetBar entries={$presets.items} shownId={shown.id} liveId={$presets.live} defaultId={$presets.default}
     follow={$followStore} {operator} {edit} dirty={status.dirty} stale={status.stale}
-    saved={!!(working ? status.saved : displayed)} builtin={working ? status.builtin : !!$presets.items.find((p) => p.id === shown.id)?.builtin}
+    saved={server.saved} builtin={server.builtin} canDelete={server.canDelete}
     saveAsPending={!!pendingAs}
     onselect={select} onfollow={follow} onedit={(on) => (edit = on)} onsave={save} onsaveas={saveAs} ondiscard={discard}
     ondelete={remove} onsetlive={() => setLivePreset(shown.id)} onsetdefault={() => setDefaultPreset(shown.id)} />

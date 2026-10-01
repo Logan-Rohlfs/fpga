@@ -118,8 +118,13 @@ export function uniqueId(base: string, taken: Iterable<string>): string {
   }
 }
 
-
 /** The body sent with preset_save. The server assigns the revision, so it is left out. */
 export function toWire(p: Preset, name: string = p.name, id: string = p.id): Omit<Preset, 'revision'> {
   return { schema: 1, id, name, grid: { cols: 12 }, cards: p.cards, triggers: p.triggers };
+}
+
+/** What the server holds for `id`: whether it exists, whether it is builtin, and whether Delete may be offered. */
+export function serverState(msg: PresetsMsg | null, id: string | null): { saved: boolean; builtin: boolean; canDelete: boolean } {
+  const item = msg && id ? msg.items.find((p) => p.id === id) : undefined;
+  return { saved: !!item, builtin: !!item?.builtin, canDelete: !!item && !item.builtin && msg!.default !== id };
 }
