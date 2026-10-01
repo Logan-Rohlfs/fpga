@@ -34,6 +34,9 @@ export const status = writable<RecordJson | null>(null);
 export const linkStats = writable<RecordJson | null>(null);
 export const metrics = writable<Partial<Record<Channel, RecordJson>>>({});
 export const iqSnaps = writable<Partial<Record<Channel, [number, number][][]>>>({});
+/** Per-snapshot metadata, index-aligned with `iqSnaps`: the snapshot's own sample rate (null if absent) and SYNTHETIC flag. */
+export interface IqSnapMeta { sample_rate_hz: number | null; synthetic: boolean }
+export const iqSnapMeta = writable<Partial<Record<Channel, IqSnapMeta[]>>>({});
 export const presets = writable<PresetsMsg | null>(null);
 export const takeover = writable<TakeoverMsg | null>(null);
 export const notices = writable<Notice[]>([]);
@@ -275,6 +278,9 @@ function applyRecord(msg: RecordMsg): void {
     case 'IQ_SNAPSHOT': {
       const ch = r.fields.channel as Channel;
       iqSnaps.update((s) => ({ ...s, [ch]: [...(s[ch] ?? []), r.fields.iq].slice(-4) }));
+      const rate = r.fields.sample_rate_hz;
+      const entry: IqSnapMeta = { sample_rate_hz: typeof rate === 'number' && rate > 0 ? rate : null, synthetic: r.synthetic };
+      iqSnapMeta.update((s) => ({ ...s, [ch]: [...(s[ch] ?? []), entry].slice(-4) }));
       break;
     }
   }
@@ -318,7 +324,7 @@ function resetChannel(channel: string, count: number): void {
       if (sub === 'A' || sub === 'B') for (const fn of spectrumResetListeners) fn(sub);
       break;
     case 'iq':
-      if (sub === 'A' || sub === 'B') iqSnaps.update((s) => ({ ...s, [sub]: [] }));
+      if (sub === 'A' || sub === 'B') { iqSnaps.update((s) => ({ ...s, [sub]: [] })); iqSnapMeta.update((s) => ({ ...s, [sub]: [] })); }
       break;
     case 'events':
       eventsStore.set([]);
@@ -375,6 +381,7 @@ export function resetState(): void {
   [hello, role, tuning, stats, status, linkStats, takeover, flightSchema, presets].forEach((s) => s.set(null));
   metrics.set({});
   iqSnaps.set({});
+  iqSnapMeta.set({});
   frames.set([]);
   frozen.set(false);
   synthetic.set(false);

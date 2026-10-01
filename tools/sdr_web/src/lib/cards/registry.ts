@@ -230,6 +230,7 @@ const specs: Spec[] = [
   },
   {
     type: 'waterfall', title: 'Waterfall', min: { w: 3, h: 3 }, phoneMinH: 5,
+    component: () => import('../../cards/WaterfallCard.svelte'),
     defaults: { channel: 'A', scale: 'auto' },
     validators: { channel: oneOf(['A', 'B']), scale: autoOr('low', 'high') },
     channels: (c) => [`spectrum.${c.channel}`],
@@ -237,6 +238,7 @@ const specs: Spec[] = [
   },
   {
     type: 'spectrum', title: 'Spectrum', min: { w: 3, h: 3 }, phoneMinH: 5,
+    component: () => import('../../cards/SpectrumCard.svelte'),
     defaults: { channel: 'both', peak_hold: false, peak_decay_s: 10 },
     validators: { channel: oneOf(['A', 'B', 'both']), peak_hold: bool, peak_decay_s: numIn(0, 60) },
     channels: (c) => (c.channel === 'both' ? ['spectrum.A', 'spectrum.B'] : [`spectrum.${c.channel}`]),
@@ -248,6 +250,7 @@ const specs: Spec[] = [
   },
   {
     type: 'constellation', title: 'Constellation', min: { w: 2, h: 3 }, phoneMinH: 5,
+    component: () => import('../../cards/ConstellationCard.svelte'),
     defaults: { channel: 'A', mode: 'iq', persistence: 4 },
     validators: { channel: oneOf(['A', 'B']), mode: oneOf(['iq', 'inst_freq']), persistence: intIn(1, 4) },
     channels: (c) => [`iq.${c.channel}`],
