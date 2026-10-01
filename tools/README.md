@@ -88,12 +88,14 @@ host arrival of chunks, not ADC sample times. Ctrl-C returns status 130; failed
 commands return nonzero. `flash` is an explicit persistent write, whereas
 `program` is the normal development command.
 
-The FPGA link is transmit-only. Sending bytes does not control the receiver or
-produce an acknowledgement.
+The only command the FPGA accepts is UART tuning (receiver control), which it
+acknowledges with a CONFIG record. Any other bytes sent have no receiver and
+produce no acknowledgement.
 
-Every current metric, frame, spectrum and I/Q message comes from stand-in FPGA
-producers and is labelled SIMULATED. Real RF numbers arrive only when the
-receiver stages replace those producers. The protocol lives in
+The receiver logic (DDC, discriminator, framing, CRC, combiner, DFT and metrics)
+is real, but its ADC input is generated in the FPGA, so every message keeps the
+SYNTHETIC flag and is labelled SIMULATED. Real RF numbers arrive only when a
+real ADC feeds the chain. The protocol lives in
 `sdr_cli/protocol.py`, and APEX frames are parsed provisionally in
 `sdr_cli/apex.py`. An old bitstream that still prints `SDR READY` is reported as
 a legacy heartbeat; view it with `--format text --baud 115200`.

@@ -1,23 +1,71 @@
 # SDR handoff
 
 Checkpoint updated 2026-10-01 (branch `gui-prep`). **The host link layer works
-on hardware. A sample-driven receiver chain closed timing at 100 MHz on an
-earlier RTL; the current RTL has not been through Vivado (see Timing and area).**
+on hardware. The sample-driven receiver chain closes timing at 100 MHz on the
+current RTL (128-bin DFT, both variants), and the RocketPy demo is flashed and
+streaming on the board (see Timing and area).**
 GUI v1, the source combiner, the receiver chain and the APEX flight replay demo
 are implemented. The FPGA sends every message type at 1 Mbaud, and the `sdr` CLI
 and dashboard decode and display them.
 
 **Provenance:** only the ADC waveform is synthetic now. Everything downstream
 (DDC, filtering, discriminator, symbol timing, frame sync, CRC, combiner, I/Q,
-64-bin DFT, metrics) is real logic operating on that synthetic input, so
+128-bin DFT, metrics) is real logic operating on that synthetic input, so
 messages keep the `SYNTHETIC` flag. The earlier "all content SIMULATED by
 stand-in producers" statement is superseded; the legacy stand-in producers
 (`link_test_sources.sv`) remain only as explicitly named test fixtures. The
 planned stages are in [`docs/sdr_pipeline.drawio`](sdr_pipeline.drawio).
 
-**Next work:** (1) the GUI overhaul, see [GUI overhaul progress](#gui-overhaul-progress-in-progress);
+**Next work:** (1) continued GUI work, see [GUI continuation: start here](#gui-continuation-start-here);
 (2) the open receiver-plan tasks, see [Remaining receiver-plan work](#remaining-receiver-plan-work).
 If you are resuming cold, read those two sections first.
+
+## GUI continuation: start here
+
+State on 2026-10-01: the GUI cards plan is complete, and the board runs the
+128-bin RocketPy demo bitstream from flash. `./sdr gui` (serial) shows it live;
+`./sdr gui --source demo` replays the same flight without a board.
+
+- **Backlog:** user-requested work, each needing a short design pass first, is in
+  [gui-backlog](superpowers/plans/2026-10-01-gui-backlog.md):
+  - 3D card follow/orbit camera modes.
+  - Ground beyond the map tiles (fade, recommended, or globe).
+  - Plot event-marker readability: labels overlap, and markers share the line colour.
+  - A launch-synced demo video in the camera card.
+- **Status and open checks:** see [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md).
+- **Spec:** [GUI cards design](superpowers/specs/2026-09-30-gui-cards-design.md).
+  Camera-card and 3D-card changes amend it.
+- **Demo video:** a public-domain NASA onboard clip is downloaded locally to the
+  ignored `.sdr/media/sounding_rocket_onboard.mp4` (liftoff about 20.5 s in). It is
+  not tracked; re-download from the Commons link in the backlog if it is missing.
+- **Viewer bandwidth:** at 128 bins the Flight-preset viewer load is 9.75 kB/s
+  against the 10 kB/s budget (`test_fanout`). New streamed content needs that
+  budget revisited.
+- **Frontend checks:** the frontend was not changed in the 2026-10-01 session. Run
+  the frontend checks from `AGENTS.md` before and after GUI work.
+- **Stale CLI help:** `./sdr send` help still says the FPGA "has no command receiver".
+  UART tuning (`SR` commands) is received and acknowledged with CONFIG; raw sends
+  are not. Reword it when touching `cli.py`.
+
+## Hardware readiness (planning note, 2026-10-01)
+
+The receiver logic is real and bit-exact against the Python reference, but its
+input is idealized. Connecting the XADC needs more than a front end:
+
+- **XADC itself:**
+  - Instantiate the XADC (simultaneous sampling, one aux channel per antenna).
+  - Add an unsigned-to-signed offset/scale adapter.
+  - Clear `SYNTHETIC` for measured data.
+- **Sample rate:** check UG480. The pipeline assumes exactly 1 MS/s, and the XADC
+  from a 100 MHz DCLK likely gives about 961.5 kS/s. That calls for a dedicated
+  clock, or re-parameterizing the NCO, decimation and samples per symbol.
+- **Analog path:**
+  - Check the Basys 3 JXADC filtering against a 100 kHz IF.
+  - The front end must reject the image, because a single real ADC cannot.
+- **Real-signal handling:**
+  - No AGC; detection thresholds were tuned to fixed synthetic amplitudes.
+  - No carrier-acquisition loop; crystal offset is covered only by the tested offsets.
+  - Gaussian BT is assumed, not measured.
 
 ## Sample-driven receiver continuation (timing evidence predates later RTL changes; review and board acceptance open)
 
@@ -28,7 +76,7 @@ transmitter settings. See the [receiver contract](superpowers/specs/2026-09-29-s
 [updated receiver guide](../projects/sdr/README.md).
 
 Implemented: synthetic signed ADC source, real DDC/decimator/discriminator/symbol
-recovery, configurable framing/CRC, existing combiner, actual I/Q and 64-bin DFT,
+recovery, configurable framing/CRC, existing combiner, actual I/Q and 128-bin DFT,
 relative dBFS measurements, and acknowledged UART test-carrier/NCO tuning.
 Legacy transport and host UI simulators remain explicitly named fixtures.
 
@@ -37,7 +85,7 @@ ADC vectors (clean, noisy/offset, corrupted CRC), RTL-generated ADC samples,
 no-signal/recovery, and complete UART/CONFIG tests. Host/GUI checks passed
 following independent review fixes.
 
-**Timing and area: closed on the earlier RTL only; not re-measured on the current RTL.** The first Vivado run failed setup at -16.941 ns
+**Timing and area (history; current numbers are in the next paragraph).** The first Vivado run failed setup at -16.941 ns
 with 97% LUTs (`build/sdr/failed-20260929-190956-6f3870be/`), and an intermediate
 run still failed by -12.430 ns (`failed-20260930-101513-6765bf0b`). The observer
 now reads from RAMs, the decimator divider is a pipelined reciprocal multiply,
@@ -50,13 +98,26 @@ pipelining advisories. The worst remaining path is in `source_combiner`
 (`frame_key` -> `a_older`, 12 logic levels), so margin is thin but positive.
 Intermediate failed reports are preserved under `build/sdr/failed-20260930-*`.
 
-**Staleness warning.** Every WNS/WHS/LUT figure here and in the demo section below was
-measured before Task 26 restructured `rx_observer` (RAM-backed, parameterized DFT
-length). That change alters the default bitstream netlist even at the default 64 bins,
-and the demo ROM has since changed to the RocketPy simulation. No Vivado build has run
-on the current RTL because the build host was offline. Run `./sdr build --all` and
-inspect timing and DRC for both variants before calling either bitstream timing-clean
-or board-ready.
+**Current RTL, newly measured 2026-10-01.** The figures above and in the demo
+section below predate Task 26 and the RocketPy ROM.
+- At 64 bins the default met timing (WNS +0.238 ns), but the RocketPy demo **failed**:
+  WNS −0.286 ns, 3 endpoints, all in `source_combiner`. The failing path ran
+  `output_key`/`frame_key` → duplicate checks → selection → the intake key compare
+  → `a_older`/`occupied`.
+- Fix: `source_combiner` now compares each incoming key against both slots before
+  selection, so the late `selected` only drives a 2:1 mux. Behavior is unchanged
+  and `./sdr sim` passes. At 64 bins this gave default +0.645 ns and demo +0.558 ns.
+- **`SPECTRUM_BINS` default is now 128** (781.25 Hz bins), raised by user request
+  because 64 looked blocky. `./sdr sim` passes. `./sdr build --all`:
+  - Default `20261001-130721-4d6ca21e`: WNS +0.305 ns, WHS +0.020 ns, 5,225 LUTs,
+    2 BRAM tiles, 41 DSPs.
+  - Demo `20261001-130721-599bfda5`: WNS +0.614 ns, WHS +0.016 ns, 5,699 LUTs,
+    18 BRAM tiles, 41 DSPs.
+  - DRC has 0 errors in both; the warnings are CFGBVS and DSP pipelining advisories.
+- The 128-bin demo is **flashed (persistent)**. Through `./sdr gui` on the board,
+  the agent observed 128-bin SPECTRUM rows, 0 CRC/COBS errors and no sequence gaps.
+  That is an observation, not the Task 3 acceptance run. The UART load at 128 bins
+  was not measured; it falls between the simulated 64- and 256-bin figures.
 
 **Parallel builds.** `./sdr build --all` builds the default and demo variants
 concurrently with Vivado threads sized from the host core count (`--cores N`
@@ -109,19 +170,20 @@ plan "Task 6 GUI flight readout".
 - Checkpoint rule: after each task the controller updates the line below. The
   system must stay functional at every task boundary except inside the 6-7 pair.
 
-**Current task: the GUI cards plan is complete on `gui-prep`, including Task 26 (FPGA DFT length), and the final whole-branch review is done with its fixes applied. Open: a Vivado build of the default and demo bitstreams on the current RTL (`./sdr build --all`; the build host was offline), a board run of the new RocketPy demo ROM, and a real-browser smoke pass.** See [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md) for status and what remains.
+**Current task: the GUI cards plan is complete, including Task 26 (FPGA DFT length). Both variants now build timing-clean at 128 bins, and the RocketPy demo is flashed and streaming (see Timing and area). Open: a watched full-flight run in a real browser, the Task 3 acceptance run, and the requested GUI additions in [gui-backlog](superpowers/plans/2026-10-01-gui-backlog.md).** See [gui-cards-remaining](superpowers/plans/2026-09-30-gui-cards-remaining.md) for status and what remains.
 
 **Verified checkpoint (GUI cards).**
 - Newly run for the final-review fix wave (2026-10-01): host suite (326 tests, OK, 3 skipped), vitest 275 pass, svelte-check 0 errors and 0 warnings, production build, and `./sdr sim` (all PASS, exit 0). No Vivado run and no board access in that wave.
 - Run earlier in this effort (sizing commit `e73b4b4`, not repeated for this commit): a headless-Chrome overflow probe at 1440x900 and 1920x1080 with `./sdr gui --source demo`, checking that no Flight preset card scrolls or clips.
-- Not verified: no hardware run of the new RocketPy demo ROM, and no Vivado build of it (resource use and timing unmeasured; the earlier recorded-log demo build numbers below do not apply). No phone or LAN viewer was tried. Camera capture and a server-side relay are not built (the camera card only embeds a stream URL).
+- Not verified: the RocketPy demo streams on the board, but no full flight has been watched end to end in a browser. No phone or LAN viewer was tried. Camera capture and a server-side relay are not built (the camera card only embeds a stream URL).
 - Task 26 (parameterized DFT length): `sdr_top` parameter `SPECTRUM_BINS` (64, 128 or 256; other values fail elaboration) sets the `rx_observer` DFT length.
   - Simulation: `rx_observer_tb` matches a floating-point DFT at 64, 128 and 256 points. The full `./sdr sim` passed with 256 as the default, and again with the default of 64.
   - Measured UART load, from a 2 s `sdr_top` simulation at hardware tick and STATUS rates: 10.5% of 1 Mbaud at 64 bins (demo 12.0%) and 14.4% at 256 (demo 15.9%).
-  - The default stays 64 by controller ruling. No Vivado build of the restructured `rx_observer` (any length) has run because the build host was offline. Timing, resources and DRC are therefore unmeasured even at 64, and earlier build numbers predate this RTL.
+  - The default is now 128, by user request on 2026-10-01; it was 64 by controller ruling. Both variants close timing at 128 (see Timing and area). 256 is still unbuilt on the current RTL.
   - Historical evidence, found at cleanup: the first Task 26 attempt (an earlier WIP of this RTL, `SPECTRUM_BINS=256` default) did reach Vivado on 2026-09-30 and **failed timing at 100 MHz**: default WNS −0.063 ns (1 failing endpoint, 5,427 LUTs), demo WNS −0.550 ns (3 failing endpoints; an earlier demo run −0.347 ns, 6,152 LUTs). Reports and artifact bundles are kept locally under `build/sdr/task26-first-attempt-reports/` (ignored). The current RTL differs, but expect 256 to need pipelining before it closes timing.
   - To enable 256 (390.625 Hz bins):
-    1. Decide the GUI viewer spectrum rate. At 256 bins a Flight-preset viewer receives about 12.3 kB/s, over the 10 kB/s budget.
+    1. Decide the GUI viewer spectrum rate. At 256 bins a Flight-preset viewer receives about 12.3 kB/s, over the 10 kB/s budget (128 measures 9.75 kB/s in `test_fanout`).
+    2a. Update `DEMO_SPEC_BINS` in `tools/sdr_cli/sources.py` and the spectrum rows in `test_fanout.viewer_load_bytes` (`test_sources` checks the former against `sdr_top`).
     2. Set `SPECTRUM_BINS=256` in `projects/sdr/rtl/sdr_top.sv` and `BINS = 256` in `projects/sdr/sim/receiver_top_tb.sv`.
     3. Run `./sdr sim`.
     4. Run `./sdr build --all` and confirm that WNS/WHS are at least 0 and DRC is clean for both variants. `check_receiver.py` follows the RTL default.
