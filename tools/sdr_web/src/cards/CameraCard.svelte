@@ -40,6 +40,9 @@
       <p class="note msg">No video source. The operator can set a stream URL in card settings.</p>
     {:else if status === 'error'}
       <p class="note msg">Video source unreachable: {config.url}</p>
+    {:else if !src}
+      <!-- The element is removed entirely so the browser drops the connection. -->
+      <p class="note msg">Stream paused while this card is off screen.</p>
     {:else if config.mode === 'video'}
       <!-- svelte-ignore a11y_media_has_caption -->
       <video {src} autoplay muted playsinline style:object-fit={config.fit} onerror={() => (errored = true)}></video>

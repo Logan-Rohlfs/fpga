@@ -94,6 +94,7 @@ interface Spec {
   channels(config: Config): string[];
   settings?: SettingField[];
   titleOf?(config: Config): string;
+  component?: CardMeta['component'];
 }
 
 function meta(spec: Spec): CardMeta {
@@ -110,7 +111,7 @@ function meta(spec: Spec): CardMeta {
   };
   return {
     type: spec.type, title: spec.title, min: spec.min, phoneMinH: spec.phoneMinH, defaults: spec.defaults,
-    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf,
+    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf, component: spec.component,
     channels: (config) => [...new Set(spec.channels(sanitize(config)))],
   };
 }
@@ -215,6 +216,7 @@ const specs: Spec[] = [
     defaults: { url: null, mode: 'mjpeg', fit: 'contain' },
     validators: { url: (v, d) => (v === null ? null : url(v, d)), mode: oneOf(['mjpeg', 'video']), fit: oneOf(['contain', 'cover']) },
     channels: () => [],
+    component: () => import('../../cards/CameraCard.svelte'),
     settings: [
       { key: 'url', label: 'Stream URL (http or https)', kind: 'text' },
       { key: 'mode', label: 'Mode', kind: 'select', options: [{ value: 'mjpeg', label: 'MJPEG' }, { value: 'video', label: 'Video' }] },
@@ -282,8 +284,6 @@ const specs: Spec[] = [
 ];
 
 export const REGISTRY: Record<string, CardMeta> = Object.fromEntries(specs.map((s) => [s.type, meta(s)]));
-
-REGISTRY.camera.component = () => import('../../cards/CameraCard.svelte');
 
 /** Per-type config defaults and clean-up; an unknown type's config passes through untouched. */
 export function sanitizeConfig(type: string, config: unknown): Config {
