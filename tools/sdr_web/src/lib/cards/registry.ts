@@ -213,6 +213,7 @@ const specs: Spec[] = [
     defaults: { site: null, layer: 'imagery', exaggeration: 1, source: 'best' },
     validators: { site: nullableText(40), layer: oneOf(['imagery', 'topo']), exaggeration: intIn(1, 5), source: oneOf(SOURCES) },
     channels: (c) => flightChannels(c.source),
+    component: () => import('../../cards/Trajectory3dCard.svelte'),
     settings: [...siteLayer, { key: 'exaggeration', label: 'Vertical exaggeration', kind: 'number', min: 1, max: 5 }, sourceField],
   },
   {
