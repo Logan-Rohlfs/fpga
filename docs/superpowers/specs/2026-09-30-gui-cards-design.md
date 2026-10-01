@@ -518,12 +518,12 @@ default), `A`, `B`, and, where noted, `both` (A and B overlaid).
 
 | Type | Config (defaults) | Channels | Min size |
 | --- | --- | --- | --- |
-| `plot` | `series: [{field, source}]` 1–6 (`[{alt_agl_m, best}]`); `window_s`: 10/30/60/120/300/0 = all (60); `y: 'auto' \| {min, max}` in display units ('auto'); `show_events` (true); `units` ({}) | `flight` / `flight.A` / `flight.B` per series source; `events` if `show_events`; `link` for metric series | 3×4 |
+| `plot` | `series: [{field, source}]` 1–6 (`[{alt_agl_m, best}]`); `window_s`: 10/30/60/120/300/0 = all (60); `y: 'auto' \| {min, max}` in display units ('auto'); `show_events` (true); `segment` current/all (current: only rows since the newest `flight_reset`; ring data is kept); `units` ({}) | `flight` / `flight.A` / `flight.B` per series source; `events` if `show_events` or `segment` is current; `link` for metric series | 3×4 |
 | `number` | `field` (alt_agl_m); `source` best/A/B/both (best); `digits` 0–3 (field default); `thresholds: [{above, level}]` with `above` in SI and level good/warn/bad ([]); `track_minmax` (false); `units` | flight channel of the source | 2×2 |
 | `state` | `source` (best); `show_time_in_phase` (true) | flight channel | 2×2 |
 | `events` | `category` flight/link (flight); `kinds` (all kinds of that category); `newest_first` (true) | `events` | 3×4 |
-| `map` | `site` (first registry site); `layer` imagery/topo (imagery); `follow` (true); `show_track` (true); `source` (best) | flight channel | 3×5 |
-| `trajectory3d` | `site`; `layer` (imagery); `exaggeration` 1–5 (1); `source` (best) | flight channel | 4×6 |
+| `map` | `site` (first registry site); `layer` imagery/topo (imagery); `follow` (true); `show_track` (true); `segment` current/all (current: only track rows since the newest `flight_reset`; ring data is kept); `source` (best) | flight channel; `events` if `segment` is current | 3×5 |
+| `trajectory3d` | `site`; `layer` (imagery); `exaggeration` 1–5 (1); `segment` current/all (current: only track rows since the newest `flight_reset`; ring data is kept); `source` (best) | flight channel; `events` if `segment` is current | 4×6 |
 | `camera` | `url` (null); `mode` mjpeg/video (mjpeg); `fit` contain/cover (contain) | none | 3×4 |
 | `waterfall` | `channel` A/B (A); `scale: 'auto' \| {low, high}` ('auto') | `spectrum.<ch>` | 3×3 |
 | `spectrum` | `channel` A/B/both (both); `peak_hold` (false); `peak_decay_s` 0–60, 0 = hold forever (10) | `spectrum.A`/`.B` | 3×3 |

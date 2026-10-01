@@ -6,7 +6,8 @@
   import 'uplot/dist/uPlot.min.css';
   import { cssVar } from '../lib/draw';
   import { scheduler } from '../lib/frame';
-  import { dataVersion, eventsStore, flightSchema, flightStores, metricsStores, serverNow } from '../lib/link';
+  import { dataVersion, eventsStore, flightSchema, flightStores, metricsStores, segmentStart, serverNow } from '../lib/link';
+  import { clampToSegment, segmentFloor } from '../lib/cards/segment';
   import { appearanceVersion } from '../lib/theme';
   import { unitFor, unitLabel, unitPrefs } from '../lib/units';
   import {
@@ -151,7 +152,8 @@
     const ins = inputs();
     const now = serverNow();
     reportStatus(ins, now);
-    range = viewRange(view, now, windowS, dataStart(ins));
+    const floor = segmentFloor(config.segment, $segmentStart);
+    range = clampToSegment(viewRange(view, now, windowS, Math.max(dataStart(ins), floor)), floor);
     // Scrubbing past the oldest data clamps; keep the stored offset in step so the drag does not wind up.
     if (view.paused && view.pausedAt !== null) view.offsetS = Math.max(0, view.pausedAt - range[1]);
     const data = ins.length === series.length
@@ -217,6 +219,8 @@
     void $dataVersion;
     void $eventsStore;
     void showEvents;
+    void config.segment;
+    void $segmentStart;
     untrack(() => scheduler.markDirty(id));
   });
 </script>

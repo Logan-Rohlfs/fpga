@@ -110,7 +110,8 @@
         "window_s": 60,
         "y": "auto",
         "show_events": true,
-        "units": {}
+        "units": {},
+        "segment": "current"
       }
     },
     {
@@ -135,7 +136,8 @@
         "window_s": 60,
         "y": "auto",
         "show_events": false,
-        "units": {}
+        "units": {},
+        "segment": "current"
       }
     },
     {
@@ -151,7 +153,8 @@
         "layer": "imagery",
         "follow": true,
         "show_track": true,
-        "source": "best"
+        "source": "best",
+        "segment": "current"
       }
     },
     {
@@ -166,7 +169,8 @@
         "site": "irec-pecos",
         "layer": "imagery",
         "exaggeration": 1,
-        "source": "best"
+        "source": "best",
+        "segment": "current"
       }
     },
     {

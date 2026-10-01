@@ -1,5 +1,6 @@
 /** The one WebSocket connection and the stores every component reads. */
 import { type Readable, derived, get, readable, writable } from 'svelte/store';
+import { latestSegmentStart } from './cards/segment';
 import { SeriesStore } from './series';
 import { createCoalescer } from './throttle';
 import type {
@@ -59,6 +60,8 @@ export const linkStatsRing = writable<LinkStatsPoint[]>([]);
 /** Power unit of the newest metrics (metrics_history or live CHAN_METRICS); null until one arrives. */
 export const powerUnit = writable<string | null>(null);
 export const eventsStore = writable<GuiEvent[]>([]);
+/** Server-clock time of the newest flight_reset (a new flight segment, such as each demo loop); null until one is seen. */
+export const segmentStart = writable<number | null>(null);
 /** The last FRAMES_MAX `frames` records, oldest first. */
 export const frames = writable<RecordMsg[]>([]);
 /** Bumped at most once per animation frame after any ring or store above changes. */
@@ -332,6 +335,7 @@ function resetChannel(channel: string, count: number): void {
       break;
     case 'events':
       eventsStore.set([]);
+      segmentStart.set(null);
       break;
     case 'link':
       for (const ch of ['A', 'B'] as Channel[]) metricsStores[ch].clear();
@@ -365,8 +369,14 @@ export function handleMessage(msg: ServerMsg | ArrayBuffer): void {
     case 'subscribed': subscribed.set(msg.channels); break;
     case 'history': resetChannel(msg.channel, msg.count); break;
     case 'events':
-      if (msg.reset) eventsStore.set(msg.items.slice(-EVENTS_MAX));
-      else eventsStore.update((l) => [...l, ...msg.items].slice(-EVENTS_MAX));
+      if (msg.reset) {
+        eventsStore.set(msg.items.slice(-EVENTS_MAX));
+        segmentStart.set(latestSegmentStart(msg.items));
+      } else {
+        eventsStore.update((l) => [...l, ...msg.items].slice(-EVENTS_MAX));
+        const s = latestSegmentStart(msg.items);
+        if (s !== null) segmentStart.set(s);
+      }
       bumpData();
       break;
     case 'metrics_history': applyMetricsHistory(msg); break;
@@ -391,6 +401,7 @@ export function resetState(): void {
   schemaReconnectRequested = false;
   linkStatsRing.set([]);
   eventsStore.set([]);
+  segmentStart.set(null);
   droppedFrames.set(0);
   subscribed.set([]);
   dataVersion.set(0);

@@ -34,8 +34,8 @@ function tileCorner(x: number, y: number, z: number): { lat: number; lon: number
 
 const fieldIndex = (schema: FlightSchema, key: string): number => schema.fields.findIndex((f) => f.key === key);
 
-/** Track from every row with a valid GPS fix, or a vertical column over the pad when none has one. */
-export function trackPoints(store: SeriesStore, schema: FlightSchema, pad: [number, number], exaggeration: number): TrackResult {
+/** Track from every row (from row index `from`) with a valid GPS fix, or a vertical column over the pad when none has one. */
+export function trackPoints(store: SeriesStore, schema: FlightSchema, pad: [number, number], exaggeration: number, from = 0): TrackResult {
   const iFix = fieldIndex(schema, 'gps_fix');
   const iLat = fieldIndex(schema, 'lat_deg');
   const iLon = fieldIndex(schema, 'lon_deg');
@@ -46,7 +46,7 @@ export function trackPoints(store: SeriesStore, schema: FlightSchema, pad: [numb
   const track: number[] = [];
   let maxAlt = 0;
   if (iFix >= 0 && iLat >= 0 && iLon >= 0) {
-    for (let i = 0; i < n; i++) {
+    for (let i = from; i < n; i++) {
       const lat = store.valueAt(i, iLat);
       const lon = store.valueAt(i, iLon);
       if (!gpsValid(store.valueAt(i, iFix), lat, lon)) continue;
@@ -61,7 +61,7 @@ export function trackPoints(store: SeriesStore, schema: FlightSchema, pad: [numb
   if (track.length) return { mode: 'track', points: Float32Array.from(track), maxAlt };
 
   const col: number[] = [];
-  for (let i = 0; i < n; i++) {
+  for (let i = from; i < n; i++) {
     const a = alt(i);
     if (!Number.isFinite(a)) continue;
     col.push(0, a * exaggeration, 0);

@@ -76,6 +76,10 @@ describe('validTrack and gpsStatus', () => {
     expect(t[0][0]).toBeCloseTo(33.5, 4);
     expect(t[1][0]).toBeCloseTo(33.7, 4);
   });
+  it('starts from a row index', () => {
+    expect(validTrack(store, schema, Infinity, 2).length).toBe(1);
+    expect(validTrack(store, schema, Infinity, 4)).toEqual([]);
+  });
   it('is empty without a schema and thins long tracks keeping the newest point', () => {
     expect(validTrack(store, null)).toEqual([]);
     const big = new SeriesStore(4, 1000);

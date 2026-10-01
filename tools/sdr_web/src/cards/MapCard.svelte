@@ -9,7 +9,8 @@
   } from '../lib/geo';
   import { cardStatus } from '../lib/cards/status';
   import { staleAge } from '../lib/cards/value';
-  import { dataVersion, flightSchema, flightStores, hello, serverNow } from '../lib/link';
+  import { dataVersion, flightSchema, flightStores, hello, segmentStart, serverNow } from '../lib/link';
+  import { firstRowFrom, segmentFloor } from '../lib/cards/segment';
 
   let { id, config }: { id: string; config: Record<string, unknown> } = $props();
 
@@ -121,10 +122,11 @@
     report(latest
       ? { synthetic: !!(latest.flags & 1), flight: true, age: staleAge(latest.t, serverNow(), 1), fields: ['lat_deg', 'lon_deg', 'gps_fix'] }
       : null);
-    const key = `${sourceKey}:${store.version}:${store.length}:${$flightSchema ? 1 : 0}:${config.show_track !== false}`;
+    const from = firstRowFrom(store, segmentFloor(config.segment, $segmentStart));
+    const key = `${sourceKey}:${store.version}:${store.length}:${$flightSchema ? 1 : 0}:${config.show_track !== false}:${from}`;
     if (key !== trackKey) {
       trackKey = key;
-      const pts = config.show_track === false ? [] : validTrack(store, $flightSchema, MAX_TRACK_POINTS);
+      const pts = config.show_track === false ? [] : validTrack(store, $flightSchema, MAX_TRACK_POINTS, from);
       // Leaflet cannot clip an empty polyline, so the line exists only while it has points.
       if (!pts.length) { trackLine?.remove(); trackLine = null; }
       else if (!trackLine) trackLine = L.polyline(pts, { className: 'map-track', interactive: false, weight: 2 }).addTo(map);
@@ -173,7 +175,7 @@
   });
   // Settings that only change what draw() shows.
   $effect(() => {
-    void [sourceKey, follow, config.show_track];
+    void [sourceKey, follow, config.show_track, config.segment, $segmentStart];
     trackKey = '';
     scheduler.markDirty(id);
   });

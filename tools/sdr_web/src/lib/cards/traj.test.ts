@@ -15,6 +15,11 @@ function store(rows: number[][]): SeriesStore {
 }
 
 describe('trackPoints', () => {
+  it('starts from a row index', () => {
+    const t = trackPoints(store([[0, 65.7, 123.2, 10], [0, 65.7, 123.2, 250], [0, 65.7, 123.2, 40]]), schema, PAD, 1, 2);
+    expect(t.points.length).toBe(3);
+    expect(t.maxAlt).toBe(40);
+  });
   it('is a column over the pad when no row has valid GPS', () => {
     const t = trackPoints(store([[0, 65.7, 123.2, 10], [0, 65.7, 123.2, 250]]), schema, PAD, 2);
     expect(t.mode).toBe('column');

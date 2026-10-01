@@ -8,7 +8,8 @@
   import { scheduler } from '../lib/frame';
   import { cardStatus } from '../lib/cards/status';
   import { staleAge } from '../lib/cards/value';
-  import { dataVersion, flightSchema, flightStores, hello, serverNow } from '../lib/link';
+  import { dataVersion, flightSchema, flightStores, hello, segmentStart, serverNow } from '../lib/link';
+  import { firstRowFrom, segmentFloor } from '../lib/cards/segment';
 
   let { id, config }: { id: string; config: Record<string, unknown> } = $props();
 
@@ -20,6 +21,7 @@
   const layer = $derived(String(config.layer ?? 'imagery'));
   const exaggeration = $derived(Number(config.exaggeration ?? 1));
   const source = $derived(String(config.source ?? 'best'));
+  const segment = $derived(config.segment);
 
   let host: HTMLDivElement;
   let mode = $state<'track' | 'column' | null>(null);
@@ -34,7 +36,7 @@
 
   // Redraw when the data, the config or the site changes (the draw function itself is installed after three loads).
   $effect(() => {
-    void $dataVersion; void exaggeration; void source; void siteKey; void ready;
+    void $dataVersion; void $segmentStart; void segment; void exaggeration; void source; void siteKey; void ready;
     rebuildTrack();
     const latest = (flightStores[source as 'best' | 'A' | 'B'] ?? flightStores.best).latest();
     report(latest
@@ -162,7 +164,7 @@
         const store = flightStores[source as 'best' | 'A' | 'B'] ?? flightStores.best;
         disposeTrack();
         if (schema && store.length) {
-          const t = trackPoints(store, schema, site?.pad ?? [0, 0], exaggeration);
+          const t = trackPoints(store, schema, site?.pad ?? [0, 0], exaggeration, firstRowFrom(store, segmentFloor(segment, get(segmentStart))));
           mode = t.mode;
           const n = t.points.length / 3;
           if (n) {

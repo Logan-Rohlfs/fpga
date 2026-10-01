@@ -66,12 +66,12 @@ function indices(schema: FlightSchema | null): { fix: number; lat: number; lon: 
   return { fix: at('gps_fix'), lat: at('lat_deg'), lon: at('lon_deg') };
 }
 
-/** [lat, lon] of every valid row, oldest first. Invalid rows are skipped, never plotted. maxPoints thins long tracks (the newest row is kept). */
-export function validTrack(store: Rows, schema: FlightSchema | null, maxPoints = Infinity): LatLon[] {
+/** [lat, lon] of every valid row, oldest first. Invalid rows are skipped, never plotted. maxPoints thins long tracks (the newest row is kept). `from` is the first row index to include. */
+export function validTrack(store: Rows, schema: FlightSchema | null, maxPoints = Infinity, from = 0): LatLon[] {
   const ix = indices(schema);
   if (ix.fix < 0 || ix.lat < 0 || ix.lon < 0) return [];
   const out: LatLon[] = [];
-  for (let i = 0; i < store.length; i++) {
+  for (let i = from; i < store.length; i++) {
     const lat = store.valueAt(i, ix.lat);
     const lon = store.valueAt(i, ix.lon);
     if (gpsValid(store.valueAt(i, ix.fix), lat, lon)) out.push([lat, lon]);

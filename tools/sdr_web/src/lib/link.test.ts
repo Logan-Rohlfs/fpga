@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from './wire.golden.json';
 import {
-  FRAMES_MAX, LinkClient, dataVersion, droppedFrames, eventsStore, flightSchema, flightStores, frames,
+  FRAMES_MAX, LinkClient, dataVersion, droppedFrames, eventsStore, segmentStart, flightSchema, flightStores, frames,
   frozen, handleMessage, hello, iqSnapMeta, iqSnaps, latestMetrics, linkStatsNow, linkStatsRing, metricsNow, metricsStores, metricsTail,
   onSpectrum, onSpectrumReset,
   frozenView, powerUnit, presets, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
@@ -172,6 +172,21 @@ describe('handleMessage', () => {
     off();
     expect(get(frames)).toEqual([]);
     expect(resets).toEqual(['B']);
+  });
+
+  it('segmentStart follows the newest flight_reset and clears on a reset snapshot and resetState', () => {
+    expect(get(segmentStart)).toBeNull();
+    handleMessage({ type: 'events', items: [event(5, 'flight_reset'), event(6)], reset: false });
+    expect(get(segmentStart)).toBe(5);
+    handleMessage({ type: 'events', items: [event(90, 'flight_reset')], reset: false });
+    handleMessage({ type: 'events', items: [event(91)], reset: false });
+    expect(get(segmentStart)).toBe(90);
+    handleMessage({ type: 'events', items: [event(1)], reset: true });
+    expect(get(segmentStart)).toBeNull();
+    handleMessage({ type: 'events', items: [event(7, 'flight_reset')], reset: true });
+    expect(get(segmentStart)).toBe(7);
+    resetState();
+    expect(get(segmentStart)).toBeNull();
   });
 
   it('replaces events on reset and appends otherwise, capped at 2000', () => {

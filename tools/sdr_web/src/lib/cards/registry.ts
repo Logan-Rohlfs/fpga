@@ -129,6 +129,11 @@ const channelField = (both = false): SettingField => ({
   key: 'channel', label: 'Channel', kind: 'select',
   options: [{ value: 'A', label: 'A' }, { value: 'B', label: 'B' }, ...(both ? [{ value: 'both', label: 'Both' }] : [])],
 });
+const SEGMENTS = ['current', 'all'] as const;
+const segmentField: SettingField = {
+  key: 'segment', label: 'Show', kind: 'select',
+  options: [{ value: 'current', label: 'Current flight only' }, { value: 'all', label: 'All data' }],
+};
 const siteLayer: SettingField[] = [
   { key: 'site', label: 'Site id', kind: 'text' },
   { key: 'layer', label: 'Layer', kind: 'select', options: [{ value: 'imagery', label: 'Imagery' }, { value: 'topo', label: 'Topo' }] },
@@ -137,8 +142,10 @@ const siteLayer: SettingField[] = [
 const specs: Spec[] = [
   {
     type: 'plot', title: 'Plot', min: { w: 3, h: 4 }, phoneMinH: 7,
-    defaults: { series: [{ field: 'alt_agl_m', source: 'best' }], window_s: 60, y: 'auto', show_events: true, units: {} },
-    validators: { series: seriesList, window_s: oneOf([10, 30, 60, 120, 300, 0]), y: autoOr('min', 'max'), show_events: bool, units: unitsMap },
+    defaults: { series: [{ field: 'alt_agl_m', source: 'best' }], window_s: 60, y: 'auto', show_events: true, segment: 'current', units: {} },
+    validators: {
+      series: seriesList, window_s: oneOf([10, 30, 60, 120, 300, 0]), y: autoOr('min', 'max'), show_events: bool, segment: oneOf(SEGMENTS), units: unitsMap,
+    },
     channels: (c) => {
       const series = c.series as { field: string; source: string }[];
       const out: string[] = [];
@@ -147,7 +154,7 @@ const specs: Spec[] = [
         if (s.field.startsWith('m.')) link = true;
         else out.push(...flightChannels(s.source));
       }
-      if (c.show_events) out.push('events');
+      if (c.show_events || c.segment === 'current') out.push('events');   // events also carry the segment start
       if (link) out.push('link');
       return out;
     },
@@ -157,6 +164,7 @@ const specs: Spec[] = [
         { value: 10, label: '10 s' }, { value: 30, label: '30 s' }, { value: 60, label: '60 s' }, { value: 120, label: '2 min' },
         { value: 300, label: '5 min' }, { value: 0, label: 'All' }] },
       { key: 'show_events', label: 'Show events', kind: 'bool' },
+      segmentField,
       { key: 'units', label: 'Units', kind: 'units' },
     ],
     component: () => import('../../cards/PlotCard.svelte'),
@@ -204,20 +212,24 @@ const specs: Spec[] = [
   },
   {
     type: 'map', title: 'Map', min: { w: 3, h: 5 }, phoneMinH: 7,
-    defaults: { site: null, layer: 'imagery', follow: true, show_track: true, source: 'best' },
-    validators: { site: nullableText(40), layer: oneOf(['imagery', 'topo']), follow: bool, show_track: bool, source: oneOf(SOURCES) },
-    channels: (c) => flightChannels(c.source),
+    defaults: { site: null, layer: 'imagery', follow: true, show_track: true, segment: 'current', source: 'best' },
+    validators: {
+      site: nullableText(40), layer: oneOf(['imagery', 'topo']), follow: bool, show_track: bool, segment: oneOf(SEGMENTS), source: oneOf(SOURCES),
+    },
+    channels: (c) => [...flightChannels(c.source), ...(c.segment === 'current' ? ['events'] : [])],
     component: () => import('../../cards/MapCard.svelte'),
     settings: [...siteLayer, { key: 'follow', label: 'Follow the vehicle', kind: 'bool' },
-      { key: 'show_track', label: 'Show track', kind: 'bool' }, sourceField],
+      { key: 'show_track', label: 'Show track', kind: 'bool' }, segmentField, sourceField],
   },
   {
     type: 'trajectory3d', title: '3D trajectory', min: { w: 4, h: 6 }, phoneMinH: 8,
-    defaults: { site: null, layer: 'imagery', exaggeration: 1, source: 'best' },
-    validators: { site: nullableText(40), layer: oneOf(['imagery', 'topo']), exaggeration: intIn(1, 5), source: oneOf(SOURCES) },
-    channels: (c) => flightChannels(c.source),
+    defaults: { site: null, layer: 'imagery', exaggeration: 1, segment: 'current', source: 'best' },
+    validators: {
+      site: nullableText(40), layer: oneOf(['imagery', 'topo']), exaggeration: intIn(1, 5), segment: oneOf(SEGMENTS), source: oneOf(SOURCES),
+    },
+    channels: (c) => [...flightChannels(c.source), ...(c.segment === 'current' ? ['events'] : [])],
     component: () => import('../../cards/Trajectory3dCard.svelte'),
-    settings: [...siteLayer, { key: 'exaggeration', label: 'Vertical exaggeration', kind: 'number', min: 1, max: 5 }, sourceField],
+    settings: [...siteLayer, { key: 'exaggeration', label: 'Vertical exaggeration', kind: 'number', min: 1, max: 5 }, segmentField, sourceField],
   },
   {
     type: 'camera', title: 'Camera', min: { w: 3, h: 4 }, phoneMinH: 6,

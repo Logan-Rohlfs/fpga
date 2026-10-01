@@ -78,11 +78,20 @@ describe('registry', () => {
 
   it('channels per type', () => {
     expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'A' }] })).toEqual(['flight.A', 'events']);
-    expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'best' }], show_events: false })).toEqual(['flight']);
-    expect(REGISTRY.plot.channels({ series: [{ field: 'm.rssi', source: 'B' }], show_events: false })).toEqual(['link']);
+    expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'best' }], show_events: false, segment: 'all' })).toEqual(['flight']);
+    expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'best' }], show_events: false })).toEqual(['flight', 'events']);
+    expect(REGISTRY.map.channels({ source: 'A' })).toEqual(['flight.A', 'events']);
+    expect(REGISTRY.map.channels({ source: 'A', segment: 'all' })).toEqual(['flight.A']);
+    expect(REGISTRY.trajectory3d.channels({})).toEqual(['flight', 'events']);
+    for (const t of ['plot', 'map', 'trajectory3d'] as const) {
+      expect(REGISTRY[t].sanitize({}).segment, t).toBe('current');
+      expect(REGISTRY[t].sanitize({ segment: 'all' }).segment, t).toBe('all');
+      expect(REGISTRY[t].sanitize({ segment: 'bogus' }).segment, t).toBe('current');
+    }
+    expect(REGISTRY.plot.channels({ series: [{ field: 'm.rssi', source: 'B' }], show_events: false, segment: 'all' })).toEqual(['link']);
     expect(REGISTRY.plot.sanitize({ series: [{ field: 'alt_agl_m', source: 'both' }] }).series)
       .toEqual([{ field: 'alt_agl_m', source: 'both' }]);
-    expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'both' }], show_events: false }))
+    expect(REGISTRY.plot.channels({ series: [{ field: 'alt_agl_m', source: 'both' }], show_events: false, segment: 'all' }))
       .toEqual(['flight.A', 'flight.B']);
     expect(REGISTRY.waterfall.channels({ channel: 'B' })).toEqual(['spectrum.B']);
     expect(REGISTRY.camera.channels({})).toEqual([]);
