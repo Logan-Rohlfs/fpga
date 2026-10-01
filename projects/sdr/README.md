@@ -189,6 +189,9 @@ a small synthetic log. On hardware, the same checker runs with
   viewer spectrum rate: at 256 bins a viewer on the Flight preset receives
   about 12.3 kB/s, above the 10 kB/s viewer budget in the GUI cards spec (§2.4).
   At 64 bins it is about 8.5 kB/s.
+  An earlier WIP of this RTL with 256 as the default failed timing in Vivado
+  (default WNS −0.063 ns, demo −0.550 ns), so 256 likely needs pipelining
+  in the DFT LOAD/MULTIPLY path first.
 - I/Q snapshots contain 64 actual decimated sample pairs.
 - Signal power and noise are **relative dBFS**, not calibrated antenna dBm.
   Flag bit 2 (`0x04`) identifies this unit in channel/frame metric records;

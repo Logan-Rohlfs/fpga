@@ -119,6 +119,7 @@ plan "Task 6 GUI flight readout".
   - Simulation: `rx_observer_tb` matches a floating-point DFT at 64, 128 and 256 points. The full `./sdr sim` passed with 256 as the default, and again with the default of 64.
   - Measured UART load, from a 2 s `sdr_top` simulation at hardware tick and STATUS rates: 10.5% of 1 Mbaud at 64 bins (demo 12.0%) and 14.4% at 256 (demo 15.9%).
   - The default stays 64 by controller ruling. No Vivado build of the restructured `rx_observer` (any length) has run because the build host was offline. Timing, resources and DRC are therefore unmeasured even at 64, and earlier build numbers predate this RTL.
+  - Historical evidence, found at cleanup: the first Task 26 attempt (an earlier WIP of this RTL, `SPECTRUM_BINS=256` default) did reach Vivado on 2026-09-30 and **failed timing at 100 MHz**: default WNS −0.063 ns (1 failing endpoint, 5,427 LUTs), demo WNS −0.550 ns (3 failing endpoints; an earlier demo run −0.347 ns, 6,152 LUTs). Reports and artifact bundles are kept locally under `build/sdr/task26-first-attempt-reports/` (ignored). The current RTL differs, but expect 256 to need pipelining before it closes timing.
   - To enable 256 (390.625 Hz bins):
     1. Decide the GUI viewer spectrum rate. At 256 bins a Flight-preset viewer receives about 12.3 kB/s, over the 10 kB/s budget.
     2. Set `SPECTRUM_BINS=256` in `projects/sdr/rtl/sdr_top.sv` and `BINS = 256` in `projects/sdr/sim/receiver_top_tb.sv`.
