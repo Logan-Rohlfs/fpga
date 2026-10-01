@@ -84,9 +84,10 @@ export interface PresetItem {
   grid: { cols: number }; cards: unknown[]; triggers: unknown[];
 }
 export interface PresetsMsg { type: 'presets'; items: PresetItem[]; live: string; default: string; auto_switch: boolean }
+export interface NoticeMsg { type: 'notice'; text: string }
 export interface DroppedMsg { type: 'dropped'; channel: 'frames'; count: number }
 export type ServerMsg = HelloMsg | RecordMsg | StatsMsg | TuningMsg | RoleMsg | TakeoverMsg | ErrorMsg
-  | SubscribedMsg | HistoryMsg | EventsMsg | MetricsHistoryMsg | DroppedMsg | PresetsMsg | { type: 'pong' };
+  | SubscribedMsg | HistoryMsg | EventsMsg | MetricsHistoryMsg | DroppedMsg | PresetsMsg | NoticeMsg | { type: 'pong' };
 
 export type ClientMsg =
   | { type: 'login'; password: string; label: string; takeover: boolean }
@@ -101,4 +102,5 @@ export type ClientMsg =
   | { type: 'preset_delete'; id: string }
   | { type: 'preset_set_live'; id: string }
   | { type: 'preset_set_default'; id: string }
+  | { type: 'preset_auto_switch'; enabled: boolean }
   | { type: 'preset_auto_switch'; enabled: boolean };

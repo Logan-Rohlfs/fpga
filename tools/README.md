@@ -191,6 +191,11 @@ For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
   cannot reach the GUI server; "Server up. …" means the server runs but the board
   UART is not delivering. Receiving continues while the display is frozen.
   Tuning is saved in ignored `.sdr/gui_state.json`.
+- **Auto-switch:** with the Operator's Auto-switch toggle on, the live layout's
+  `triggers` are active: a flight phase change (`phase` trigger) or a launch,
+  burnout, apogee or landing event (`event` trigger) makes the target layout live
+  for every client, with an "Auto-switched to ..." notice. Link events never
+  trigger. The toggle is Operator-only and saved in `.sdr/gui/preset_state.json`.
 - **Serial auto-reconnect:** with the UART source, the server survives losing the
   port (USB unplugged, board reprogrammed) and reopens it by itself after 0.5, 1,
   2, 4 and 8 s, then every 8 s. A successful open resets the delay. The status

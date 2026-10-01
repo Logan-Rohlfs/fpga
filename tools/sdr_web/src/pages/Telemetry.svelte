@@ -5,7 +5,7 @@
   import PresetBar from '../components/PresetBar.svelte';
   import { cardChannels } from '../lib/cards/registry';
   import type { GridCard } from '../lib/grid';
-  import { deletePreset, notify, presets, role, savePreset, setDefaultPreset, setLivePreset } from '../lib/link';
+  import { deletePreset, notify, presets, role, savePreset, setAutoSwitch, setDefaultPreset, setLivePreset } from '../lib/link';
   import {
     type Preset, choose, chosenStore, displayedPreset, editStatus, followStore, makeWorkingCopy, serverState, settleWorking, slugify,
     toWire, uniqueId,
@@ -137,11 +137,12 @@
 {:else if !shown}
   <p class="note">The server has no preset to show.</p>
 {:else}
-  <PresetBar entries={$presets.items} shownId={shown.id} liveId={$presets.live} defaultId={$presets.default}
+  <PresetBar entries={$presets.items} autoSwitch={$presets.auto_switch} shownId={shown.id} liveId={$presets.live} defaultId={$presets.default}
     follow={$followStore} {operator} {edit} dirty={status.dirty} stale={status.stale}
     saved={server.saved} builtin={server.builtin} canDelete={server.canDelete}
     saveAsPending={!!pendingAs}
     onselect={select} onfollow={follow} onedit={(on) => (edit = on)} onsave={save} onsaveas={saveAs} ondiscard={discard}
-    ondelete={remove} onsetlive={() => setLivePreset(shown.id)} onsetdefault={() => setDefaultPreset(shown.id)} />
+    ondelete={remove} onsetlive={() => setLivePreset(shown.id)} onsetdefault={() => setDefaultPreset(shown.id)}
+    onautoswitch={setAutoSwitch} />
   <CardGrid {cards} editable={operator} {edit} onchange={edited} />
 {/if}

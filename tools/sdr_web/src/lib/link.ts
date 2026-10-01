@@ -367,6 +367,7 @@ export function handleMessage(msg: ServerMsg | ArrayBuffer): void {
     case 'metrics_history': applyMetricsHistory(msg); break;
     case 'dropped': droppedFrames.update((n) => n + msg.count); break;
     case 'presets': presets.set(msg); break;
+    case 'notice': notify(msg.text); break;
   }
 }
 
@@ -531,3 +532,4 @@ export const savePreset = (preset: unknown, baseRevision: number | null): void =
 export const deletePreset = (id: string): void => link.send({ type: 'preset_delete', id });
 export const setLivePreset = (id: string): void => link.send({ type: 'preset_set_live', id });
 export const setDefaultPreset = (id: string): void => link.send({ type: 'preset_set_default', id });
+export const setAutoSwitch = (enabled: boolean): void => link.send({ type: 'preset_auto_switch', enabled });
