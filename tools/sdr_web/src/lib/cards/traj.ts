@@ -70,7 +70,8 @@ export function trackPoints(store: SeriesStore, schema: FlightSchema, pad: [numb
       const lon = store.valueAt(i, iLon);
       if (!gpsValid(store.valueAt(i, iFix), lat, lon)) continue;
       const a = alt(i);
-      const h = Number.isFinite(a) ? a : 0;
+      if (!Number.isFinite(a)) continue;   // shown as decoded: no altitude means no point
+      const h = a;
       const p = enu(lat, lon, pad[0], pad[1]);
       track.push(p.east, h * exaggeration, -p.north);
       if (h > maxAlt) maxAlt = h;

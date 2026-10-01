@@ -13,6 +13,8 @@
   interface Site { id: string; name?: string; pad: [number, number] }
   const sites = $derived(($hello?.sites ?? []) as Site[]);
   const site = $derived(sites.find((s) => s.id === config.site) ?? sites[0] ?? null);
+  // Keyed on id and pad values so a hello republish with the same site does not refetch tiles or rebuild the track.
+  const siteKey = $derived(site ? `${site.id}|${site.pad[0]}|${site.pad[1]}` : '');
   const layer = $derived(String(config.layer ?? 'imagery'));
   const exaggeration = $derived(Number(config.exaggeration ?? 1));
   const source = $derived(String(config.source ?? 'best'));
@@ -24,15 +26,17 @@
 
   let draw: () => void = () => {};
   let rebuildGround: () => void = () => {};
+  let rebuildTrack: () => void = () => {};
   const dirty = () => scheduler.markDirty(id);
 
   // Redraw when the data, the config or the site changes (the draw function itself is installed after three loads).
   $effect(() => {
-    void $dataVersion; void exaggeration; void source; void site; void ready;
+    void $dataVersion; void exaggeration; void source; void siteKey; void ready;
+    rebuildTrack();
     dirty();
   });
   $effect(() => {
-    void layer; void site; void ready;
+    void layer; void siteKey; void ready;
     rebuildGround();
   });
 
@@ -126,6 +130,7 @@
               tex.needsUpdate = true;
               dirty();
             };
+            img.onerror = () => { /* missing tile stays grey */ };
             img.src = `/tiles/${layer}/${span.z}/${tx}/${ty}`;
           }
         }
@@ -145,7 +150,7 @@
         dots = null;
       }
 
-      draw = () => {
+      rebuildTrack = () => {
         const schema = get(flightSchema);
         const store = flightStores[source as 'best' | 'A' | 'B'] ?? flightStores.best;
         disposeTrack();
@@ -169,9 +174,16 @@
         } else {
           mode = null;
         }
+      };
+
+      let sizeW = 0;
+      let sizeH = 0;
+      draw = () => {
         const w = host.clientWidth;
         const h = host.clientHeight;
-        if (w > 0 && h > 0) {
+        if (w > 0 && h > 0 && (w !== sizeW || h !== sizeH)) {
+          sizeW = w;
+          sizeH = h;
           renderer.setSize(w, h, false);
           renderer.domElement.style.width = `${w}px`;
           renderer.domElement.style.height = `${h}px`;
@@ -187,6 +199,7 @@
       const ro = new ResizeObserver(onChange);
       ro.observe(host);
       ready = true;
+      rebuildTrack();
       dirty();
 
       cleanup = () => {
@@ -205,6 +218,7 @@
         renderer.domElement.remove();
         draw = () => {};
         rebuildGround = () => {};
+        rebuildTrack = () => {};
       };
     })();
 

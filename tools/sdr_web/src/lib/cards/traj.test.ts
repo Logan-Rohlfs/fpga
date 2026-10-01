@@ -36,6 +36,13 @@ describe('trackPoints', () => {
     expect(Math.abs(t.points[2] + 1105)).toBeLessThan(2);
   });
 
+  it('skips valid-GPS rows with no altitude instead of plotting them at 0', () => {
+    const t = trackPoints(store([[3, PAD[0] + 0.01, PAD[1], NaN], [3, PAD[0] + 0.01, PAD[1], 50]]), schema, PAD, 1);
+    expect(t.mode).toBe('track');
+    expect(t.points.length).toBe(3);
+    expect(t.points[1]).toBe(50);
+  });
+
   it('is an empty column for an empty store', () => {
     const t = trackPoints(store([]), schema, PAD, 1);
     expect(t.mode).toBe('column');
