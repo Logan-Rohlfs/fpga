@@ -260,6 +260,22 @@ class StoreTest(unittest.TestCase):
         self.assertNotIn('imagery', cov['seymour'])
         self.assertNotIn('ttu', cov)
 
+    def test_sites_with_coverage(self):
+        sites = {s['id']: s for s in maps.sites_with_coverage(self.root)}
+        self.assertEqual(len(sites), 3)
+        self.assertEqual((sites['seymour']['layers'], sites['seymour']['outer_max_z']), ({}, None))
+        site = sites['seymour']
+        z, x, y = maps.plan(site)[0]
+        path = self.root / '.sdr' / 'maps' / 'topo' / str(z) / str(x)
+        path.mkdir(parents=True)
+        (path / '{}.png'.format(y)).write_bytes(b'x')
+        maps.write_coverage(self.root, 'topo')
+        seymour = {s['id']: s for s in maps.sites_with_coverage(self.root)}['seymour']
+        self.assertEqual(seymour['layers'], {'topo': {'min_z': 5, 'max_z': 5}})
+        self.assertEqual(seymour['outer_max_z'], 5)
+        for key in ('name', 'center', 'pad', 'outer_radius_km', 'inner_radius_km'):
+            self.assertIn(key, seymour)
+
 
 class MainTest(unittest.TestCase):
     def setUp(self):

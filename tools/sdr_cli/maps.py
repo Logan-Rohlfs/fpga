@@ -227,6 +227,17 @@ def coverage(root):
     return out
 
 
+def sites_with_coverage(root):
+    """Registry sites plus, per layer, the zooms downloaded, and the site's outer_max_z (None when absent)."""
+    covered = coverage(root)
+    out = []
+    for site in load_sites(root):
+        have = covered.get(site['id'], {})
+        layers = {name: {'min_z': have[name]['min_z'], 'max_z': have[name]['max_z']} for name in LAYERS if name in have}
+        out.append(dict(site, layers=layers, outer_max_z=have.get('outer_max_z')))
+    return out
+
+
 # ---------------------------------------------------------------- fetch
 
 class Fetcher:

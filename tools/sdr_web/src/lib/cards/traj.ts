@@ -1,12 +1,12 @@
 /** Pure helpers for the 3D trajectory card: local ENU track points, ground tile span and altitude colours.
- *  The ENU and tile math here is local to this card; lib/geo.ts (Map card) may replace it after merge. */
+ *  ENU, GPS validity and tile math come from lib/geo.ts. */
 import type { FlightSchema } from '../types';
 import type { SeriesStore } from '../series';
+import { enu, gpsValid, tileXY } from '../geo';
 
 const M_PER_DEG_LAT = 110540;
 const M_PER_DEG_LON = 111320;
 const EARTH_CIRCUMFERENCE_M = 40075016.686;
-const MAX_LAT = 85.0511287798;
 
 export interface TrackResult {
   mode: 'track' | 'column';
@@ -21,25 +21,6 @@ export interface GroundSpan {
   originEast: number; originNorth: number;
   /** Ground width of the whole span in metres; every tile is sizeM / (x1 - x0 + 1) wide and tall. */
   sizeM: number;
-}
-
-/** Local east and north metres of (lat, lon) from (lat0, lon0). */
-export function enu(lat: number, lon: number, lat0: number, lon0: number): { east: number; north: number } {
-  return { east: (lon - lon0) * M_PER_DEG_LON * Math.cos((lat0 * Math.PI) / 180), north: (lat - lat0) * M_PER_DEG_LAT };
-}
-
-/** A real position fix: 2D, 3D or 3D+DR with in-range coordinates that are not both zero (spec 13.5). */
-export function gpsValid(fix: number, lat: number, lon: number): boolean {
-  return (fix === 2 || fix === 3 || fix === 4) && Number.isFinite(lat) && Number.isFinite(lon)
-    && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && !(lat === 0 && lon === 0);
-}
-
-export function tileXY(lat: number, lon: number, z: number): { x: number; y: number } {
-  const n = 2 ** z;
-  const rad = (Math.max(-MAX_LAT, Math.min(MAX_LAT, lat)) * Math.PI) / 180;
-  const x = Math.floor(((lon + 180) / 360) * n);
-  const y = Math.floor(((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n);
-  return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
 }
 
 /** North-west corner (lat, lon) of a tile. */

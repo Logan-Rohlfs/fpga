@@ -680,3 +680,64 @@ class PreflightBindTest(unittest.TestCase):
         client.close()
         listener.close()
         self.assertIsNone(web_server.preflight_bind('127.0.0.1', port))
+
+
+@unittest.skipIf(GuiServer is None, 'aiohttp not installed: pip install -e ".[gui]"')
+class TileRouteTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from sdr_cli import maps
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        (root / 'static').mkdir()
+        (root / 'static/index.html').write_text('<!doctype html><title>t</title>')
+        tile = root / '.sdr/maps/topo/3/1'
+        tile.mkdir(parents=True)
+        (tile / '2.png').write_bytes(b'\x89PNG\r\n\x1a\nfake')
+        (root / 'secret.png').write_bytes(b'secret')
+        server = GuiServer(lambda get_tuning: Idle(), r.RoleManager(''), root / 'state.json',
+                           static_dir=root / 'static', root=root)
+        self.maps = maps
+        self.root = root
+        self.client = TestClient(TestServer(server.app()))
+        await self.client.start_server()
+        self.addAsyncCleanup(self.client.close)
+
+    async def test_tile_served_with_cache_header(self):
+        resp = await self.client.get('/tiles/topo/3/1/2')
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers['Content-Type'], 'image/png')
+        self.assertEqual(resp.headers['Cache-Control'], 'max-age=86400')
+        self.assertTrue((await resp.read()).startswith(b'\x89PNG'))
+
+    async def test_missing_tile_is_404(self):
+        self.assertEqual((await self.client.get('/tiles/topo/3/1/9')).status, 404)
+        self.assertEqual((await self.client.get('/tiles/imagery/3/1/2')).status, 404)
+
+    async def test_bad_requests_are_never_served(self):
+        for path in ('/tiles/%2e%2e/3/1/2', '/tiles/topo/-1/0/0', '/tiles/topo/21/0/0', '/tiles/osm/3/1/2',
+                     '/tiles/topo/a/b/c', '/tiles/topo/3/1/2.png', '/tiles/topo/3/1/%2e%2e%2f%2e%2e%2fsecret',
+                     '/tiles/topo/3/%2e%2e/2', '/tiles/topo/3/1/2%00', '/tiles/topo/3/+1/2', '/tiles/topo/%C2%B23/1/2',
+                     '/tiles/topo/3/1/2/extra', '/tiles/..%2f..%2f/3/1/2', '/tiles/topo/3/1/99999999999'):
+            resp = await self.client.get(path)
+            self.assertIn(resp.status, (400, 404), path)
+
+    async def test_hello_sites(self):
+        site = {x['id']: x for x in self.maps.load_sites(self.root)}['seymour']
+        z, x, y = [t for t in self.maps.plan(site) if t[0] == 13][0]
+        tile = self.root / '.sdr/maps/topo/13/{}'.format(x)
+        tile.mkdir(parents=True, exist_ok=True)
+        (tile / '{}.png'.format(y)).write_bytes(b'x')
+        self.maps.write_coverage(self.root, 'topo')
+        ws = await self.client.ws_connect('/ws')
+        hello = await ws.receive_json()
+        self.assertEqual(hello['type'], 'hello')
+        sites = {s['id']: s for s in hello['sites']}
+        self.assertEqual(len(sites), 3)
+        self.assertEqual(sites['seymour']['layers'], {'topo': {'min_z': 13, 'max_z': 13}})
+        self.assertEqual(sites['seymour']['outer_max_z'], 13)
+        self.assertEqual(sites['ttu']['layers'], {})
+        self.assertIsNone(sites['ttu']['outer_max_z'])
+        for key in ('name', 'center', 'pad', 'outer_radius_km', 'inner_radius_km'):
+            self.assertIn(key, sites['seymour'])
+        await ws.close()
