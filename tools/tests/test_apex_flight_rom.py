@@ -39,6 +39,14 @@ def f32(value):
 
 
 class RomStructureTest(unittest.TestCase):
+    def test_truncated_rom_raises_value_error_not_assert(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / 'bad.mem'
+            bad.write_text('01\n02\n03\n')
+            with self.assertRaisesRegex(ValueError, 'not a multiple'):
+                apex.read_rom_frames(bad)
+
     def setUp(self):
         self.frames = rom_frames()
         self.decoded = [decode(frame) for frame in self.frames]

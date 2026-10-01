@@ -208,7 +208,7 @@ For frontend development, run the server and `npm run dev` in `tools/sdr_web`.
   pill and banner show the state: `connected`; `waiting for port` (the device is
   absent); `port busy` (another process such as a second `./sdr gui`,
   `./sdr tui` or `./sdr receive` holds it; close that process); or
-  `reconnecting in N s` (a read failure or another open error). One link event is
+  `reconnecting in N s` (a read failure or another open error; a POSIX permission error shows "permission denied opening PORT (on Linux add your user to the dialout group)" here rather than as busy). One link event is
   logged per state change, not per retry. The Operator's Reconnect button retries
   at once. Replay and sim sources never auto-reconnect; an ended replay stays
   ended, and a failed one can be restarted with Reconnect.

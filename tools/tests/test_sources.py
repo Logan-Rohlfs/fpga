@@ -138,7 +138,9 @@ class ClassifyOpenErrorTest(unittest.TestCase):
                          'missing')
         self.assertEqual(sources.classify_open_error(self.chained(OSError(errno.EBUSY, 'Resource busy'))), 'busy')
         self.assertEqual(sources.classify_open_error(self.chained(OSError(errno.EACCES, 'Permission denied'))),
-                         'busy')
+                         'denied')
+        self.assertEqual(sources.classify_open_error(self.chained(OSError(errno.EPERM, 'Operation not permitted'))),
+                         'denied')
 
     def test_message_text(self):
         self.assertEqual(sources.classify_open_error(ToolError(
@@ -192,6 +194,19 @@ class DemoSourceTest(unittest.TestCase):
         self.assertEqual(sources.DEMO_GAP_SLOTS, rtl_constant('FLIGHT_GAP_SLOTS'))
         self.assertEqual(sources.DEMO_LOSS['A'], (rtl_constant('FLIGHT_LOSS_A_FIRST'), rtl_constant('FLIGHT_LOSS_A_LAST')))
         self.assertEqual(sources.DEMO_LOSS['B'], (rtl_constant('FLIGHT_LOSS_B_FIRST'), rtl_constant('FLIGHT_LOSS_B_LAST')))
+
+    def test_spectrum_uses_the_demo_bitstream_dft_length(self):
+        bins = rtl_constant('SPECTRUM_BINS')   # the receiver_link_sources default that sdr_top passes through
+        self.assertEqual(sources.DEMO_SPEC_BINS, bins)
+        rows = [r for r in self.slots(0, 4) if r.type == p.SPECTRUM]
+        self.assertTrue(rows)
+        for r in rows:
+            self.assertEqual(len(r.fields['power']), bins)
+            self.assertEqual(r.fields['bin_hz'], 100000 / bins)
+        # The plain simulator keeps its own 256-bin model.
+        sim = sources.SimSource(lambda: freqplan.TuningState(), seed=1)
+        _, recs = decode(b''.join(sim.step() for _ in range(4)))
+        self.assertEqual({len(r.fields['power']) for r in recs if r.type == p.SPECTRUM}, {256})
 
     def test_rom_frames_in_order_synthetic_with_the_demo_build_id(self):
         records = self.slots(0, 40)

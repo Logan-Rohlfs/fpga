@@ -72,7 +72,8 @@ def read_rom_frames(path):
         if text:
             data.append(int(text, 16))
     size = 1 + FLIGHT_STRUCT.size
-    assert len(data) % size == 0
+    if len(data) % size:
+        raise ValueError('{}: {} bytes is not a multiple of the {}-byte flight frame'.format(path, len(data), size))
     return [bytes(data[i:i + size]) for i in range(0, len(data), size)]
 
 

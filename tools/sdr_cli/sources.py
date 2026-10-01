@@ -18,7 +18,9 @@ LINK_BYTES_PER_S = 100000   # 1 Mbaud, 8N1
 
 _MISSING_ERRNOS = (errno.ENOENT, errno.ENXIO)
 # EAGAIN: pyserial's exclusive flock fails this way when another ./sdr process holds the port.
-_BUSY_ERRNOS = (errno.EBUSY, errno.EACCES, errno.EPERM, errno.EAGAIN)
+_BUSY_ERRNOS = (errno.EBUSY, errno.EAGAIN)
+# A permission error on POSIX is not a competing process: the user cannot open the device node.
+_DENIED_ERRNOS = (errno.EACCES, errno.EPERM)
 # pyserial on Windows reports these as message text only, without an errno. serial_io's
 # 'auto' port resolution reports an absent board as "Cannot select a unique Basys 3 UART".
 _MISSING_TEXT = ('No such file', 'cannot find the file', 'Cannot select a unique')
@@ -42,7 +44,7 @@ class Backoff:
 
 
 def classify_open_error(exc):
-    """'missing', 'busy' or 'other' for a failed port open, from the errno or text of exc and its causes."""
+    """'missing', 'busy', 'denied' or 'other' for a failed port open, from the errno or text of exc and its causes."""
     chain = []
     while exc is not None and exc not in chain:
         chain.append(exc)
@@ -53,6 +55,8 @@ def classify_open_error(exc):
             return 'missing'
         if code in _BUSY_ERRNOS:
             return 'busy'
+        if code in _DENIED_ERRNOS:
+            return 'denied'
     text = ' '.join(str(item) for item in chain)
     if any(t in text for t in _MISSING_TEXT):
         return 'missing'
@@ -164,6 +168,7 @@ class SimSource:
     kind = 'sim'
     responds_to_tuning = True
     detail = 'host simulator'
+    spec_bins, spec_bin_hz = SPEC_BINS, SPEC_BIN_HZ
 
     def __init__(self, get_tuning, seed=None):
         self.get_tuning = get_tuning
@@ -253,8 +258,9 @@ class SimSource:
         center = int(round(s.target_if_hz))
         peak = 10 ** (model['peak_db'] / 10) if present else 0.0
         power = []
-        for k in range(SPEC_BINS):
-            f = center + (k - SPEC_BINS // 2) * SPEC_BIN_HZ
+        bins, bin_hz = self.spec_bins, self.spec_bin_hz
+        for k in range(bins):
+            f = center + (k - bins // 2) * bin_hz
             linear = 10 ** ((model['noise_db'] + self.rng.gauss(0, 2.2)) / 10)
             for deviation in (-FSK_DEVIATION_HZ, FSK_DEVIATION_HZ):
                 linear += peak * math.exp(-0.5 * ((f - sig - deviation) / 1.6e3) ** 2)
@@ -263,7 +269,7 @@ class SimSource:
         row = self.rows[ch]
         self.rows[ch] = (row + 1) & 0xFFFF
         return self._msg(p.SPECTRUM, dict(
-            channel=ch, averages=1, row=row, t_us=t_us, center_hz=center, bin_mhz=int(SPEC_BIN_HZ * 1000),
+            channel=ch, averages=1, row=row, t_us=t_us, center_hz=center, bin_mhz=int(bin_hz * 1000),
             db_ref_x10=int(DB_REF * 10), db_step_x100=int(DB_STEP * 100), power=power))
 
     def _iq(self, ch, t_us, locked):
@@ -289,6 +295,9 @@ DEMO_ROM = Path(__file__).resolve().parents[2] / 'projects/sdr/rom/apex_flight.m
 DEMO_GAP_SLOTS = 20
 DEMO_LOSS = {'A': (60, 69), 'B': (505, 514)}
 DEMO_BUILD_ID = 0x53445246
+# rx_observer DFT of the demo bitstream: sdr_top's default SPECTRUM_BINS over the 100 kHz I/Q rate
+# (tools/tests/test_sources.py checks the bin count against the RTL).
+DEMO_SPEC_BINS, DEMO_SPEC_BIN_HZ = 64, 100000 / 64
 DEMO_DBFS = dict(A=dict(rssi=-21.0, noise=-58.0), B=dict(rssi=-24.0, noise=-58.0))
 
 
@@ -304,6 +313,7 @@ class DemoSource(SimSource):
     kind = 'demo'
     responds_to_tuning = False
     detail = 'host demo replay (no FPGA)'
+    spec_bins, spec_bin_hz = DEMO_SPEC_BINS, DEMO_SPEC_BIN_HZ
 
     def __init__(self, get_tuning=None, seed=None, rom_path=DEMO_ROM):
         from .freqplan import TuningState

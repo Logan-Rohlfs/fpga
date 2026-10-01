@@ -30,6 +30,7 @@ QUEUE_MAX = 400   # control messages; fanout.CONTROL_MAX enforces it
 DROPPED_PERIOD_S = 1.0
 LOCAL_ADDRESSES = ('127.0.0.1', '::1')
 BUILD_HINT = 'GUI is not built. Run: cd tools/sdr_web && npm install && npm run build'
+DENIED_DETAIL = 'permission denied opening {} (on Linux add your user to the dialout group). Retrying.'
 BUSY_DETAIL = '{} is held by another process (another ./sdr gui, ./sdr tui or receive?). Close it; retrying.'
 WSAEADDRINUSE = 10048
 PRESET_ACTIONS = dict(preset_save='save presets', preset_delete='delete presets',
@@ -221,6 +222,8 @@ class GuiServer:
                     state, detail = 'waiting', source.detail
                 elif reason == 'busy':
                     state, detail = 'busy', BUSY_DETAIL.format(source.port)
+                elif reason == 'denied':
+                    state, detail = 'reconnecting', DENIED_DETAIL.format(source.port)
                 else:
                     state, detail = 'reconnecting', str(exc)
             else:

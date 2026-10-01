@@ -53,9 +53,9 @@ class EventDeriver:
         self._max_vel = None
         self._apogee_done = False
 
-    def _event(self, t, kind, text, synthetic, channel=None, value=None, quantity=None):
+    def _event(self, t, kind, text, synthetic, channel=None, value=None, quantity=None, prev_phase=None):
         ev = dict(id=self._next_id, t=t, kind=kind, category=CATEGORY[kind], text=text, channel=channel, value=value,
-                  quantity=quantity, segment=self.segment, synthetic=bool(synthetic))
+                  quantity=quantity, segment=self.segment, synthetic=bool(synthetic), prev_phase=prev_phase)
         self._next_id += 1
         return ev
 
@@ -176,5 +176,5 @@ class EventDeriver:
         if new == 'LANDED':
             out.append(ev('landing', 'Landing detected'))
         if reset:
-            out.append(ev('flight_reset', RESET_TEXT))
+            out.append(ev('flight_reset', RESET_TEXT, prev_phase=old))
         return out

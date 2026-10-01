@@ -521,6 +521,22 @@ class GuiServerTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(setattr, FakeSession, 'script', [])
         self.addCleanup(setattr, FakeSession, 'fail_read', False)
 
+    async def test_serial_permission_denied_is_not_reported_as_busy(self):
+        self.serial_setup([OSError(errno.EACCES, 'Permission denied'), 'ok'])
+
+        async def sleep(delay):
+            pass
+        hub = Hub()
+        stats, _ = self.recorder(hub)
+        server, _ = await self.start(serial_factory, hub=hub, sleep=sleep)
+        await self.until(lambda: stats and stats[-1]['state'] == 'running')
+        states = distinct([s['state'] for s in stats])
+        self.assertNotIn('busy', states)
+        denied = next(s for s in stats if s['state'] == 'reconnecting')
+        self.assertIn('permission denied opening /dev/fake0', denied['detail'])
+        self.assertIn('dialout', denied['detail'])
+        self.assertNotIn('another', denied['detail'])
+
     async def test_serial_supervisor_reports_waiting_busy_running_and_reconnects(self):
         self.serial_setup([OSError(errno.ENOENT, 'No such file or directory'), OSError(errno.EBUSY, 'Resource busy'),
                            'ok'])

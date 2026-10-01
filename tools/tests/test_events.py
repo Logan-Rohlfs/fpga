@@ -3,7 +3,7 @@ import unittest
 from link_samples import rom_flight_frames, with_crc
 from sdr_cli import apex, events, protocol as p
 
-KEYS = {'id', 't', 'kind', 'category', 'text', 'channel', 'value', 'quantity', 'segment', 'synthetic'}
+KEYS = {'id', 't', 'kind', 'category', 'text', 'channel', 'value', 'quantity', 'segment', 'synthetic', 'prev_phase'}
 
 
 def best(raw, n=0, t=None, src=0, flags=p.FLAG_SYNTHETIC):
@@ -29,6 +29,16 @@ def kinds(evs):
 
 
 class FlightEventsTest(unittest.TestCase):
+    def test_flight_reset_carries_previous_phase(self):
+        for prev in ('LANDED', 'DESCENT'):
+            d = events.EventDeriver()
+            out = []
+            for n, ph in enumerate(('ARMED', 'BOOST', prev, 'IDLE')):
+                out += d.feed(best(flight_raw(ph), n))
+            resets = [e for e in out if e['kind'] == 'flight_reset']
+            self.assertEqual([e['prev_phase'] for e in resets], [prev])
+            self.assertTrue(all(e['prev_phase'] is None for e in out if e['kind'] != 'flight_reset'))
+
     def test_rom_pass_and_wrap(self):
         d = events.EventDeriver()
         frames = rom_flight_frames()
