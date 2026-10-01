@@ -92,6 +92,9 @@ export function frozenView<T>(src: Readable<T>): Readable<T> {
 export const statusView = frozenView(status);
 export const iqSnapsView = frozenView(iqSnaps);
 export const statsView = frozenView(stats);
+/** Raw-frame log and event log for display; ingestion continues while frozen. */
+export const framesView = frozenView(frames);
+export const eventsView = frozenView(eventsStore);
 
 /** The newest sample in a channel's metrics ring, or null when it is empty. */
 export function latestMetrics(ch: Channel): MetricsSample | null {

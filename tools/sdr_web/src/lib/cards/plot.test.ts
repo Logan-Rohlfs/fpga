@@ -114,6 +114,28 @@ describe('buildData', () => {
     expect(d[1]).toEqual([1, null]);
     expect(d[2]).toEqual([5, 6]);
   });
+  it('keeps later rows after a duplicate timestamp in one series', () => {
+    const a = new SeriesStore(1, 8);
+    const b = new SeriesStore(1, 8);
+    a.append(1, 0, [10]); a.append(1, 0, [11]); a.append(2, 0, [20]); a.append(3, 0, [30]);
+    b.append(1, 0, [1]); b.append(2, 0, [2]); b.append(3, 0, [3]);
+    const d = buildData([{ store: a, col: 0, quantity: 'count' }, { store: b, col: 0, quantity: 'count' }], 0, 10, prefs('metric'), {});
+    expect(d[0]).toEqual([1, 2, 3]);
+    expect(d[1]).toEqual([10, 20, 30]);
+    expect(d[2]).toEqual([1, 2, 3]);
+  });
+  it('keeps later rows after an out-of-order timestamp in one series', () => {
+    const a = new SeriesStore(1, 8);
+    const b = new SeriesStore(1, 8);
+    a.append(1, 0, [10]); a.append(3, 0, [30]); a.append(2, 0, [20]); a.append(4, 0, [40]);
+    b.append(1, 0, [1]); b.append(2, 0, [2]); b.append(3, 0, [3]); b.append(4, 0, [4]);
+    const d = buildData([{ store: a, col: 0, quantity: 'count' }, { store: b, col: 0, quantity: 'count' }], 0, 10, prefs('metric'), {});
+    expect(d[0]).toEqual([1, 2, 3, 4]);
+    expect(d[1][0]).toBe(10);
+    expect(d[1][2]).toBe(30);
+    expect(d[1][3]).toBe(40);
+    expect(d[2]).toEqual([1, 2, 3, 4]);
+  });
   it('is empty without series', () => {
     expect(buildData([], 0, 1, prefs('metric'), {})).toEqual([[]]);
   });

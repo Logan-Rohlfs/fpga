@@ -110,8 +110,10 @@ export function buildData(
   inputs.forEach((_, k) => {
     const col: (number | null)[] = new Array(union.length).fill(null);
     let j = 0;
-    for (let i = 0; i < union.length && j < times[k].length; i++) {
-      if (times[k][j] === union[i]) {
+    const tk = times[k];
+    for (let i = 0; i < union.length && j < tk.length; i++) {
+      while (j < tk.length && tk[j] < union[i]) j++;   // skip duplicate / out-of-order rows already passed
+      if (j < tk.length && tk[j] === union[i]) {
         col[i] = Number.isFinite(values[k][j]) ? values[k][j] : null;
         j++;
       }

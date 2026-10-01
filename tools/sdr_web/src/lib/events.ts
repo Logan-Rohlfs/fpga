@@ -14,9 +14,10 @@ export function filterEvents(
   return newestFirst ? out.reverse() : out;
 }
 
-/** Server-clock time of the newest flight_reset (the start of the current flight segment), or null. */
+/** Server-clock time of the newest flight_reset that followed LANDED (the start of the current display
+ * segment), or null. A reset from BOOST/COAST/DESCENT is a reboot mid-flight and must not hide the track. */
 export function latestSegmentStart(items: readonly GuiEvent[]): number | null {
-  for (let i = items.length - 1; i >= 0; i--) if (items[i].category === 'flight' && items[i].kind === 'flight_reset') return items[i].t;
+  for (let i = items.length - 1; i >= 0; i--) if (items[i].category === 'flight' && items[i].kind === 'flight_reset' && items[i].prev_phase === 'LANDED') return items[i].t;
   return null;
 }
 

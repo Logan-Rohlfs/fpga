@@ -3,7 +3,7 @@
   import VirtualList from '../components/VirtualList.svelte';
   import { FLIGHT_CATEGORY_KINDS, LINK_KINDS, filterEvents, formatEvent, lastLaunch } from '../lib/events';
   import { cardStatus } from '../lib/cards/status';
-  import { eventsStore } from '../lib/link';
+  import { eventsView } from '../lib/link';
   import { unitPrefs } from '../lib/units';
 
   let { config }: { id: string; config: Record<string, unknown> } = $props();
@@ -18,8 +18,8 @@
     local && local.category === category ? local.kinds : ((config.kinds as string[] | undefined) ?? [...allKinds]),
   );
   const selected = $derived(new Set(kinds));
-  const rows = $derived(filterEvents($eventsStore, category, selected, config.newest_first !== false));
-  const launchT = $derived(lastLaunch($eventsStore));
+  const rows = $derived(filterEvents($eventsView, category, selected, config.newest_first !== false));
+  const launchT = $derived(lastLaunch($eventsView));
   // Rows mixing simulated and measured events mark the simulated ones; otherwise the header badge says it once.
   const mixed = $derived(rows.some((e) => e.synthetic) && rows.some((e) => !e.synthetic));
   const report = cardStatus();

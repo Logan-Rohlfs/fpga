@@ -5,7 +5,7 @@ import {
   FRAMES_MAX, LinkClient, dataVersion, droppedFrames, eventsStore, segmentStart, flightSchema, flightStores, frames,
   frozen, handleMessage, hello, iqSnapMeta, iqSnaps, latestMetrics, linkStatsNow, linkStatsRing, metricsNow, metricsStores, metricsTail,
   onSpectrum, onSpectrumReset,
-  frozenView, powerUnit, presets, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
+  eventsView, framesView, frozenView, powerUnit, presets, resetState, role, serverNow, setFrameScheduler, status, subscribed, synthetic, tuning,
 } from './link';
 import type { FlightSchema, GuiEvent, HelloMsg, RecordMsg } from './types';
 
@@ -56,9 +56,9 @@ const helloMsg = (): HelloMsg => ({
   flight_schema: schema, channels: ['flight', 'events'], sites: [],
 });
 
-const event = (id: number, kind = 'phase'): GuiEvent => ({
+const event = (id: number, kind = 'phase', prev_phase: string | null = kind === 'flight_reset' ? 'LANDED' : null): GuiEvent => ({
   id, t: id, kind, category: 'flight', text: `e${id}`, channel: null, value: null, quantity: null, segment: 0,
-  synthetic: true,
+  synthetic: true, prev_phase,
 });
 
 let frameCallbacks: (() => void)[] = [];
@@ -181,6 +181,8 @@ describe('handleMessage', () => {
     handleMessage({ type: 'events', items: [event(90, 'flight_reset')], reset: false });
     handleMessage({ type: 'events', items: [event(91)], reset: false });
     expect(get(segmentStart)).toBe(90);
+    handleMessage({ type: 'events', items: [event(95, 'flight_reset', 'COAST')], reset: false });   // a mid-flight reboot
+    expect(get(segmentStart)).toBe(90);
     handleMessage({ type: 'events', items: [event(1)], reset: true });
     expect(get(segmentStart)).toBeNull();
     handleMessage({ type: 'events', items: [event(7, 'flight_reset')], reset: true });
@@ -289,6 +291,25 @@ describe('handleMessage', () => {
     frozen.set(false);
     off();
     expect(seen).toEqual([undefined, 1, 2]);
+  });
+
+  it('freezes the raw frames and events views while ingestion continues', () => {
+    const fOff = framesView.subscribe(() => {});
+    const eOff = eventsView.subscribe(() => {});
+    handleMessage(record('CHAN_FRAME', { channel: 'A' }));
+    const before = get(framesView).length;
+    const evBefore = get(eventsView).length;
+    frozen.set(true);
+    handleMessage(record('CHAN_FRAME', { channel: 'A' }));
+    handleMessage({ type: 'events', reset: false, items: [event(99)] });
+    expect(get(frames).length).toBe(before + 1);
+    expect(get(eventsStore).length).toBe(evBefore + 1);
+    expect(get(framesView).length).toBe(before);
+    expect(get(eventsView).length).toBe(evBefore);
+    frozen.set(false);
+    expect(get(framesView).length).toBe(before + 1);
+    expect(get(eventsView).length).toBe(evBefore + 1);
+    fOff(); eOff();
   });
 
   it('resetState clears every store', () => {

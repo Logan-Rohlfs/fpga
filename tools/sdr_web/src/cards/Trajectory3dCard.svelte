@@ -37,7 +37,6 @@
   // Redraw when the data, the config or the site changes (the draw function itself is installed after three loads).
   $effect(() => {
     void $dataVersion; void $segmentStart; void segment; void exaggeration; void source; void siteKey; void ready;
-    rebuildTrack();
     const latest = (flightStores[source as 'best' | 'A' | 'B'] ?? flightStores.best).latest();
     report(latest
       ? { synthetic: !!(latest.flags & 1), flight: true, age: staleAge(latest.t, serverNow(), 1), fields: ['lat_deg', 'lon_deg', 'alt_agl_m'] }
@@ -159,12 +158,19 @@
         dots = null;
       }
 
+      // Runs from the scheduled draw only, and rebuilds the line/dots just when the inputs changed, so
+      // off-screen or frozen cards do no rescans or GPU buffer reallocation.
+      let trackKey = '';
       rebuildTrack = () => {
         const schema = get(flightSchema);
         const store = flightStores[source as 'best' | 'A' | 'B'] ?? flightStores.best;
+        const from = firstRowFrom(store, segmentFloor(segment, get(segmentStart)));
+        const key = `${source}:${store.version}:${store.length}:${schema ? 1 : 0}:${from}:${exaggeration}:${siteKey}`;
+        if (key === trackKey) return;
+        trackKey = key;
         disposeTrack();
         if (schema && store.length) {
-          const t = trackPoints(store, schema, site?.pad ?? [0, 0], exaggeration, firstRowFrom(store, segmentFloor(segment, get(segmentStart))));
+          const t = trackPoints(store, schema, site?.pad ?? [0, 0], exaggeration, from);
           mode = t.mode;
           const n = t.points.length / 3;
           if (n) {
@@ -188,6 +194,7 @@
       let sizeW = 0;
       let sizeH = 0;
       draw = () => {
+        rebuildTrack();
         const w = host.clientWidth;
         const h = host.clientHeight;
         if (w > 0 && h > 0 && (w !== sizeW || h !== sizeH)) {
@@ -208,7 +215,6 @@
       const ro = new ResizeObserver(onChange);
       ro.observe(host);
       ready = true;
-      rebuildTrack();
       dirty();
 
       cleanup = () => {

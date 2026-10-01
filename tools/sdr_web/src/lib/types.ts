@@ -49,6 +49,8 @@ export interface FlightSchema { version: number; fields: FlightField[] }
 export interface GuiEvent {
   id: number; t: number; kind: string; category: 'flight' | 'link'; text: string;
   channel: Channel | null; value: number | null; quantity: string | null; segment: number; synthetic: boolean;
+  /** flight_reset only: the phase before the reset (a display segment starts only after LANDED). */
+  prev_phase?: string | null;
 }
 
 export interface TuningMsg { type: 'tuning'; state: TuningState; derived: Derived }

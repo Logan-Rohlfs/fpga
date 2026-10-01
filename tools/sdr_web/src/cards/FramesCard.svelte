@@ -4,7 +4,7 @@
   import VirtualList from '../components/VirtualList.svelte';
   import { type FrameFilter, crcSpan, filterFrames, frameLabel, hexGroups } from '../lib/cards/frames';
   import { cardStatus } from '../lib/cards/status';
-  import { droppedFrames, frames, role } from '../lib/link';
+  import { droppedFrames, framesView, role } from '../lib/link';
 
   let { config }: { id: string; config: Record<string, unknown> } = $props();
 
@@ -21,7 +21,7 @@
     return { head: false, pre: pre.join(' '), crc: crc.length ? ` ${crc.join(' ')}` : '' };
   }
 
-  const items = $derived(filterFrames($frames, filter).reverse());
+  const items = $derived(filterFrames($framesView, filter).reverse());
   const mixed = $derived(items.some((m) => m.record.synthetic) && items.some((m) => !m.record.synthetic));
   const report = cardStatus();
   $effect(() => {

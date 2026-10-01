@@ -1,5 +1,6 @@
 <script lang="ts">
   import { hello, link, role, stats, status, synthetic } from '../lib/link';
+  import { countLabel } from '../lib/plural';
   import { sourcePillText } from '../lib/status';
 
   const src = $derived($stats?.source ?? $hello?.source);
@@ -19,5 +20,5 @@
 {#if versionMismatch}
   <span class="chip bad">FPGA protocol v{$status?.fields.version}: rebuild and program</span>
 {/if}
-{#if $stats?.clients}<span class="pill" title="{$stats.clients.operators} operator(s) connected">{$stats.clients.viewers} viewers</span>{/if}
+{#if $stats?.clients}<span class="pill" title="{$stats.clients.operators} operator(s) connected">{countLabel($stats.clients.viewers, 'viewer')}</span>{/if}
 {#if canReconnect}<button class="btn" onclick={() => link.reconnectSource()}>Reconnect</button>{/if}
