@@ -91,16 +91,19 @@ every record stays `SYNTHETIC`.
 | ADC / IF | 1 MS/s, 100 kHz, as the default | **assumed** analog front end |
 | Noise | uniform ±256 LSB on both channels (A tone 1400, B tone 1000) | demo choice |
 | Loss windows | A: slots 60–69, B: slots 228–237 (0.5 s each, every loop) | demo choice |
-| Loop | 293 frames, then 20 silent slots (1 s); 15.65 s per loop | demo choice |
+| Loop | 1230 frames, then 20 silent slots (1 s); 62.5 s per loop | demo choice |
 
 Antenna A loses the signal about 1 s after launch detect, during the fast coast.
 B loses it across the COAST→DESCENT change at slot 233. During each window the
 combiner's BEST output comes from the other antenna.
 
-The ROM is `rom/apex_flight.mem`: 293 frames × 42 bytes (type + body) =
-12,306 bytes in block RAM. The transmitter appends the CRC. The file is checked
-in, so builds do not need the flight CSV. Regenerate it with the apex checkout
-next to this repository:
+The ROM is `rom/apex_flight.mem`: 1230 frames × 42 bytes (type + body) =
+51,660 bytes in block RAM. The generator refuses more than 64 KiB, about 16 of
+the 50 RAMB36 tiles (the 293-frame ROM used 4; the new size is not yet measured
+in Vivado). The transmitter appends the CRC. The file is checked in, so builds
+do not need the flight CSV. The CSV is not in this repository: it lives in the
+sibling apex checkout (`../apex/sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800/IREC-2026-SRAD-TELEMETRY.csv`).
+Regenerate the ROM with that checkout next to this repository, or pass `--csv`:
 
 ```sh
 python3 projects/sdr/host/apex_flight_rom.py            # rewrite rom/apex_flight.mem
@@ -109,19 +112,42 @@ python3 projects/sdr/host/apex_flight_rom.py --check    # confirm it is current
 
 `host/apex_flight_rom.py` documents the replay choices and holds the FLIGHT field
 table (`FLIGHT_FIELDS`, offsets and firmware scaling), matching
-`tools/sdr_cli/apex.py`. The window runs from 2 s before LAUNCH_DETECTED to 3 s
-after the PHASE event leaving COAST. Frames are sampled at 20 Hz with a
-latest-row-at-or-before hold. The radio seq counts from 0, because the CSV seq
-is a log counter. Fields missing from the log are zero: status flag bits,
-sensor/radio health bits, tilt and azimuth. The once-per-second HOUSEKEEPING
-beat is not replayed.
+`tools/sdr_cli/apex.py`. The window is the whole flight: from 2 s before
+LAUNCH_DETECTED to 3 s after the PHASE event entering LANDED. Up to 3 s after
+the PHASE event leaving COAST, each frame advances 50 ms of flight (real time).
+After that each frame advances 200 ms, so the descent and landing replay at 4×
+speed; that keeps the ROM inside its BRAM budget. Each frame takes the
+latest log row at or before its flight time; values are never interpolated.
+The radio seq counts from 0, because the CSV seq is a log counter. The
+once-per-second HOUSEKEEPING beat is not replayed.
+
+The log has no GPS fix and lacks the interlock, sensor-health, tilt and azimuth
+fields. So that the demo shows a complete ground-station view, the generator
+**emulates** them (table `EMULATED` in the generator, seeded and
+deterministic). Everything else is the logged value.
+
+| Field | Emulated value |
+| --- | --- |
+| `gps_fix`, `gps_sats` | Only when the logged fix is OFFLINE or SEARCHING (every row of this log): a 3D fix, 9–12 satellites |
+| `lat_deg`, `lon_deg` | The `irec-pecos` pad from `tools/sdr_cli/sites.json`, moving 0.12 m downrange per metre of climb, then 4 m/s from the altitude peak until landing, toward 62° true, plus 1.5 m noise |
+| `gps_alt_m` | Pad elevation (standard-atmosphere altitude of the mean logged ARMED pressure) plus the logged altitude AGL, plus 2 m noise |
+| `phase_status` bits 3–7 | Airbrakes authorized in COAST, servo powered ARMED–DESCENT, arm switches closed from ARMED, logging ready, GPS time valid |
+| `health` bits 0–3, 5 | IMU, high-g, baro, mag and radio on. Bits 4, 6 and 7 are derived as the firmware derives them |
+| `tilt_deg` | 2° on the rail, up to 27° at the highest logged altitude, about 100° under canopy, 88° landed |
+| `azimuth_deg` | The drift bearing with a 3° wobble while climbing, turning 20°/s under canopy |
+
+The demo receiver profile (`receiver_control.PROFILES`, `apex_demo`) lists the
+same fields, and the GUI marks cards that show them `EMULATED`. The host
+decoder and the GUI never invent or correct values themselves.
 
 Simulation: `flight_decoder_tb` (bit-level framing), `flight_replay_tb` (ROM ->
 GFSK ADC -> both pipelines -> combiner, bit-exact; each loss-window edge and the
 loop wrap), and `flight_top_tb` (demo `sdr_top` over UART). Then
 `check_receiver.py --demo --rom rom/apex_flight.mem` checks the capture.
 `tools/tests/test_apex_flight_rom.py` checks the ROM against the CSV with the
-host APEX parser. On hardware, the same checker runs with
+host APEX parser (set `APEX_FLIGHT_CSV` if the apex checkout is elsewhere), and
+`tools/tests/test_apex_flight_generator.py` checks the schedule and emulation on
+a small synthetic log. On hardware, the same checker runs with
 `--port DEVICE --demo --rom projects/sdr/rom/apex_flight.mem`.
 
 ## Measurements and provenance

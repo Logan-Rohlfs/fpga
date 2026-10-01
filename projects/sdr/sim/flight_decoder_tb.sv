@@ -20,7 +20,7 @@ module flight_decoder_tb;
         .good_count(good_count),.bad_count(bad_count),.dropped_count(dropped_count),
         .timeout_count(timeout_count),.locked(locked));
 
-    reg [7:0] rom[0:293*42-1];
+    reg [7:0] rom[0:1230*42-1];
     reg [7:0] frame[0:FRAME_BYTES-1];
     integer completes=0, last_seq=-1, last_ok=0, i;
 
@@ -82,7 +82,7 @@ module flight_decoder_tb;
         preamble_sync; send_byte(8'h03);
         repeat(2) @(negedge clk);
         if(locked) $fatal(1,"decoder stayed locked after a non-FLIGHT type byte");
-        preamble_sync; send_rom_frame(292,0); expect_frame(292,1);
+        preamble_sync; send_rom_frame(1229,0); expect_frame(1229,1);
         if(completes!=3 || good_count!=2 || bad_count!=1 || sync_count!=4 || dropped_count!=0)
             $fatal(1,"counters completes=%0d good=%0d bad=%0d sync=%0d",completes,good_count,bad_count,sync_count);
         $display("PASS flight_decoder: 16-bit sync, 44-byte FLIGHT frames exact, CRC fail counted, foreign type released");

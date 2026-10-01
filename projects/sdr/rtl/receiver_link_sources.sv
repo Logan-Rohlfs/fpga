@@ -40,14 +40,15 @@ module receiver_link_sources #(
     // preamble (first bit 1), 16-bit sync 2DD4, type 0x02 + 41-byte FLIGHT body
     // + CRC16 (44 bytes after sync), +/-25 kHz deviation, seq u16 LE at byte 7.
     // The same 1 MS/s ADC and 100 kHz IF are kept (analog-frontend assumption).
-    // The ROM replays FLIGHT_ROM_FRAMES frames at 20 Hz, then FLIGHT_GAP_SLOTS
+    // The ROM replays FLIGHT_ROM_FRAMES frames at 20 Hz (launch to landing; the
+    // generator time-compresses the descent 4x), then FLIGHT_GAP_SLOTS
     // silent 50 ms slots, and loops. Each antenna loses the tone for 0.5 s per
     // loop at a different flight time: A in slots 60-69 (coast, ~1 s after
     // launch detect), B in slots 228-237 (across the COAST->DESCENT change at
     // slot 233). Additive ADC noise is +/-256 LSB uniform on both channels.
     localparam integer DEMO=DEMO_FLIGHT!=0;
     localparam integer FRAME_BYTES=DEMO ? 44 : 19;
-    localparam integer FLIGHT_ROM_FRAMES=293, FLIGHT_GAP_SLOTS=20;
+    localparam integer FLIGHT_ROM_FRAMES=1230, FLIGHT_GAP_SLOTS=20;
     localparam integer FLIGHT_LOSS_A_FIRST=60, FLIGHT_LOSS_A_LAST=69;
     localparam integer FLIGHT_LOSS_B_FIRST=228, FLIGHT_LOSS_B_LAST=237;
     // ------------------------------------------------------------ timebase

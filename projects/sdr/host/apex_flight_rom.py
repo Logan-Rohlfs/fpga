@@ -17,25 +17,32 @@ bytes MSB first, and appends CRC-16-CCITT (0x1021, init 0xFFFF, big-endian)
 over type+body, as apex fsw/src/radio.cpp radio_build_frame() does.
 
 Replay choices (documented assumptions, not firmware facts):
-- Window: SAMPLE rows from 2 s before LAUNCH_DETECTED through 3 s after
-  apogee, where apogee is the PHASE event that leaves COAST.
-- Cadence: 20 Hz ticks starting at the first SAMPLE row in the window. Each
-  tick uses the latest SAMPLE row at or before it (a zero-order hold).
+- Window: the whole flight, from 2 s before LAUNCH_DETECTED to 3 s after the
+  PHASE event that enters LANDED (or the last SAMPLE row if there is none).
+- Cadence: one frame per 20 Hz radio slot. Up to 3 s after apogee (the PHASE
+  event that leaves COAST) each frame advances 50 ms of flight time, which is
+  real time. After that each frame advances DESCENT_STEP_MS (200 ms), so the
+  descent and landing replay at 4x speed and the ROM fits ROM_BUDGET_BYTES.
+  Each frame uses the latest SAMPLE row at or before its flight time (a
+  zero-order hold). Values are never interpolated.
 - seq: a radio counter from 0 (the CSV seq is a log counter, not radio seq).
 - Only FLIGHT frames. The firmware's once-per-second HOUSEKEEPING beat is not
   replayed, so no seq numbers are skipped.
-- Fields absent from the CSV are zero: phase_status flag bits 3-7, health
-  sensor bits 0-3 and radio bit 5, tilt_deg and azimuth. health bits 4, 6
-  and 7 are derived as the firmware derives them, from the CSV gps_fix
-  (>= 0) and storage_health (STORAGE_OK_FLASH=1, STORAGE_OK_SD=2; INFERRED
-  to be the logged storage_health() value).
-- gps_lat/lon are copied as logged (they look like placeholders in this log).
+- health bits 4, 6 and 7 are derived as the firmware derives them, from the
+  gps_fix sent (>= 0) and storage_health (STORAGE_OK_FLASH=1, STORAGE_OK_SD=2;
+  INFERRED to be the logged storage_health() value).
+- Fields the log does not have are EMULATED (table EMULATED below), so the demo
+  shows a complete ground-station view. Emulation is deterministic (seeded) and
+  follows the logged altitude and phase. The GUI labels these fields as
+  emulated; they are not flight data. The host decoder never invents values.
 """
 import argparse
 import csv
 import hashlib
+import json
 import math
 from pathlib import Path
+import random
 import struct
 import sys
 
@@ -43,15 +50,55 @@ REPO = Path(__file__).resolve().parents[3]
 DEFAULT_CSV = (REPO.parent / 'apex/sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800'
                / 'IREC-2026-SRAD-TELEMETRY.csv')
 DEFAULT_MEM = REPO / 'projects/sdr/rom/apex_flight.mem'
+SITES = REPO / 'tools/sdr_cli/sites.json'
+SITE_ID = 'irec-pecos'
 
 FRAME_TYPE_FLIGHT = 0x02
 CALLSIGN = b'KG5LDI'
 TICK_MS = 50                # 20 Hz, RADIO_TELEM_FLIGHT_HZ
 PRE_LAUNCH_MS = 2000
 POST_APOGEE_MS = 3000
+DESCENT_STEP_MS = 200       # flight time per frame after apogee + POST_APOGEE_MS (4x speed)
+POST_LANDING_MS = 3000
+ROM_BUDGET_BYTES = 64 * 1024   # demo ROM budget: at most 16 of the 50 RAMB36 tiles
 PHASES = ('IDLE', 'ARMED', 'BOOST', 'COAST', 'DESCENT', 'LANDED')   # flight_state.h
 STORAGE_OK_FLASH, STORAGE_OK_SD = 0x01, 0x02                       # storage.h
 HEALTH_GPS, HEALTH_QSPI, HEALTH_SD = 0x10, 0x40, 0x80                # radio.cpp
+HEALTH_SENSORS_AND_RADIO = 0x01 | 0x02 | 0x04 | 0x08 | 0x20          # imu, highg, baro, mag, radio
+FLAG_AIRBRAKES_AUTH, FLAG_SERVO_POWER, FLAG_ARM_SWITCHES = 0x08, 0x10, 0x20
+FLAG_LOG_READY, FLAG_GPS_TIME = 0x40, 0x80
+
+# Emulation constants: demo choices, not flight data.
+SEED = 2026
+ASCENT_DRIFT = 0.12         # metres downrange per metre of climb (weathercocking)
+WIND_MPS = 4.0              # drift under canopy, from the altitude peak until landing
+DRIFT_BEARING_DEG = 62.0    # direction of the drift, degrees true
+GPS_SIGMA_M = 1.5           # horizontal noise per axis, 1 sigma
+GPS_ALT_SIGMA_M = 2.0
+M_PER_DEG_LAT = 111320.0
+
+# Every emulated FLIGHT field: (GUI schema key, rule). The demo receiver profile
+# (tools/sdr_cli/receiver_control.py) lists the same keys so the GUI can label
+# them as emulated; tools/tests/test_apex_flight_rom.py keeps the two in step.
+EMULATED = (
+    ('gps_fix', 'only when the logged fix is OFFLINE or SEARCHING: a 3D fix'),
+    ('gps_sats', 'with an emulated fix: 9 to 12 satellites (a slow seeded random walk), one fewer in BOOST'),
+    ('lat_deg', 'with an emulated fix: the irec-pecos pad (sites.json), moving {} m downrange per metre of '
+                'climb, then {} m/s from the altitude peak until landing, toward {} deg true, plus {} m '
+                'noise'.format(ASCENT_DRIFT, WIND_MPS, DRIFT_BEARING_DEG, GPS_SIGMA_M)),
+    ('lon_deg', 'as lat_deg'),
+    ('gps_alt_m', 'with an emulated fix: pad elevation (standard-atmosphere altitude of the mean logged ARMED '
+                  'pressure) plus the logged altitude AGL, plus {} m noise'.format(GPS_ALT_SIGMA_M)),
+    ('phase_status', 'interlock bits 3-7: airbrakes authorized in COAST, servo powered from ARMED to DESCENT, '
+                     'arm switches closed from ARMED, logging ready always, GPS time valid with a 2D or 3D fix. '
+                     'The phase bits 0-2 are logged.'),
+    ('health', 'sensor bits 0-3 (IMU, high-g, baro, mag) and radio bit 5 on; bits 4, 6 and 7 derived as the '
+               'firmware does'),
+    ('tilt_deg', '2 deg on the rail, growing to 27 deg at the highest logged altitude, about 100 deg swinging '
+                 'under canopy, 88 deg landed'),
+    ('azimuth_deg', 'the drift bearing with a 3 deg wobble in BOOST and COAST, turning 20 deg/s under canopy, '
+                    'held after landing'),
+)
 
 # APEX TelemFlight (fsw/src/radio.cpp:61-83, static_assert 41 bytes), packed
 # little-endian. This table is the single place the layout is written down here.
@@ -60,6 +107,7 @@ HEALTH_GPS, HEALTH_QSPI, HEALTH_SD = 0x10, 0x40, 0x80                # radio.cpp
 #   s16:<scale>  tlm_s16(v, scale): float32 v*scale, clamp to int16, lroundf
 #   trunc:<scale>:<lo>:<hi>  C cast of constrain(v*scale, lo, hi) (truncates)
 #   f32 / i8 / u8 / u16 / text  copied; derived fields are built in pack_flight
+#   emulated  absent from the log; the Emulator supplies it (table EMULATED)
 FLIGHT_FIELDS = (
     (0, 'callsign', '6s', 'text', None),
     (6, 'seq', 'H', 'u16', None),
@@ -79,8 +127,8 @@ FLIGHT_FIELDS = (
     (34, 'deployment', 'B', 'trunc:255:0:255', 'deploy'),
     (35, 'baro_pa', 'H', 'trunc:0.5:0:65535', 'baro_pa'),
     (37, 'baro_temp', 'b', 'trunc:1:-128:127', 'baro_temp_c'),
-    (38, 'tilt_deg', 'b', 'zero', None),
-    (39, 'azimuth', 'H', 'zero', None),
+    (38, 'tilt_deg', 'b', 'emulated', None),
+    (39, 'azimuth', 'H', 'emulated', None),
 )
 FLIGHT_STRUCT = struct.Struct('<' + ''.join(code for _, _, code, _, _ in FLIGHT_FIELDS))
 FRAME_BYTES = 1 + FLIGHT_STRUCT.size        # type + body in the ROM; CRC is added by RTL
@@ -136,18 +184,23 @@ def encode(row, encoding, column):
         return f32(number(row, column))
     if kind in ('i8', 'u8'):
         return int(number(row, column))
-    if kind == 'zero':
+    if kind == 'emulated':
         return 0
     raise ValueError(encoding)
 
 
-def pack_flight(row, seq):
-    """TelemFlight body (41 bytes) for one CSV SAMPLE row."""
+def pack_flight(row, seq, emulated=None):
+    """TelemFlight body (41 bytes) for one CSV SAMPLE row.
+
+    ``emulated`` maps FLIGHT_FIELDS names to wire values from the Emulator, plus
+    'flag_bits' and 'health_bits' to OR into phase_status and health.
+    """
+    emulated = emulated or {}
     phase = PHASES.index(row['phase'])
-    gps_fix = int(number(row, 'gps_fix'))
+    gps_fix = emulated.get('gps_fix', int(number(row, 'gps_fix')))
     storage = int(number(row, 'storage_health'))
     health = ((HEALTH_GPS if gps_fix >= 0 else 0) | (HEALTH_QSPI if storage & STORAGE_OK_FLASH else 0) |
-              (HEALTH_SD if storage & STORAGE_OK_SD else 0))
+              (HEALTH_SD if storage & STORAGE_OK_SD else 0) | emulated.get('health_bits', 0))
     values = []
     for _, name, _, encoding, column in FLIGHT_FIELDS:
         if name == 'callsign':
@@ -155,12 +208,93 @@ def pack_flight(row, seq):
         elif name == 'seq':
             values.append(seq & 0xFFFF)
         elif name == 'phase_status':
-            values.append(phase & 0x07)
+            values.append((phase & 0x07) | emulated.get('flag_bits', 0))
         elif name == 'health':
             values.append(health)
+        elif name in emulated:
+            values.append(emulated[name])
         else:
             values.append(encode(row, encoding, column))
     return FLIGHT_STRUCT.pack(*values)
+
+
+def site_pad(site_id=SITE_ID, path=SITES):
+    """(lat, lon) of a site's pad in the tracked site registry."""
+    sites = json.loads(Path(path).read_text())['sites']
+    return tuple(next(s['pad'] for s in sites if s['id'] == site_id))
+
+
+def pressure_altitude(pa):
+    """Standard-atmosphere altitude (m) of a static pressure (Pa)."""
+    return 44330.77 * (1.0 - (pa / 101325.0) ** 0.190263)
+
+
+class Emulator:
+    """Plausible wire values for the fields the flight log lacks (table EMULATED).
+
+    Deterministic: seeded, and fed the selected rows in replay order.
+    """
+
+    def __init__(self, samples, pad, launch_ms, landing_ms):
+        self.rng = random.Random(SEED)
+        self.pad = pad
+        armed = [number(r, 'baro_pa') for r in samples if r['phase'] == 'ARMED' and number(r, 'baro_pa') > 0]
+        self.pad_elev = pressure_altitude(sum(armed) / len(armed)) if armed else 0.0
+        self.top_alt = max([number(r, 'alt_m') for r in samples] + [1.0])
+        self.launch_ms = launch_ms
+        self.landing_ms = landing_ms
+        self.sats = 10
+        self.peak_alt = 0.0
+        self.peak_ms = launch_ms
+        self.azimuth = DRIFT_BEARING_DEG
+
+    def values(self, tick_ms, row):
+        """Wire values to override for one frame (see pack_flight)."""
+        phase = row['phase']
+        alt = number(row, 'alt_m')
+        t = min(tick_ms, self.landing_ms)
+        if tick_ms >= self.launch_ms and phase != 'LANDED' and alt > self.peak_alt:
+            self.peak_alt, self.peak_ms = alt, t
+        if self.rng.random() < 0.05:
+            self.sats = min(12, max(9, self.sats + self.rng.choice((-1, 1))))
+        out = {'health_bits': HEALTH_SENSORS_AND_RADIO}
+        fix = int(number(row, 'gps_fix'))
+        if fix <= 0:
+            fix = 3
+            dist = ASCENT_DRIFT * self.peak_alt + WIND_MPS * max(0.0, (t - self.peak_ms) / 1000.0)
+            bearing = math.radians(DRIFT_BEARING_DEG)
+            north = dist * math.cos(bearing) + self.rng.gauss(0.0, GPS_SIGMA_M)
+            east = dist * math.sin(bearing) + self.rng.gauss(0.0, GPS_SIGMA_M)
+            out.update(
+                gps_fix=fix, gps_sats=self.sats - (1 if phase == 'BOOST' else 0),
+                gps_lat_deg=f32(self.pad[0] + north / M_PER_DEG_LAT),
+                gps_lon_deg=f32(self.pad[1] + east / (M_PER_DEG_LAT * math.cos(math.radians(self.pad[0])))),
+                gps_alt_msl=tlm_s16(self.pad_elev + alt + self.rng.gauss(0.0, GPS_ALT_SIGMA_M), 2))
+        flags = FLAG_LOG_READY
+        if phase == 'COAST':
+            flags |= FLAG_AIRBRAKES_AUTH
+        if phase in ('ARMED', 'BOOST', 'COAST', 'DESCENT'):
+            flags |= FLAG_SERVO_POWER
+        if phase != 'IDLE':
+            flags |= FLAG_ARM_SWITCHES
+        if fix >= 2:
+            flags |= FLAG_GPS_TIME
+        out['flag_bits'] = flags
+        seconds = tick_ms / 1000.0
+        if phase in ('IDLE', 'ARMED'):
+            tilt = 2.0
+            self.azimuth = DRIFT_BEARING_DEG
+        elif phase in ('BOOST', 'COAST'):
+            tilt = 2.0 + 25.0 * min(1.0, max(0.0, alt) / self.top_alt) ** 2
+            self.azimuth = DRIFT_BEARING_DEG + 3.0 * math.sin(2 * math.pi * seconds / 2.5)
+        elif phase == 'DESCENT':
+            tilt = 100.0 + 8.0 * math.sin(2 * math.pi * seconds / 7.0)
+            self.azimuth = (DRIFT_BEARING_DEG + 20.0 * (tick_ms - self.peak_ms) / 1000.0) % 360.0
+        else:
+            tilt = 88.0
+        out['tilt_deg'] = max(-128, min(127, int(round(tilt))))
+        out['azimuth'] = int(round(self.azimuth * 10)) % 3600
+        return out
 
 
 def load_rows(csv_path):
@@ -169,53 +303,74 @@ def load_rows(csv_path):
 
 
 def flight_window(rows):
-    """Return (start_ms, end_ms, launch_ms, apogee_ms) per the replay window rule."""
-    launch = next(int(r['time_ms']) for r in rows
-                  if r['record_type'] == 'EVENT' and r['event'] == 'LAUNCH_DETECTED')
-    apogee = next(int(r['time_ms']) for r in rows
-                  if r['record_type'] == 'EVENT' and r['event'] == 'PHASE' and int(r['time_ms']) > launch
-                  and r['phase'] not in ('BOOST', 'COAST'))
+    """Return (start_ms, end_ms, launch_ms, apogee_ms, landing_ms) per the replay window rule."""
+    events = [r for r in rows if r['record_type'] == 'EVENT']
     samples = [r for r in rows if r['record_type'] == 'SAMPLE']
+    launch = next(int(r['time_ms']) for r in events if r['event'] == 'LAUNCH_DETECTED')
+    apogee = next(int(r['time_ms']) for r in events
+                  if r['event'] == 'PHASE' and int(r['time_ms']) > launch and r['phase'] not in ('BOOST', 'COAST'))
+    last = max(int(r['time_ms']) for r in samples)
+    landing = next((int(r['time_ms']) for r in events
+                    if r['event'] == 'PHASE' and r['phase'] == 'LANDED' and int(r['time_ms']) > apogee), last)
     begin = launch - PRE_LAUNCH_MS
     start = min(int(r['time_ms']) for r in samples if int(r['time_ms']) >= begin)
-    return start, apogee + POST_APOGEE_MS, launch, apogee
+    return start, min(landing + POST_LANDING_MS, last), launch, apogee, landing
+
+
+def replay_ticks(rows):
+    """Flight times (ms) of the ROM frames: 50 ms steps to apogee + 3 s, then DESCENT_STEP_MS steps."""
+    start, end, _, apogee, _ = flight_window(rows)
+    ticks, tick = [], start
+    while tick <= end:
+        ticks.append(tick)
+        tick += TICK_MS if tick < apogee + POST_APOGEE_MS else DESCENT_STEP_MS
+    return ticks
 
 
 def select_rows(rows):
-    """20 Hz zero-order hold over the replay window: [(tick_ms, row), ...]."""
-    start, end, _, _ = flight_window(rows)
+    """Zero-order hold over the replay ticks: [(tick_ms, row), ...]."""
     samples = sorted((r for r in rows if r['record_type'] == 'SAMPLE'), key=lambda r: int(r['time_ms']))
     chosen, index = [], 0
-    tick = start
-    while tick <= end:
+    for tick in replay_ticks(rows):
         while index + 1 < len(samples) and int(samples[index + 1]['time_ms']) <= tick:
             index += 1
         chosen.append((tick, samples[index]))
-        tick += TICK_MS
     return chosen
 
 
-def build_frames(rows):
-    return [bytes([FRAME_TYPE_FLIGHT]) + pack_flight(row, seq) for seq, (_, row) in enumerate(select_rows(rows))]
+def build_frames(rows, pad=None):
+    """ROM frames (type + body) of the replay, with the emulated fields filled in."""
+    _, _, launch, _, landing = flight_window(rows)
+    samples = [r for r in rows if r['record_type'] == 'SAMPLE']
+    emulator = Emulator(samples, pad or site_pad(), launch, landing)
+    frames = [bytes([FRAME_TYPE_FLIGHT]) + pack_flight(row, seq, emulator.values(tick, row))
+              for seq, (tick, row) in enumerate(select_rows(rows))]
+    if len(frames) * FRAME_BYTES > ROM_BUDGET_BYTES:
+        raise ValueError('{} frames exceed the {}-byte ROM budget'.format(len(frames), ROM_BUDGET_BYTES))
+    return frames
 
 
 def render_mem(rows, csv_path):
-    start, end, launch, apogee = flight_window(rows)
+    start, _, launch, apogee, landing = flight_window(rows)
     digest = hashlib.sha256(Path(csv_path).read_bytes()).hexdigest()
     selected = select_rows(rows)
+    frames = build_frames(rows)
     lines = [
         '// APEX IREC 2026 flight replay ROM. GENERATED, do not edit.',
         '// Regenerate: python3 projects/sdr/host/apex_flight_rom.py --csv <IREC-2026-SRAD-TELEMETRY.csv>',
         '// Source: apex sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800/'
         'IREC-2026-SRAD-TELEMETRY.csv',
         '// Source sha256: ' + digest,
-        '// Window: LAUNCH_DETECTED {} ms - {} ms to apogee {} ms + {} ms; ticks {}..{} ms at 20 Hz'.format(
-            launch, PRE_LAUNCH_MS, apogee, POST_APOGEE_MS, start, selected[-1][0]),
+        '// Window: LAUNCH_DETECTED {} ms - {} ms to LANDED {} ms + {} ms; ticks {}..{} ms'.format(
+            launch, PRE_LAUNCH_MS, landing, POST_LANDING_MS, start, selected[-1][0]),
+        '// Cadence: 50 ms of flight per frame to apogee {} ms + {} ms, then {} ms per frame'.format(
+            apogee, POST_APOGEE_MS, DESCENT_STEP_MS),
+        '// EMULATED (absent from the log, see EMULATED in the generator): '
+        + ', '.join(key for key, _ in EMULATED),
         '// {} frames x {} bytes: type 0x02 + 41-byte FLIGHT body. The RTL appends the CRC.'.format(
             len(selected), FRAME_BYTES),
     ]
-    for seq, (tick, row) in enumerate(selected):
-        frame = bytes([FRAME_TYPE_FLIGHT]) + pack_flight(row, seq)
+    for seq, ((tick, row), frame) in enumerate(zip(selected, frames)):
         lines.append('// frame {} tick {} ms row {} {}'.format(seq, tick, row['time_ms'], row['phase']))
         lines += ['{:02x}'.format(b) for b in frame]
     return '\n'.join(lines) + '\n'

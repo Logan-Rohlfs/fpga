@@ -11,7 +11,14 @@ PROFILES = {
     BUILD_ID: {'id': 'default', 'label': 'Default receiver profile (ADC test carrier)'},
     APEX_DEMO_BUILD_ID: {
         'id': 'apex_demo', 'label': 'APEX flight replay demo (IREC 2026)',
-        'rf_label': '441.480 MHz \u00b7 2GFSK \u00b125 kHz \u00b7 10 kbit/s (APEX RF4463 settings; ADC input simulated)'},
+        'rf_label': '441.480 MHz \u00b7 2GFSK \u00b125 kHz \u00b7 10 kbit/s (APEX RF4463 settings; ADC input simulated)',
+        # The demo ROM generator fills these FLIGHT fields in because the flight log lacks them
+        # (projects/sdr/host/apex_flight_rom.py EMULATED; a test keeps the lists in step).
+        'emulated_fields': ['gps_fix', 'gps_sats', 'lat_deg', 'lon_deg', 'gps_alt_m', 'phase_status', 'health',
+                            'tilt_deg', 'azimuth_deg'],
+        'emulated_note': ('GPS, interlock, health, tilt and azimuth fields are emulated by the demo ROM generator '
+                          '(absent from the flight log).'),
+        'replay_note': 'Launch to landing; the descent replays at 4x speed.'},
 }
 
 
@@ -19,7 +26,7 @@ def profile_for(build_id):
     """Profile description for a STATUS build_id; unknown builds are labelled, never guessed."""
     profile = PROFILES.get(build_id)
     if profile is not None:
-        return dict(profile)
+        return {k: list(v) if isinstance(v, list) else v for k, v in profile.items()}
     return {'id': 'unknown', 'label': 'Unknown build 0x%08X' % build_id}
 
 

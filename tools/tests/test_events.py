@@ -32,7 +32,7 @@ class FlightEventsTest(unittest.TestCase):
     def test_rom_pass_and_wrap(self):
         d = events.EventDeriver()
         frames = rom_flight_frames()
-        self.assertEqual(len(frames), 293)
+        self.assertEqual(len(frames), 1230)   # launch to landing (rtl FLIGHT_ROM_FRAMES)
         parsed = [apex.parse_frame(f)['fields'] for f in frames]
         out = []
         for n, raw in enumerate(frames):
@@ -42,12 +42,11 @@ class FlightEventsTest(unittest.TestCase):
         # Tail after the wrap, then the ordered flight milestones.
         self.assertEqual(ks[-2:], ['phase', 'flight_reset'])
         self.assertEqual([k for k in ks if k != 'phase'],
-                         ['launch', 'burnout', 'apogee', 'max_velocity', 'flight_reset'])
-        self.assertNotIn('landing', ks)
+                         ['launch', 'burnout', 'apogee', 'max_velocity', 'landing', 'flight_reset'])
         self.assertEqual(out[0]['kind'], 'phase')
         self.assertEqual(out[0]['text'], 'ARMED → BOOST')
         self.assertEqual(out[1]['kind'], 'launch')
-        self.assertEqual(out[-2]['text'], 'DESCENT → ARMED')
+        self.assertEqual(out[-2]['text'], 'LANDED → ARMED')
         self.assertEqual(out[-1]['text'], 'New flight segment (replay loop or flight-computer restart)')
         # Apogee value/time are the segment maximum.
         # The ROM keeps climbing after the flight computer reports DESCENT (frame 233), so the
@@ -172,7 +171,7 @@ class LinkEventsTest(unittest.TestCase):
         out += d.feed(chan(1, True, 500.0)) + d.feed(chan(1, True, 501.0)) + d.tick(510)
         out += d.source_state('down', 'x', 511.0)
         seen = set(e['kind'] for e in out)
-        self.assertEqual(seen, set(events.ALL_KINDS) - {'landing'})
+        self.assertEqual(seen, set(events.ALL_KINDS))
         for e in out:
             self.assertEqual(e['category'], 'link' if e['kind'] in events.LINK_KINDS else 'flight')
         self.assertTrue(set(events.FLIGHT_KINDS) <= set(events.FLIGHT_CATEGORY_KINDS))

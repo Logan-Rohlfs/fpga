@@ -7,6 +7,7 @@ CSV-based tests skip when the apex checkout is not next to this repository.
 """
 import csv
 import importlib.util
+import os
 from pathlib import Path
 import re
 import struct
@@ -17,8 +18,10 @@ from link_samples import ROM_MEM, rom_frames, with_crc
 
 REPO = Path(__file__).resolve().parents[2]
 RTL = REPO / 'projects/sdr/rtl/receiver_link_sources.sv'
-CSV = (REPO.parent / 'apex/sim/output/log_exports/Flight_02_2026-06-17T21-28-54-800'
-       / 'IREC-2026-SRAD-TELEMETRY.csv')
+# The flight log lives in the sibling apex checkout; APEX_FLIGHT_CSV overrides the path (for a worktree).
+CSV = Path(os.environ.get('APEX_FLIGHT_CSV') or (REPO.parent / 'apex/sim/output/log_exports/'
+                                                 'Flight_02_2026-06-17T21-28-54-800/IREC-2026-SRAD-TELEMETRY.csv'))
+EMULATED = {'gps_fix', 'gps_sats', 'lat_deg', 'lon_deg', 'gps_alt_m', 'tilt_deg', 'azimuth_deg'}
 
 
 def decode(frame):
@@ -47,7 +50,7 @@ class RomStructureTest(unittest.TestCase):
             self.assertEqual(frame['fields']['seq'], index)
 
     def test_phases_follow_the_flight_and_loss_windows_fall_where_documented(self):
-        order = ['ARMED', 'BOOST', 'COAST', 'DESCENT']
+        order = ['ARMED', 'BOOST', 'COAST', 'DESCENT', 'LANDED']
         phases = [frame['fields']['phase'] for frame in self.decoded]
         ranks = [order.index(phase) for phase in phases]
         self.assertEqual(ranks, sorted(ranks))
@@ -71,14 +74,17 @@ class RomMatchesCsvTest(unittest.TestCase):
         launch = [int(r['time_ms']) for r in events if r['event'] == 'LAUNCH_DETECTED'][0]
         apogee = [int(r['time_ms']) for r in events
                   if r['event'] == 'PHASE' and r['phase'] == 'DESCENT' and int(r['time_ms']) > launch][0]
+        landing = [int(r['time_ms']) for r in events
+                   if r['event'] == 'PHASE' and r['phase'] == 'LANDED' and int(r['time_ms']) > apogee][0]
         times = [int(r['time_ms']) for r in samples]
         start = min(t for t in times if t >= launch - 2000)
+        # Real time (50 ms per frame) to apogee + 3 s, then 200 ms of flight per frame to landing + 3 s.
         cls.expected = []
         tick = start
-        while tick <= apogee + 3000:
+        while tick <= landing + 3000:
             cls.expected.append(max((r for r in samples if int(r['time_ms']) <= tick),
                                     key=lambda r: int(r['time_ms'])))
-            tick += 50
+            tick += 50 if tick < apogee + 3000 else 200
         cls.frames = [decode(frame)['fields'] for frame in rom_frames()]
 
     def test_one_frame_per_20hz_tick(self):
@@ -96,11 +102,13 @@ class RomMatchesCsvTest(unittest.TestCase):
         for index, (fields, row) in enumerate(zip(self.frames, self.expected)):
             with self.subTest(frame=index):
                 self.assertEqual(fields['phase'], row['phase'])
-                self.assertEqual(fields['gps_fix'], int(value(row, 'gps_fix')))
-                self.assertEqual(fields['gps_sats'], int(value(row, 'gps_sats')))
-                self.assertEqual(fields['lat_deg'], f32(value(row, 'gps_lat_deg')))
-                self.assertEqual(fields['lon_deg'], f32(value(row, 'gps_lon_deg')))
+                # This log never has a fix, so the generator emulates the GPS group (checked in
+                # test_apex_flight_generator); every other field must be the logged value.
+                self.assertLessEqual(int(value(row, 'gps_fix')), 0)
+                self.assertEqual(fields['gps_fix'], 3)
                 for name, column, lsb, scale in scaled:
+                    if name in EMULATED:
+                        continue
                     target = min(max(value(row, column), -32768 / scale), 32767 / scale)   # int16 clamp
                     self.assertLessEqual(abs(fields[name] - target), lsb / 2 + 1e-6, name)
                 deploy = value(row, 'deploy')
@@ -108,7 +116,6 @@ class RomMatchesCsvTest(unittest.TestCase):
                 pressure = value(row, 'baro_pa')
                 self.assertTrue(pressure - 2 < fields['baro_pa'] <= pressure + 1e-3)
                 self.assertEqual(fields['baro_temp_c'], int(value(row, 'baro_temp_c')))
-                self.assertEqual((fields['tilt_deg'], fields['azimuth_deg']), (0, 0))
 
     def test_checked_in_rom_is_current(self):
         spec = importlib.util.spec_from_file_location('apex_flight_rom',

@@ -4,7 +4,7 @@
 // Every CRC-good frame must equal ROM[seq] plus its CRC, bit for bit. Outside its
 // loss window each channel must decode every frame; inside it, none. The
 // combiner must emit every frame exactly once, from the surviving antenna when
-// one is lost. Whole loops are too long for event simulation (~16 s of air
+// one is lost. Whole loops are too long for event simulation (~63 s of air
 // time), so each lane starts at a chosen slot (START_SLOT) on one edge of a
 // loss window or at the loop wrap. The gate inside a window is a slot compare.
 module flight_lane #(
@@ -14,7 +14,7 @@ module flight_lane #(
 )(input wire clk, input wire rst, output reg done);
     // Demo profile values; flight_replay_tb checks them against the
     // elaborated receiver_link_sources DEMO_FLIGHT instance.
-    localparam integer CLK_HZ=5_000_000, FRAME_BYTES=44, DATA_BYTES=42, ROM_FRAMES=293;
+    localparam integer CLK_HZ=5_000_000, FRAME_BYTES=44, DATA_BYTES=42, ROM_FRAMES=1230;
     localparam integer LOSS_A_FIRST=60, LOSS_A_LAST=69, LOSS_B_FIRST=228, LOSS_B_LAST=237;
     localparam integer LOOP=ROM_FRAMES+GAP_SLOTS;
     wire sample_valid;
@@ -162,7 +162,7 @@ module flight_replay_tb;
     flight_lane #(.START_SLOT(69),.SLOTS(2)) lane_a_exit(.clk(lane_clk[1]),.rst(rst),.done(done[1]));
     flight_lane #(.START_SLOT(227),.SLOTS(2)) lane_b(.clk(lane_clk[2]),.rst(rst),.done(done[2]));
     flight_lane #(.START_SLOT(237),.SLOTS(2)) lane_b_exit(.clk(lane_clk[3]),.rst(rst),.done(done[3]));
-    flight_lane #(.START_SLOT(292),.SLOTS(3),.GAP_SLOTS(1)) lane_wrap(.clk(lane_clk[4]),.rst(rst),.done(done[4]));
+    flight_lane #(.START_SLOT(1229),.SLOTS(3),.GAP_SLOTS(1)) lane_wrap(.clk(lane_clk[4]),.rst(rst),.done(done[4]));
 
     // Idle (unclocked) reference instance: the lanes must use the demo profile
     // that receiver_link_sources elaborates for the board.
