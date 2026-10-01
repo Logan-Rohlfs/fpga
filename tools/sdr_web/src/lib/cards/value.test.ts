@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { SeriesStore } from '../series';
 import type { FlightSchema } from '../types';
-import { MinMax, badgeFor, decodeBits, fieldIndex, gpsFixLabel, noFlightNotice, staleAge, thresholdLevel, timeInPhase } from './value';
+import {
+  badgeLabel, flightKey, formatMmSs, gpsFixLevel, newCursor, otherFramesPerS, pushNewRows, sourceLabel, staleText,
+  MinMax, badgeFor, decodeBits, fieldIndex, gpsFixLabel, noFlightNotice, staleAge, thresholdLevel, timeInPhase } from './value';
 
 const HEALTH = { '0': 'imu', '1': 'highg', '2': 'baro', '3': 'mag', '4': 'gps', '5': 'radio', '6': 'qspi', '7': 'sd' };
 const schema: FlightSchema = {
@@ -86,5 +88,41 @@ describe('value helpers', () => {
     expect(noFlightNotice({ ...base, waitedS: 4 })).toBeNull();
     expect(noFlightNotice({ ...base, otherFramesPerS: 0 })).toBeNull();
     expect(noFlightNotice({ ...base, flightRows: 2 })).toBeNull();
+  });
+});
+
+describe('value helpers, fix round 1', () => {
+  it('pushNewRows sees every row once and resets on a flight reset', () => {
+    const s = new SeriesStore(2, 100);
+    const mm = new MinMax();
+    const cur = newCursor();
+    [[0, 1, 5], [1, 2, 9], [2, 3, 1]].forEach(([t, seq, v]) => s.append(t, 0, [seq, v]));
+    pushNewRows(s, 1, 0, mm, cur);
+    expect([mm.min, mm.max]).toEqual([1, 9]);
+    s.append(3, 0, [4, 20]);
+    pushNewRows(s, 1, 0, mm, cur);
+    expect(mm.max).toBe(20);
+    s.clear();
+    s.append(1, 0, [1, 7]);
+    pushNewRows(s, 1, 0, mm, cur);
+    expect([mm.min, mm.max]).toEqual([7, 7]);
+  });
+
+  it('labels the demo replay badge per spec 12', () => {
+    expect(badgeLabel('REPLAY').text).toBe('REPLAY · SIMULATED ADC');
+    expect(badgeLabel('REPLAY').title).toContain('Replayed IREC 2026 flight');
+    expect(badgeLabel('SIMULATED').text).toBe('SIMULATED');
+    expect(staleText(3.24)).toBe('stale 3.2 s');
+  });
+
+  it('small formatters', () => {
+    expect(otherFramesPerS({ a: 2, b: -1, c: NaN, d: 1 })).toBe(3);
+    expect(otherFramesPerS(null)).toBe(0);
+    expect(flightKey('both')).toBe('best');
+    expect(sourceLabel('B')).toBe('channel B');
+    expect(formatMmSs(125.9)).toBe('02:05');
+    expect(gpsFixLevel(schema, 9)).toBeNull();
+    expect(gpsFixLevel(schema, 3)).toBe('good');
+    expect(gpsFixLevel(schema, 0)).toBe('bad');
   });
 });

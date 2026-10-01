@@ -74,3 +74,63 @@ export function badgeFor(latestFlags: number | null, profileId: string): 'REPLAY
 export function noFlightNotice(o: { flightRows: number; otherFramesPerS: number; waitedS: number }): string | null {
   return o.flightRows === 0 && o.otherFramesPerS > 0 && o.waitedS >= 5 ? 'No FLIGHT frames from this source' : null;
 }
+
+/** Badge text and tooltip (spec section 12); the demo replay is labelled as such. */
+export function badgeLabel(badge: 'REPLAY' | 'SIMULATED'): { text: string; title: string } {
+  return badge === 'REPLAY'
+    ? { text: 'REPLAY · SIMULATED ADC', title: 'Replayed IREC 2026 flight through the real receiver; the ADC input is simulated' }
+    : { text: 'SIMULATED', title: 'Simulated data, not a measurement' };
+}
+
+export const staleText = (age: number): string => `stale ${age.toFixed(1)} s`;
+
+/** Frames per second arriving on any channel, ignoring negative or non-finite rates. */
+export function otherFramesPerS(rates: Record<string, number> | null | undefined): number {
+  let sum = 0;
+  for (const r of Object.values(rates ?? {})) if (Number.isFinite(r) && r > 0) sum += r;
+  return sum;
+}
+
+export function flightKey(source: unknown): 'best' | 'A' | 'B' {
+  return source === 'A' || source === 'B' ? source : 'best';
+}
+
+export function sourceLabel(source: unknown): string {
+  return source === 'both' ? 'A and B' : source === 'A' || source === 'B' ? `channel ${source}` : 'best';
+}
+
+export function formatMmSs(s: number): string {
+  const t = Math.max(0, Math.floor(s));
+  return `${Math.floor(t / 60).toString().padStart(2, '0')}:${(t % 60).toString().padStart(2, '0')}`;
+}
+
+/** Colour level for a fix the schema names; unknown enum values get none. */
+export function gpsFixLevel(schema: FlightSchema | null, v: number): Level | null {
+  const map = schema?.fields.find((f) => f.key === 'gps_fix')?.enum_map;
+  if (!map || !Number.isFinite(v) || !(String(Math.trunc(v)) in map)) return null;
+  return v >= 3 ? 'good' : v >= 1 ? 'warn' : 'bad';
+}
+
+export interface MinMaxCursor { t: number; seq: number }
+export const newCursor = (): MinMaxCursor => ({ t: -Infinity, seq: -Infinity });
+
+/**
+ * Feed every row newer than the cursor to `mm`. Time or seq going backwards (a flight reset) resets `mm` and
+ * rescans the whole store.
+ */
+export function pushNewRows(store: SeriesStore, field: number, seqField: number, mm: MinMax, cursor: MinMaxCursor): void {
+  const n = store.length;
+  if (n === 0 || field < 0) return;
+  const lastT = store.timeAt(n - 1);
+  const lastSeq = seqField >= 0 ? store.valueAt(n - 1, seqField) : NaN;
+  if (lastT < cursor.t || (Number.isFinite(lastSeq) && lastSeq < cursor.seq)) {
+    mm.reset();
+    cursor.t = -Infinity;
+    cursor.seq = -Infinity;
+  }
+  let first = n;
+  while (first > 0 && store.timeAt(first - 1) > cursor.t) first--;
+  for (let i = first; i < n; i++) mm.push(store.valueAt(i, field));
+  cursor.t = lastT;
+  if (Number.isFinite(lastSeq)) cursor.seq = lastSeq;
+}
