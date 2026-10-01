@@ -115,3 +115,38 @@ export function buildData(
   });
   return out;
 }
+
+const Y_PAD = 0.06;   // fraction of the span added above and below
+
+/**
+ * Y range per quantity that tightly frames the plotted (visible-window) data with a small pad. `data` is the
+ * uPlot AlignedData from buildData; `quantities[i]` is the quantity of series i (data column i + 1). A quantity
+ * with no finite value gets [0, 1]. `fixed` (the config's manual y) applies to the first quantity only.
+ */
+export function yRanges(
+  data: PlotData, quantities: string[], fixed: { min: number; max: number } | null,
+): Record<string, [number, number]> {
+  const lo: Record<string, number> = {};
+  const hi: Record<string, number> = {};
+  quantities.forEach((q, i) => {
+    for (const v of data[i + 1] ?? []) {
+      if (v === null || !Number.isFinite(v)) continue;
+      lo[q] = Math.min(lo[q] ?? Infinity, v);
+      hi[q] = Math.max(hi[q] ?? -Infinity, v);
+    }
+  });
+  const out: Record<string, [number, number]> = {};
+  quantities.forEach((q, i) => {
+    if (q in out) return;
+    if (i === 0 && fixed) { out[q] = [fixed.min, fixed.max]; return; }
+    if (!(q in lo)) { out[q] = [0, 1]; return; }
+    const pad = (hi[q] - lo[q]) * Y_PAD || Math.abs(hi[q]) * Y_PAD || 1;
+    out[q] = [lo[q] - pad, hi[q] + pad];
+  });
+  return out;
+}
+
+/** Canvas size for a plot host, leaving room for the legend below it (one formula for build and resize). */
+export function plotSize(hostW: number, hostH: number, legendH: number): { width: number; height: number } {
+  return { width: Math.max(Math.floor(hostW), 50), height: Math.max(Math.floor(hostH - legendH - 6), 50) };
+}

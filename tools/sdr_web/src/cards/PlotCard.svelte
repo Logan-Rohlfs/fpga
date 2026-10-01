@@ -10,7 +10,8 @@
   import { appearanceVersion } from '../lib/theme';
   import { unitFor, unitLabel, unitPrefs } from '../lib/units';
   import {
-    type PlotInput, type PlotSeries, type ViewState, axesFor, buildData, columnOf, eventMarkers, expandSeries, quantityOf, storeFor, viewRange,
+    type PlotInput, type PlotSeries, type ViewState, axesFor, buildData, columnOf, eventMarkers, expandSeries, plotSize, quantityOf,
+    storeFor, viewRange, yRanges,
   } from '../lib/cards/plot';
   import { cardStatus } from '../lib/cards/status';
   import { staleAge } from '../lib/cards/value';
@@ -23,6 +24,8 @@
   let plot: uPlot | null = null;
   let view: ViewState = $state({ paused: false, pausedAt: null, offsetS: 0 });
   let range: [number, number] = [0, 1];
+  // Y ranges per quantity, recomputed from the visible window on every draw (lib/cards/plot.ts yRanges).
+  let ranges: Record<string, [number, number]> = {};
   let markers: { t: number; label: string }[] = [];
   let dragX: number | null = null;
   const report = cardStatus();
@@ -84,18 +87,11 @@
     const axisFont = `11px ${cssVar('--f-mono') || 'monospace'}`;
     const unitOf = (q: string) => unitLabel(q, unitFor(q, cardUnits, $unitPrefs));
     const opts: uPlot.Options = {
-      width: Math.max(host.clientWidth, 50), height: Math.max(host.clientHeight - 40, 50),
+      ...sizeNow(24),
       cursor: { drag: { x: false, y: false } },
       scales: {
         x: { time: true, range: () => range },
-        ...Object.fromEntries(qs.map((q, i) => [q, {
-          range: (_u: uPlot, lo: number, hi: number): [number, number] => {
-            if (i === 0 && yFixed) return [yFixed.min, yFixed.max];
-            if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [0, 1];
-            const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.05 || 1;
-            return [lo - pad, hi + pad];
-          },
-        }])),
+        ...Object.fromEntries(qs.map((q) => [q, { range: (): [number, number] => ranges[q] ?? [0, 1] }])),
       },
       axes: [
         { stroke: muted, grid, ticks: grid, font: axisFont },
@@ -119,6 +115,7 @@
     };
     plot = new uPlot(opts, [[], ...series.map(() => [])] as uPlot.AlignedData, host);
     attachScrub(plot.over);
+    resize();   // now that the legend exists, fit around its real height
     scheduler.markDirty(id);
   }
 
@@ -161,13 +158,19 @@
       ? buildData(ins, range[0], range[1], $unitPrefs, cardUnits)
       : [[], ...series.map(() => [])];
     markers = showEvents ? eventMarkers($eventsStore, range[0], range[1]) : [];
+    ranges = yRanges(data, series.map((s) => quantityOf(s.field, $flightSchema) ?? ''), yFixed);
     plot.setData(data as uPlot.AlignedData, true);
+  }
+
+  /** Plot canvas size inside the host (its 6 px side padding excluded), leaving the legend's height free. */
+  function sizeNow(legendH: number) {
+    return plotSize(host.clientWidth - 12, host.clientHeight, legendH);
   }
 
   function resize() {
     if (!plot || !host) return;
     const legend = plot.root.querySelector<HTMLElement>('.u-legend');
-    plot.setSize({ width: Math.max(host.clientWidth, 50), height: Math.max(host.clientHeight - (legend?.offsetHeight ?? 24) - 30, 50) });
+    plot.setSize(sizeNow(legend?.offsetHeight ?? 24));
   }
 
   function attachScrub(over: HTMLElement) {

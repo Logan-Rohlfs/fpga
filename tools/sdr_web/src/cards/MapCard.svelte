@@ -54,8 +54,11 @@
     return (sourceKey === 'A' ? flightStores.A : sourceKey === 'B' ? flightStores.B : undefined) ?? flightStores.best;
   }
 
+  /** Leaflet throws on bounds queries until the map has a centre and zoom (applySite sets them). */
+  const hasView = (m: L.Map | null): m is L.Map => !!m && !!(m as unknown as { _loaded?: boolean })._loaded;
+
   function drawGraticule() {
-    if (!map || !gratGroup) return;
+    if (!hasView(map) || !gratGroup) return;
     gratGroup.clearLayers();
     if (plan?.available) return;
     const b = map.getBounds();
@@ -111,7 +114,7 @@
   }
 
   function draw() {
-    if (!map) return;
+    if (!hasView(map)) return;
     const store = storeNow();
     const latest = store.latest();
     gps = gpsStatus(latest ? latest.values : null, $flightSchema);
@@ -122,7 +125,9 @@
     if (key !== trackKey) {
       trackKey = key;
       const pts = config.show_track === false ? [] : validTrack(store, $flightSchema, MAX_TRACK_POINTS);
-      if (!trackLine) trackLine = L.polyline(pts, { className: 'map-track', interactive: false, weight: 2 }).addTo(map);
+      // Leaflet cannot clip an empty polyline, so the line exists only while it has points.
+      if (!pts.length) { trackLine?.remove(); trackLine = null; }
+      else if (!trackLine) trackLine = L.polyline(pts, { className: 'map-track', interactive: false, weight: 2 }).addTo(map);
       else trackLine.setLatLngs(pts);
     }
     if (gps.position) {
@@ -138,6 +143,9 @@
 
   onMount(() => {
     map = L.map(el, { zoomControl: true, attributionControl: true, maxZoom: 19 });
+    // Give the map a view at once: layers added to a map that is not loaded yet never get a working renderer.
+    map.setView([0, 0], 2);
+    fittedSite = '-';
     map.attributionControl.setPrefix(false);
     tileGroup = L.layerGroup().addTo(map);
     gratGroup = L.layerGroup().addTo(map);
@@ -159,8 +167,8 @@
   $effect(() => {
     if (!map) return;
     void [site, layer, plan];
+    applySite();     // first: the view must exist before the graticule asks for bounds
     rebuildTiles();
-    applySite();
     scheduler.markDirty(id);
   });
   // Settings that only change what draw() shows.

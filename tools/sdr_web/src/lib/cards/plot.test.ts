@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SeriesStore } from '../series';
 import type { FlightSchema, GuiEvent } from '../types';
 import type { UnitPrefs } from '../units';
-import { axesFor, buildData, eventMarkers, expandSeries, storeFor, viewRange } from './plot';
+import { axesFor, buildData, eventMarkers, expandSeries, plotSize, storeFor, viewRange, yRanges } from './plot';
 
 const schema: FlightSchema = {
   version: 1,
@@ -116,5 +116,37 @@ describe('buildData', () => {
   });
   it('is empty without series', () => {
     expect(buildData([], 0, 1, prefs('metric'), {})).toEqual([[]]);
+  });
+});
+
+describe('yRanges', () => {
+  const data = [[1, 2, 3], [10, null, 30], [100, 200, null], [-5, 0, 5]];
+  it('frames the visible values of each quantity with a small pad', () => {
+    const r = yRanges(data, ['length', 'length', 'speed'], null);
+    expect(r.length[0]).toBeCloseTo(10 - 190 * 0.06);   // min 10, max 200 across both length series
+    expect(r.length[1]).toBeCloseTo(200 + 190 * 0.06);
+    expect(r.speed[0]).toBeLessThan(-5);
+    expect(r.speed[1]).toBeGreaterThan(5);
+    expect(r.speed[1]).toBeLessThan(6);
+  });
+  it('ignores values outside the window rows given, nulls and non-finite values', () => {
+    const r = yRanges([[1, 2], [null, NaN as unknown as number]], ['length'], null);
+    expect(r.length).toEqual([0, 1]);
+  });
+  it('pads a flat line and keeps a fixed range for the first quantity', () => {
+    const flat = yRanges([[1, 2], [50, 50]], ['length'], null).length;
+    expect(flat[0]).toBeLessThan(50);
+    expect(flat[1]).toBeGreaterThan(50);
+    const fixed = yRanges(data, ['length', 'length', 'speed'], { min: 0, max: 1000 });
+    expect(fixed.length).toEqual([0, 1000]);
+    expect(fixed.speed[1]).toBeLessThan(6);
+  });
+});
+
+describe('plotSize', () => {
+  it('leaves room for the legend and never goes below the minimum', () => {
+    expect(plotSize(400, 300, 24)).toEqual({ width: 400, height: 300 - 24 - 6 });
+    expect(plotSize(400, 300, 70)).toEqual({ width: 400, height: 300 - 70 - 6 });
+    expect(plotSize(10, 10, 24)).toEqual({ width: 50, height: 50 });
   });
 });
