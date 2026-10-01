@@ -29,6 +29,7 @@
     document.addEventListener('visibilitychange', report);
     return () => {
       io?.disconnect();
+      scheduler.setVisible(id, true);   // do not leave a stale hidden flag behind
       document.removeEventListener('visibilitychange', report);
     };
   });

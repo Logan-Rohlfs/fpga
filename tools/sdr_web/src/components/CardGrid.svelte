@@ -1,7 +1,9 @@
 <script lang="ts">
   // The 12-column card grid. All geometry lives in lib/grid.ts; this component measures the DOM, handles pointer and
   // keyboard input and reports the finished layout through `onchange`. Edit mode needs a desktop-width window.
+  import type { Component } from 'svelte';
   import PlaceholderCard from '../cards/PlaceholderCard.svelte';
+  import { loadComponent } from '../lib/cards/loader';
   import { REGISTRY, cardTitle, minOfType, sanitizeConfig, type Config } from '../lib/cards/registry';
   import {
     COLS, GAP_PX, ROW_PX, type GridCard, addCard, colWidth, compact, modeForWidth, moveCard, newCardId, pxToGrid, reflow,
@@ -19,6 +21,14 @@
   let settingsId = $state<string | null>(null);
   let addType = $state('plot');
   let grid: HTMLDivElement;
+  // Resolved card components by type. Loaded once per type (memoized), so layout changes never remount a card.
+  let loaded = $state<Record<string, Component<any>>>({});
+  $effect(() => {
+    for (const t of new Set(cards.map((c) => c.type))) {
+      if (loaded[t]) continue;
+      loadComponent(t)?.then((c) => { loaded[t] = c; }, (err) => console.error('card load failed', t, err));
+    }
+  });
 
   const mode = $derived(modeForWidth(innerWidth));
   const cols = $derived(mode === 'desktop' ? COLS : mode === 'tablet' ? 6 : 1);
@@ -165,10 +175,8 @@
         onsettings={meta ? () => (settingsId = card.id) : undefined} onremove={() => remove(card.id)}
         onheaderdown={(e) => startDrag(e, card)}>
         {#if meta?.component}
-          {#await meta.component() then mod}
-            {@const Card = mod.default}
-            <Card id={card.id} config={sanitizeConfig(card.type, card.config)} />
-          {/await}
+          {@const Card = loaded[card.type]}
+          {#if Card}<Card id={card.id} config={sanitizeConfig(card.type, card.config)} />{/if}
         {:else}
           <PlaceholderCard type={card.type} known={!!meta} />
         {/if}
