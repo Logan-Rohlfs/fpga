@@ -3,6 +3,7 @@
   // with the trailing CRC bytes highlighted.
   import VirtualList from '../components/VirtualList.svelte';
   import { type FrameFilter, crcSpan, filterFrames, frameLabel, hexGroups } from '../lib/cards/frames';
+  import { cardStatus } from '../lib/cards/status';
   import { droppedFrames, frames, role } from '../lib/link';
 
   let { config }: { id: string; config: Record<string, unknown> } = $props();
@@ -21,6 +22,12 @@
   }
 
   const items = $derived(filterFrames($frames, filter).reverse());
+  const mixed = $derived(items.some((m) => m.record.synthetic) && items.some((m) => !m.record.synthetic));
+  const report = cardStatus();
+  $effect(() => {
+    const newest = items[0];
+    report(newest ? { synthetic: newest.record.synthetic, flight: newest.record.fields?.apex?.kind === 'FLIGHT', age: null } : null);
+  });
   const lines = $derived.by<Line[]>(() => {
     if (view !== 'hex') return [];
     const out: Line[] = [];
@@ -54,13 +61,13 @@
           {#if view === 'hex'}
             {@const l = lines[i]}
             {#if l.head}
-              <span class="head" class:bad={l.bad}>{l.text}</span>{#if l.syn}<span class="syn" title="Simulated data">SIM</span>{/if}
+              <span class="head" class:bad={l.bad}>{l.text}</span>{#if mixed && l.syn}<span class="syn" title="Simulated data">SIM</span>{/if}
             {:else}
               <span class="hex">{l.pre}<span class="crc">{l.crc}</span></span>
             {/if}
           {:else}
             {@const l = frameLabel(items[i])}
-            <span class="head" class:bad={l.crcBad}>{l.text}</span>{#if l.synthetic}<span class="syn" title="Simulated data">SIM</span>{/if}
+            <span class="head" class:bad={l.crcBad}>{l.text}</span>{#if mixed && l.synthetic}<span class="syn" title="Simulated data">SIM</span>{/if}
           {/if}
         {/snippet}
       </VirtualList>

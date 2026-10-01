@@ -6,7 +6,9 @@
   import type * as ThreeNS from 'three';
   import { altitudeColor, groundTiles, trackPoints, type GroundSpan } from '../lib/cards/traj';
   import { scheduler } from '../lib/frame';
-  import { dataVersion, flightSchema, flightStores, hello } from '../lib/link';
+  import { cardStatus } from '../lib/cards/status';
+  import { staleAge } from '../lib/cards/value';
+  import { dataVersion, flightSchema, flightStores, hello, serverNow } from '../lib/link';
 
   let { id, config }: { id: string; config: Record<string, unknown> } = $props();
 
@@ -24,6 +26,7 @@
   let loadError = $state('');
   let ready = $state(false);
 
+  const report = cardStatus();
   let draw: () => void = () => {};
   let rebuildGround: () => void = () => {};
   let rebuildTrack: () => void = () => {};
@@ -33,6 +36,10 @@
   $effect(() => {
     void $dataVersion; void exaggeration; void source; void siteKey; void ready;
     rebuildTrack();
+    const latest = (flightStores[source as 'best' | 'A' | 'B'] ?? flightStores.best).latest();
+    report(latest
+      ? { synthetic: !!(latest.flags & 1), flight: true, age: staleAge(latest.t, serverNow(), 1), fields: ['lat_deg', 'lon_deg', 'alt_agl_m'] }
+      : null);
     dirty();
   });
   $effect(() => {

@@ -2,7 +2,9 @@
   // Per-channel signal quality and the combiner split. Numbers come from the metrics rings; "now" is the server clock.
   import { signedKhz } from '../lib/format';
   import { badRatio, combinerShare, frameRate, powerLabel } from '../lib/cards/linkq';
-  import { dataVersion, frozen, linkStatsRing, metricsStores, powerUnit, serverNow, synthetic } from '../lib/link';
+  import { cardStatus } from '../lib/cards/status';
+  import { staleAge } from '../lib/cards/value';
+  import { dataVersion, frozen, linkStatsRing, metricsStores, powerUnit, serverNow } from '../lib/link';
   import type { Channel } from '../lib/types';
 
   let { config }: { id: string; config: { channels?: string[]; window_s?: number } } = $props();
@@ -16,6 +18,7 @@
 
   let cols = $state<Col[]>([]);
   let share = $state<{ a: number; b: number } | null>(null);
+  const report = cardStatus();
 
   // Freeze holds the displayed numbers; the rings keep filling underneath.
   $effect(() => {
@@ -24,17 +27,22 @@
     if ($frozen) return;
     const now = serverNow();
     const next: Col[] = [];
+    let newest = -Infinity;
+    let syn = false;
     for (const ch of chans) {
       const s = metricsStores[ch];
       const l = s.latest();
       if (!l) continue;
       const v = l.values;
+      newest = Math.max(newest, l.t);
+      syn ||= !!(l.flags & 1);
       next.push({
         ch, rssi: v[0], noise: v[1], snr: v[2], df: v[3], good: v[4], bad: v[5],
         rate: frameRate(s, windowS, now), ratio: badRatio(s, windowS, now),
       });
     }
     cols = next;
+    report(Number.isFinite(newest) ? { synthetic: syn, flight: false, age: staleAge(newest, now, 3) } : null);
     share = combinerShare($linkStatsRing, windowS, now);
   });
 
@@ -43,7 +51,6 @@
 </script>
 
 <div class="lq">
-  {#if $synthetic}<p class="note syn">Simulated data</p>{/if}
   {#if !cols.length}
     <p class="note empty">Waiting for channel metrics</p>
   {:else}

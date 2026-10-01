@@ -123,7 +123,7 @@ class Hub:
             key = 'link.CHAN_METRICS.' + f['channel']
             self.history.add_metrics(f['channel'], r.t, f.get('rssi_dbm'), f.get('noise_dbm'), f.get('snr_db'),
                                      f.get('freq_offset_hz'), f.get('crc_good'), f.get('crc_bad'),
-                                     f.get('power_unit'))
+                                     f.get('power_unit'), synthetic=r.synthetic)
         elif r.type == p.IQ_SNAPSHOT and f.get('channel') in CHANNELS:
             key = 'iq.' + f['channel']
             self.history.set_latest(key, text)

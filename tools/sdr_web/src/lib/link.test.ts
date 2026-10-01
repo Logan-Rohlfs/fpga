@@ -192,8 +192,9 @@ describe('handleMessage', () => {
     }));
     handleMessage({
       type: 'metrics_history', channel: 'A', t: [1, 2], rssi: [-70, -71], noise: [-90, null], snr: [20, 19],
-      df: [0, 5], crc_good: [1, 2], crc_bad: [0, 0], power_unit: 'dBm',
+      df: [0, 5], crc_good: [1, 2], crc_bad: [0, 0], power_unit: 'dBm', synthetic: [false, true],
     });
+    expect(latestMetrics('A')?.synthetic).toBe(true);
     const m = metricsStores.A;
     expect(m.length).toBe(2);
     expect(m.valueAt(0, 0)).toBe(-70);

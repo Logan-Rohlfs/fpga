@@ -5,10 +5,10 @@
   import { scheduler } from '../lib/frame';
   import { flightSchema, flightStores, serverNow, stats } from '../lib/link';
   import { startLive } from '../lib/cards/live';
+  import { cardStatus } from '../lib/cards/status';
   import {
-    badgeFor, decodeBits, fieldIndex, flightKey, formatMmSs, noFlightNotice, otherFramesPerS, sourceLabel, staleAge, timeInPhase,
+    decodeBits, fieldIndex, flightKey, formatMmSs, noFlightNotice, otherFramesPerS, sourceLabel, staleAge, timeInPhase,
   } from '../lib/cards/value';
-  import CardBadges from './CardBadges.svelte';
 
   let { id, config }: { id: string; config: Record<string, any> } = $props(); // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -21,7 +21,7 @@
   let inPhase = $state<number | null>(null);
   let seq = $state<number | null>(null);
   let bits = $state<{ name: string; on: boolean }[]>([]);
-  let badge = $state<'REPLAY' | 'SIMULATED' | null>(null);
+  const report = cardStatus();
   let age = $state<number | null>(null);
   let notice = $state<string | null>(null);
   const born = Date.now() / 1000;
@@ -35,15 +35,15 @@
     const latest = store && pi >= 0 ? store.latest() : null;
     const st = get(stats);
     notice = noFlightNotice({ flightRows: store?.length ?? 0, otherFramesPerS: otherFramesPerS(st?.rates), waitedS: Date.now() / 1000 - born });
-    if (!latest || !schema) { phase = null; bits = []; badge = null; age = null; inPhase = null; seq = null; return; }
+    if (!latest || !schema) { phase = null; bits = []; age = null; inPhase = null; seq = null; report(null); return; }
     const v = latest.values[pi];
     phase = schema.fields[pi].enum?.[v] ?? `UNKNOWN (${Number.isFinite(v) ? v : '?'})`;
     seq = qi >= 0 && Number.isFinite(latest.values[qi]) ? latest.values[qi] : null;
     const sf = si >= 0 ? schema.fields[si] : null;
     bits = sf?.bits ? decodeBits(latest.values[si], sf.bits) : [];
     inPhase = config.show_time_in_phase ? timeInPhase(store!, pi) : null;
-    badge = badgeFor(latest.flags, st?.source.profile?.id ?? 'unknown');
     age = staleAge(latest.t, serverNow(), 1);
+    report({ synthetic: !!(latest.flags & 1), flight: true, age, fields: ['phase', 'seq', 'phase_status'] });
   }
 
   onMount(() => startLive(id, draw));
@@ -51,7 +51,6 @@
 </script>
 
 <div class="state">
-  <CardBadges {badge} {age} />
   {#if phase === null}
     <p class="note">Waiting for FLIGHT frames ({sourceLabel(config.source)})</p>
     {#if notice}<p class="note">{notice}</p>{/if}

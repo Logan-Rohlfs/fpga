@@ -1,15 +1,22 @@
 <script lang="ts">
-  // The chrome around every card: header (title, badge and stale slots, edit-mode buttons) and visibility reporting
+  // The chrome around every card: header (title, status chips, edit-mode buttons) and visibility reporting
   // to the draw scheduler. The scheduler skips cards that are scrolled out of view or on a hidden tab.
   import type { Snippet } from 'svelte';
   import { onMount } from 'svelte';
+  import CardBadges from '../cards/CardBadges.svelte';
+  import { headerChips, provideCardStatus } from '../lib/cards/status';
   import { scheduler } from '../lib/frame';
+  import { flightSchema, hello, stats } from '../lib/link';
 
-  let { id, title, editing = false, showSettings = false, onsettings, onremove, onheaderdown, badge, stale, children }: {
+  let { id, title, editing = false, showSettings = false, onsettings, onremove, onheaderdown, children }: {
     id: string; title: string; editing?: boolean; showSettings?: boolean;
     onsettings?: () => void; onremove?: () => void; onheaderdown?: (e: PointerEvent) => void;
-    badge?: Snippet; stale?: Snippet; children: Snippet;
+    children: Snippet;
   } = $props();
+
+  // The card inside reports what it shows; the header turns that into the SIMULATED/REPLAY, EMULATED and stale chips.
+  const status = provideCardStatus();
+  const chips = $derived(headerChips($status, $stats?.source ?? $hello?.source, $flightSchema));
 
   let root: HTMLElement;
   let intersecting = true;
@@ -39,8 +46,7 @@
   <header class="ph" class:grab={editing} role="presentation" onpointerdown={editing ? onheaderdown : undefined}>
     {#if editing}<span class="grip" aria-hidden="true">⋮⋮</span>{/if}
     <h2>{title}</h2>
-    {#if badge}{@render badge()}{/if}
-    {#if stale}{@render stale()}{/if}
+    <CardBadges {chips} />
     {#if editing || showSettings}
       <div class="right">
         {#if onsettings}<button class="btn" aria-label="Settings for {title}" onclick={onsettings}

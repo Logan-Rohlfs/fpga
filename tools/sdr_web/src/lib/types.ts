@@ -81,6 +81,8 @@ export interface MetricsHistoryMsg {
   type: 'metrics_history'; channel: Channel; t: number[]; rssi: (number | null)[]; noise: (number | null)[];
   snr: (number | null)[]; df: (number | null)[]; crc_good: (number | null)[]; crc_bad: (number | null)[];
   power_unit: string | null;
+  /** Per-row SYNTHETIC flag (absent from older servers). */
+  synthetic?: boolean[];
 }
 /** A stored preset as the server sends it (sdr_cli/presets.py message()). Cards are untrusted until sanitizeGrid. */
 export interface PresetItem {

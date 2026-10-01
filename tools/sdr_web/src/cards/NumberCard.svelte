@@ -6,11 +6,11 @@
   import { flightSchema, flightStores, serverNow, stats } from '../lib/link';
   import { startLive } from '../lib/cards/live';
   import { format, unitFor, unitLabel, unitPrefs } from '../lib/units';
+  import { cardStatus } from '../lib/cards/status';
   import {
-    MinMax, badgeFor, fieldIndex, flightKey, newCursor, noFlightNotice, otherFramesPerS, pushNewRows, sourceLabel, staleAge,
+    MinMax, fieldIndex, flightKey, newCursor, noFlightNotice, otherFramesPerS, pushNewRows, sourceLabel, staleAge,
     thresholdLevel, type Level,
   } from '../lib/cards/value';
-  import CardBadges from './CardBadges.svelte';
 
   let { id, config }: { id: string; config: Record<string, any> } = $props(); // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -19,7 +19,7 @@
     age: number | null; empty: boolean;
   }
   let cols = $state<Col[]>([]);
-  let badge = $state<'REPLAY' | 'SIMULATED' | null>(null);
+  const report = cardStatus();
   let missing = $state(false);
   let notice = $state<string | null>(null);
   const mm = [new MinMax(), new MinMax()];
@@ -48,9 +48,8 @@
     const digits = typeof config.digits === 'number' ? config.digits : (field?.digits ?? 1);
     const now = serverNow();
     const st = get(stats);
-    const profile = st?.source.profile?.id ?? 'unknown';
     let anyRows = 0;
-    let nextBadge: typeof badge = null;
+    let synthetic = false;
     cols = sources().map((s, i) => {
       const store = flightStores[s.key];
       const latest = store && idx >= 0 ? store.latest() : null;
@@ -67,26 +66,24 @@
         pushNewRows(store, idx, seqIdx, mm[i], cursors[i]);
       }
       const fmt = (v: number | null) => (v === null ? null : format(v, field.quantity, unit, digits));
-      nextBadge ??= badgeFor(latest.flags, profile);
+      synthetic ||= !!(latest.flags & 1);
       return {
         name: s.name, label: field.label, text: format(si, field.quantity, unit, digits), unit: unitLabel(field.quantity, unit),
         level: thresholdLevel(si, config.thresholds ?? []), min: fmt(mm[i].min), max: fmt(mm[i].max),
         age: staleAge(latest.t, now, 1), empty: false,
       };
     });
-    badge = nextBadge;
+    report({ synthetic, flight: true, age: cols.find((c) => c.age !== null)?.age ?? null, fields: [config.field] });
     notice = noFlightNotice({ flightRows: anyRows, otherFramesPerS: otherFramesPerS(st?.rates), waitedS: Date.now() / 1000 - born });
   }
 
   onMount(() => startLive(id, draw));
   $effect(() => { void [config.field, config.source, config.digits, config.units, config.thresholds, config.track_minmax, $unitPrefs, $flightSchema]; scheduler.markDirty(id); });
 
-  const firstAge = $derived(cols.find((c) => c.age !== null)?.age ?? null);
   const LEVEL_TEXT: Record<Level, string> = { good: 'GOOD', warn: 'WARN', bad: 'BAD' };
 </script>
 
 <div class="num">
-  <CardBadges {badge} age={firstAge} />
   {#if missing}
     <p class="note">This source has no field '{config.field}'.</p>
   {:else if cols.every((c) => c.empty)}

@@ -98,7 +98,7 @@ class HistoryTest(unittest.TestCase):
         h.set_latest('link.CHAN_METRICS.A', 'ca')
         for i in range(650):
             h.add_metrics('A', float(i), -50.0, -90.0, 40.0, 1.0, i, 0, 'dBm')
-        h.add_metrics('B', 1.0, -60.0, -90.0, 30.0, 2.0, 1, 2, 'dB')
+        h.add_metrics('B', 1.0, -60.0, -90.0, 30.0, 2.0, 1, 2, 'dB', synthetic=True)
         snap = h.snapshot('link', 0.0)
         self.assertEqual(snap[:5], ['st', 'ls', 'cfg', 'ca', 'cb'])
         hist = parse(snap[5:])
@@ -111,6 +111,7 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(hist[0]['t'][0], 50.0)
         self.assertEqual(hist[0]['power_unit'], 'dBm')
         self.assertEqual(hist[1]['crc_bad'], [2])
+        self.assertEqual((hist[0]['synthetic'][0], hist[1]['synthetic']), (False, [True]))   # per row (spec 12)
 
     def test_non_finite_becomes_null(self):
         h = History()

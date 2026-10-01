@@ -5,16 +5,14 @@
   import { scheduler } from '../lib/frame';
   import { flightSchema, flightStores, serverNow, stats } from '../lib/link';
   import { startLive } from '../lib/cards/live';
-  import {
-    badgeFor, decodeBits, fieldIndex, flightKey, noFlightNotice, otherFramesPerS, sourceLabel, staleAge,
-  } from '../lib/cards/value';
-  import CardBadges from './CardBadges.svelte';
+  import { cardStatus } from '../lib/cards/status';
+  import { decodeBits, fieldIndex, flightKey, noFlightNotice, otherFramesPerS, sourceLabel, staleAge } from '../lib/cards/value';
 
   let { id, config }: { id: string; config: Record<string, any> } = $props(); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   type Bit = { name: string; on: boolean };
   let groups = $state<{ title: string; bits: Bit[] }[] | null>(null);
-  let badge = $state<'REPLAY' | 'SIMULATED' | null>(null);
+  const report = cardStatus();
   let age = $state<number | null>(null);
   let notice = $state<string | null>(null);
   let profile = $state('unknown');
@@ -27,7 +25,7 @@
     const st = get(stats);
     profile = st?.source.profile?.id ?? 'unknown';
     notice = noFlightNotice({ flightRows: store?.length ?? 0, otherFramesPerS: otherFramesPerS(st?.rates), waitedS: Date.now() / 1000 - born });
-    if (!latest || !schema) { groups = null; badge = null; age = null; return; }
+    if (!latest || !schema) { groups = null; age = null; report(null); return; }
     const out: { title: string; bits: Bit[] }[] = [];
     for (const k of ['health', 'phase_status']) {
       const i = fieldIndex(schema, k);
@@ -35,8 +33,8 @@
       if (bits) out.push({ title: schema.fields[i].label, bits: decodeBits(latest.values[i], bits) });
     }
     groups = out;
-    badge = badgeFor(latest.flags, profile);
     age = staleAge(latest.t, serverNow(), 1);
+    report({ synthetic: !!(latest.flags & 1), flight: true, age, fields: ['health', 'phase_status'] });
   }
 
   onMount(() => startLive(id, draw));
@@ -44,7 +42,6 @@
 </script>
 
 <div class="health">
-  <CardBadges {badge} {age} />
   {#if !groups}
     <p class="note">Waiting for FLIGHT frames ({sourceLabel(config.source)})</p>
     {#if notice}<p class="note">{notice}</p>{/if}

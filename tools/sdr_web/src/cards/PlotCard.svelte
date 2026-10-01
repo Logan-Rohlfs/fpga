@@ -12,6 +12,8 @@
   import {
     type PlotInput, type PlotSeries, type ViewState, axesFor, buildData, columnOf, eventMarkers, expandSeries, quantityOf, storeFor, viewRange,
   } from '../lib/cards/plot';
+  import { cardStatus } from '../lib/cards/status';
+  import { staleAge } from '../lib/cards/value';
 
   let { id, config }: { id: string; config: Record<string, unknown> } = $props();
 
@@ -23,6 +25,23 @@
   let range: [number, number] = [0, 1];
   let markers: { t: number; label: string }[] = [];
   let dragX: number | null = null;
+  const report = cardStatus();
+
+  /** Header status: SYNTHETIC if any series' newest row is; stale after 1 s (flight) or 3 s (link metrics only). */
+  function reportStatus(ins: PlotInput[], now: number) {
+    let newest = -Infinity;
+    let synthetic = false;
+    for (const i of ins) {
+      const l = i.store.latest();
+      if (!l) continue;
+      newest = Math.max(newest, l.t);
+      synthetic ||= !!(l.flags & 1);
+    }
+    const flightFields = series.filter((s) => !s.field.startsWith('m.')).map((s) => s.field);
+    report(Number.isFinite(newest)
+      ? { synthetic, flight: flightFields.length > 0, age: staleAge(newest, now, flightFields.length ? 1 : 3), fields: flightFields }
+      : null);
+  }
 
   const series = $derived(expandSeries(config.series as PlotSeries[]));
   const windowS = $derived(config.window_s as number);
@@ -134,6 +153,7 @@
     if (!plot) return;
     const ins = inputs();
     const now = serverNow();
+    reportStatus(ins, now);
     range = viewRange(view, now, windowS, dataStart(ins));
     // Scrubbing past the oldest data clamps; keep the stored offset in step so the drag does not wind up.
     if (view.paused && view.pausedAt !== null) view.offsetS = Math.max(0, view.pausedAt - range[1]);

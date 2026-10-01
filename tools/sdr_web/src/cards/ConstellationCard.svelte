@@ -5,6 +5,7 @@
   import { instFreq, lastSnaps, niceStep } from '../lib/cards/spectral';
   import { cssVar, drawConstellation, fitCanvas } from '../lib/draw';
   import { scheduler } from '../lib/frame';
+  import { cardStatus } from '../lib/cards/status';
   import { iqSnapMeta, iqSnaps } from '../lib/link';
   import { appearanceVersion } from '../lib/theme';
   import type { Channel } from '../lib/types';
@@ -20,6 +21,8 @@
   const count = $derived(($iqSnaps[channel] ?? []).length);
 
   let cv: HTMLCanvasElement;
+  const report = cardStatus();
+  $effect(() => { report(newest ? { synthetic: newest.synthetic, flight: false, age: null } : null); });
   const dirty = () => scheduler.markDirty(id);
 
   function message(ctx: CanvasRenderingContext2D, w: number, h: number, text: string) {
@@ -110,7 +113,6 @@
   <canvas bind:this={cv}
     aria-label={mode === 'inst_freq' ? `Channel ${channel} instantaneous frequency` : `Channel ${channel} I/Q constellation`}></canvas>
   <footer>
-    {#if newest?.synthetic}<span class="pill synth" title="SYNTHETIC stand-in data, not an RF measurement">SIMULATED</span>{/if}
     <span class="note">Ch {channel}, {mode === 'inst_freq' ? 'inst. frequency' : 'I/Q'}, {Math.min(count, persistence)} of {persistence} snapshots</span>
   </footer>
 </div>

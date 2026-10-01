@@ -7,7 +7,9 @@
   import {
     boundsFor, footerText, gpsStatus, graticule, layerPlan, makeSeeder, resolveSite, validTrack, type GpsStatus, type SiteInfo,
   } from '../lib/geo';
-  import { dataVersion, flightSchema, flightStores, hello } from '../lib/link';
+  import { cardStatus } from '../lib/cards/status';
+  import { staleAge } from '../lib/cards/value';
+  import { dataVersion, flightSchema, flightStores, hello, serverNow } from '../lib/link';
 
   let { id, config }: { id: string; config: Record<string, unknown> } = $props();
 
@@ -45,6 +47,7 @@
   let trackLine: L.Polyline | null = null;
   let here: L.CircleMarker | null = null;
   let trackKey = '';
+  const report = cardStatus();
   let fittedSite = '';
 
   function storeNow() {
@@ -112,6 +115,9 @@
     const store = storeNow();
     const latest = store.latest();
     gps = gpsStatus(latest ? latest.values : null, $flightSchema);
+    report(latest
+      ? { synthetic: !!(latest.flags & 1), flight: true, age: staleAge(latest.t, serverNow(), 1), fields: ['lat_deg', 'lon_deg', 'gps_fix'] }
+      : null);
     const key = `${sourceKey}:${store.version}:${store.length}:${$flightSchema ? 1 : 0}:${config.show_track !== false}`;
     if (key !== trackKey) {
       trackKey = key;

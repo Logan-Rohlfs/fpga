@@ -307,7 +307,7 @@ function applyMetricsHistory(msg: MetricsHistoryMsg): void {
   const row = new Array<number>(cols.length);
   for (let i = 0; i < msg.t.length; i++) {
     for (let k = 0; k < cols.length; k++) row[k] = cols[k]?.[i] ?? NaN;
-    store.append(msg.t[i], 0, row);
+    store.append(msg.t[i], msg.synthetic?.[i] ? 1 : 0, row);
   }
   bumpData();
 }

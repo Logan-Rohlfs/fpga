@@ -64,22 +64,12 @@ export function staleAge(latestT: number | null, nowS: number, limitS: number): 
   return age > limitS ? age : null;
 }
 
-/** Badge for SYNTHETIC-flagged data: replay of the demo ROM, otherwise simulated. */
-export function badgeFor(latestFlags: number | null, profileId: string): 'REPLAY' | 'SIMULATED' | null {
-  if (latestFlags === null || !(latestFlags & 1)) return null;
-  return profileId === 'apex_demo' ? 'REPLAY' : 'SIMULATED';
-}
+export const NO_FLIGHT_TEXT = 'No FLIGHT frames from this source. The default bitstream sends TEST frames; '
+  + 'build with --demo (or run ./sdr gui --source demo) for the flight replay.';
 
 /** The "no FLIGHT frames" hint: after 5 s with no flight rows while other frames still arrive (spec 12). */
 export function noFlightNotice(o: { flightRows: number; otherFramesPerS: number; waitedS: number }): string | null {
-  return o.flightRows === 0 && o.otherFramesPerS > 0 && o.waitedS >= 5 ? 'No FLIGHT frames from this source' : null;
-}
-
-/** Badge text and tooltip (spec section 12); the demo replay is labelled as such. */
-export function badgeLabel(badge: 'REPLAY' | 'SIMULATED'): { text: string; title: string } {
-  return badge === 'REPLAY'
-    ? { text: 'REPLAY · SIMULATED ADC', title: 'Replayed IREC 2026 flight through the real receiver; the ADC input is simulated' }
-    : { text: 'SIMULATED', title: 'Simulated data, not a measurement' };
+  return o.flightRows === 0 && o.otherFramesPerS > 0 && o.waitedS >= 5 ? NO_FLIGHT_TEXT : null;
 }
 
 export const staleText = (age: number): string => `stale ${age.toFixed(1)} s`;

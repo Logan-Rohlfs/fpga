@@ -6,6 +6,8 @@
   import { PeakHold, niceStep, rowSpan } from '../lib/cards/spectral';
   import { cssVar, drawDbGrid, drawFreqTicks, drawTrace, fitCanvas } from '../lib/draw';
   import { scheduler } from '../lib/frame';
+  import { cardStatus } from '../lib/cards/status';
+  import { staleAge } from '../lib/cards/value';
   import { onSpectrum, onSpectrumReset, serverNow } from '../lib/link';
   import { appearanceVersion } from '../lib/theme';
   import type { Channel, SpectrumMsg } from '../lib/types';
@@ -20,7 +22,7 @@
   const rows: Partial<Record<Channel, SpectrumMsg>> = {};
   let peaks: Record<Channel, PeakHold> = { A: new PeakHold(10), B: new PeakHold(10) };
   let peakRows: Partial<Record<Channel, Float32Array>> = {};
-  let synth = $state(false);
+  const report = cardStatus();
   let bins = $state(0);
   const dirty = () => scheduler.markDirty(id);
 
@@ -28,6 +30,10 @@
     const { ctx, w, h } = fitCanvas(cv);
     ctx.clearRect(0, 0, w, h);
     const live = shown.map((c) => rows[c]).filter((r): r is SpectrumMsg => !!r);
+    const newest = Math.max(...live.map((r) => r.t_us / 1e6));
+    report(live.length
+      ? { synthetic: live.some((r) => r.synthetic), flight: false, age: staleAge(newest, serverNow(), 2) }
+      : null);
     if (!live.length) {
       ctx.fillStyle = cssVar('--muted');
       ctx.font = '14px "Jost", system-ui, sans-serif';
@@ -89,7 +95,6 @@
       if (!shown.includes(m.channel)) return;
       rows[m.channel] = m;
       peakRows[m.channel] = peaks[m.channel].update(m.db10, serverNow());
-      synth = m.synthetic;
       bins = m.bins;
       dirty();
     });
@@ -98,7 +103,6 @@
       delete peakRows[ch];
       peaks[ch].reset();
       const rest = Object.values(rows);
-      synth = rest.some((r) => r.synthetic);
       bins = rest.length ? rest[0].bins : 0;
       dirty();
     });
@@ -117,7 +121,6 @@
 <div class="card">
   <canvas bind:this={cv} aria-label="Spectrum, dBFS"></canvas>
   <footer>
-    {#if synth}<span class="pill synth" title="SYNTHETIC stand-in data, not an RF measurement">SIMULATED</span>{/if}
     {#each shown as c (c)}<span class="note key" style="color: var({COLOR[c]})">Ch {c}</span>{/each}
     <span class="note">dBFS{bins ? `, ${bins} bins` : ''}{hold ? `, peak hold ${decayS ? `${decayS} s decay` : 'no decay'}` : ''}</span>
   </footer>

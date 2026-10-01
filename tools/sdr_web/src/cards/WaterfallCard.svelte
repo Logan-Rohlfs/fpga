@@ -6,7 +6,9 @@
   import { niceStep, rowSpan, scaleLimits, viewerRateNote } from '../lib/cards/spectral';
   import { cssVar, drawFreqTicks, fitCanvas } from '../lib/draw';
   import { scheduler } from '../lib/frame';
-  import { onSpectrum, onSpectrumReset, role } from '../lib/link';
+  import { cardStatus } from '../lib/cards/status';
+  import { staleAge } from '../lib/cards/value';
+  import { onSpectrum, onSpectrumReset, role, serverNow } from '../lib/link';
   import { appearanceVersion } from '../lib/theme';
   import type { Channel, SpectrumMsg } from '../lib/types';
   import { WaterfallImage } from '../lib/waterfall';
@@ -19,7 +21,7 @@
   let cv: HTMLCanvasElement;
   let image: WaterfallImage | null = null;
   let last: SpectrumMsg | null = null;
-  let synth = $state(false);
+  const report = cardStatus();
   let bins = $state(0);
   let rate = $derived(viewerRateNote($role?.budget ?? 'operator'));
 
@@ -27,6 +29,7 @@
   const dirty = () => scheduler.markDirty(id);
 
   function draw() {
+    report(last ? { synthetic: last.synthetic, flight: false, age: staleAge(last.t_us / 1e6, serverNow(), 2) } : null);
     const { ctx, w, h } = fitCanvas(cv);
     ctx.fillStyle = cssVar('--wf-bg');
     ctx.fillRect(0, 0, w, h);
@@ -58,7 +61,6 @@
     void channel;
     image = null;
     last = null;
-    synth = false;
     bins = 0;
     dirty();
   });
@@ -74,7 +76,6 @@
       if (m.channel !== channel) return;
       if (!image || image.bins !== m.bins) image = new WaterfallImage(m.bins, ROWS);
       last = m;
-      synth = m.synthetic;
       bins = m.bins;
       const [low, high] = limits();
       image.push(m.db10, low, high);
@@ -84,7 +85,6 @@
       if (ch !== channel) return;
       image = null;
       last = null;
-      synth = false;
       bins = 0;
       dirty();
     });
@@ -103,7 +103,6 @@
 <div class="card">
   <canvas bind:this={cv} aria-label="Channel {channel} waterfall, dBFS"></canvas>
   <footer>
-    {#if synth}<span class="pill synth" title="SYNTHETIC stand-in data, not an RF measurement">SIMULATED</span>{/if}
     <span class="note">Ch {channel}, dBFS{bins ? `, ${bins} bins` : ''}</span>
     {#if rate}<span class="note">{rate}</span>{/if}
   </footer>

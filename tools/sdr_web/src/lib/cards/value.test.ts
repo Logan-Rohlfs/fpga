@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { SeriesStore } from '../series';
 import type { FlightSchema } from '../types';
 import {
-  badgeLabel, flightKey, formatMmSs, gpsFixLevel, newCursor, otherFramesPerS, pushNewRows, sourceLabel, staleText,
-  MinMax, badgeFor, decodeBits, fieldIndex, gpsFixLabel, noFlightNotice, staleAge, thresholdLevel, timeInPhase } from './value';
+  NO_FLIGHT_TEXT, flightKey, formatMmSs, gpsFixLevel, newCursor, otherFramesPerS, pushNewRows, sourceLabel, staleText,
+  MinMax, decodeBits, fieldIndex, gpsFixLabel, noFlightNotice, staleAge, thresholdLevel, timeInPhase } from './value';
 
 const HEALTH = { '0': 'imu', '1': 'highg', '2': 'baro', '3': 'mag', '4': 'gps', '5': 'radio', '6': 'qspi', '7': 'sd' };
 const schema: FlightSchema = {
@@ -74,17 +74,10 @@ describe('value helpers', () => {
     expect(staleAge(8, 10, 1)).toBe(2);
   });
 
-  it('badgeFor labels synthetic data by profile', () => {
-    expect(badgeFor(1, 'apex_demo')).toBe('REPLAY');
-    expect(badgeFor(1, 'default')).toBe('SIMULATED');
-    expect(badgeFor(0, 'default')).toBeNull();
-    expect(badgeFor(null, 'default')).toBeNull();
-    expect(badgeFor(1, 'unknown')).toBe('SIMULATED');
-  });
-
   it('noFlightNotice appears after 5 s with other frames arriving', () => {
     const base = { flightRows: 0, otherFramesPerS: 3, waitedS: 6 };
-    expect(noFlightNotice(base)).toBe('No FLIGHT frames from this source');
+    expect(noFlightNotice(base)).toBe(NO_FLIGHT_TEXT);
+    expect(NO_FLIGHT_TEXT).toContain('The default bitstream sends TEST frames; build with --demo');
     expect(noFlightNotice({ ...base, waitedS: 4 })).toBeNull();
     expect(noFlightNotice({ ...base, otherFramesPerS: 0 })).toBeNull();
     expect(noFlightNotice({ ...base, flightRows: 2 })).toBeNull();
@@ -108,10 +101,7 @@ describe('value helpers, fix round 1', () => {
     expect([mm.min, mm.max]).toEqual([7, 7]);
   });
 
-  it('labels the demo replay badge per spec 12', () => {
-    expect(badgeLabel('REPLAY').text).toBe('REPLAY · SIMULATED ADC');
-    expect(badgeLabel('REPLAY').title).toContain('Replayed IREC 2026 flight');
-    expect(badgeLabel('SIMULATED').text).toBe('SIMULATED');
+  it('formats the stale chip', () => {
     expect(staleText(3.24)).toBe('stale 3.2 s');
   });
 

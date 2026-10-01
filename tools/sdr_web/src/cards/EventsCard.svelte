@@ -2,6 +2,7 @@
   // Virtualized event log: one category (flight or link), kind chips as a view filter, newest first by default.
   import VirtualList from '../components/VirtualList.svelte';
   import { FLIGHT_CATEGORY_KINDS, LINK_KINDS, filterEvents, formatEvent, lastLaunch } from '../lib/events';
+  import { cardStatus } from '../lib/cards/status';
   import { eventsStore } from '../lib/link';
   import { unitPrefs } from '../lib/units';
 
@@ -19,6 +20,13 @@
   const selected = $derived(new Set(kinds));
   const rows = $derived(filterEvents($eventsStore, category, selected, config.newest_first !== false));
   const launchT = $derived(lastLaunch($eventsStore));
+  // Rows mixing simulated and measured events mark the simulated ones; otherwise the header badge says it once.
+  const mixed = $derived(rows.some((e) => e.synthetic) && rows.some((e) => !e.synthetic));
+  const report = cardStatus();
+  $effect(() => {
+    const newest = rows.length ? (config.newest_first !== false ? rows[0] : rows[rows.length - 1]) : null;
+    report(newest ? { synthetic: newest.synthetic, flight: category === 'flight', age: null } : null);
+  });
 
   function toggle(k: string) {
     const next = selected.has(k) ? kinds.filter((x) => x !== k) : allKinds.filter((x) => selected.has(x) || x === k);
@@ -35,7 +43,7 @@
   </div>
   <div class="list">
     {#if rows.length === 0}
-      <p class="note empty">No events yet.</p>
+      <p class="note empty">{category === 'link' ? 'No link events yet.' : 'No flight events yet. Launch, burnout, apogee and landing appear here.'}</p>
     {:else}
       <VirtualList count={rows.length}>
         {#snippet row(i)}
@@ -45,7 +53,7 @@
           <span class="kind">{label(e.kind)}</span>
           <span class="txt">{f.text}</span>
           {#if f.value}<span class="val mono">{f.value}</span>{/if}
-          {#if e.synthetic}<span class="syn" title="Derived from simulated data">SIM</span>{/if}
+          {#if mixed && e.synthetic}<span class="syn" title="Derived from simulated data">SIM</span>{/if}
         {/snippet}
       </VirtualList>
     {/if}

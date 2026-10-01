@@ -13,7 +13,7 @@ BATCH = 4096
 
 _LINK_LATEST = ('link.STATUS', 'link.LINK_STATS', 'link.CONFIG',
                 'link.CHAN_METRICS.A', 'link.CHAN_METRICS.B')
-_METRIC_COLUMNS = ('t', 'rssi', 'noise', 'snr', 'df', 'crc_good', 'crc_bad')
+_METRIC_COLUMNS = ('t', 'rssi', 'noise', 'snr', 'df', 'crc_good', 'crc_bad', 'synthetic')
 _FLIGHT_CHANNELS = {'flight': 'best', 'flight.A': 'A', 'flight.B': 'B'}
 
 
@@ -52,8 +52,9 @@ class History:
     def set_latest(self, key, json_str):
         self._latest[key] = json_str
 
-    def add_metrics(self, channel, t, rssi, noise, snr, df, crc_good, crc_bad, power_unit):
-        self._metrics[channel].append(tuple(gui_wire.json_num(v) for v in (t, rssi, noise, snr, df, crc_good, crc_bad)))
+    def add_metrics(self, channel, t, rssi, noise, snr, df, crc_good, crc_bad, power_unit, synthetic=False):
+        self._metrics[channel].append(tuple(gui_wire.json_num(v) for v in (t, rssi, noise, snr, df, crc_good, crc_bad))
+                                      + (bool(synthetic),))
         self._power_unit[channel] = power_unit
 
     def add_frame(self, json_str):
