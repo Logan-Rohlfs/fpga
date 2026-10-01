@@ -94,6 +94,7 @@ interface Spec {
   channels(config: Config): string[];
   settings?: SettingField[];
   titleOf?(config: Config): string;
+  component?: CardMeta['component'];
 }
 
 function meta(spec: Spec): CardMeta {
@@ -110,7 +111,7 @@ function meta(spec: Spec): CardMeta {
   };
   return {
     type: spec.type, title: spec.title, min: spec.min, phoneMinH: spec.phoneMinH, defaults: spec.defaults,
-    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf,
+    settings: spec.settings ?? [], sanitize, titleOf: spec.titleOf, component: spec.component,
     channels: (config) => [...new Set(spec.channels(sanitize(config)))],
   };
 }
@@ -255,6 +256,7 @@ const specs: Spec[] = [
     defaults: { channels: ['A', 'B'], window_s: 10 },
     validators: { channels: channelSubset, window_s: oneOf([5, 10, 30]) },
     channels: () => ['link'],
+    component: () => import('../../cards/LinkCard.svelte'),
     settings: [{ key: 'window_s', label: 'Rate window', kind: 'select', options: [
       { value: 5, label: '5 s' }, { value: 10, label: '10 s' }, { value: 30, label: '30 s' }] }],
   },
